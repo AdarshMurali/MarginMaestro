@@ -1,5 +1,8 @@
 # MarginMaestro
 
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=AdarshMurali_MarginMaestro&metric=alert_status&token=4157367f77e322beb6d40f440ad64e2ea134188f)](https://sonarcloud.io/summary/new_code?id=AdarshMurali_MarginMaestro)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=AdarshMurali_MarginMaestro&metric=coverage&token=4157367f77e322beb6d40f440ad64e2ea134188f)](https://sonarcloud.io/summary/new_code?id=AdarshMurali_MarginMaestro)
+
 **An agentic, event-driven platform that automates the end-to-end margin call lifecycle — from market event to client notification, escalation, and audit — using LLM agent orchestration, a RAG pipeline over legal/policy documents, and a real-time streaming backbone.**
 
 > Status: 🚧 In active development (Phase 0 — foundations). See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phased plan and [`docs/PROGRESS.md`](docs/PROGRESS.md) for current state.

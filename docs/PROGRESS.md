@@ -17,14 +17,21 @@ At the end of each story, prepend an entry using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** 0 — Foundations. Jira epic MM-1 + stories MM-2..MM-9 created. MM-2 through MM-6 all merged to `main` (MM-4/MM-5 execution order was swapped — see MM-5's log entry). CI is fully green including the live Docker Hub push — image is at `adarshmurali/marginmaestro` (`latest` + per-commit-SHA tags).
+- **Phase:** 0 — Foundations. Jira epic MM-1 + stories MM-2..MM-9 created. MM-2 through MM-6 all merged to `main` (MM-4/MM-5 execution order was swapped — see MM-5's log entry). CI is fully green including the live Docker Hub push. MM-7 (SonarCloud) done on branch `feature/MM-7-sonarcloud`, not yet pushed/merged; quality gate verified passing on PR #6. SonarCloud project: org `adarshmurali`, project key `AdarshMurali_MarginMaestro` (auto-assigned by SonarCloud, not the literal repo name — see MM-7's log entry), Automatic Analysis turned off in favor of CI-based, `SONAR_TOKEN` set as a GitHub Actions repo secret.
 - **Docs:** complete — README, CLAUDE.md, ARCHITECTURE, AGENTS, DATA_SOURCES, ROADMAP, ADRs, CONTRIBUTING, TESTING.
-- **Next up:** **MM-7** — SonarCloud integration (upload coverage, quality gate, README badge).
+- **Next up:** **MM-8** — Terraform skeleton for AWS (Parameter Store, IAM least-privilege, compute placeholders).
 - **Blockers:** none. Note: `ROADMAP.md` MM-# numbering for Phase 0 was corrected to match real Jira keys (epic took MM-1, not a story); later phases still show the original placeholder scheme pending ticket creation.
 
 ---
 
 ## Log
+
+### 2026-07-24 — MM-7: SonarCloud integration (coverage upload, quality gate, README badge)
+- **Done:** `sonar-project.properties` (org `adarshmurali`, project key `AdarshMurali_MarginMaestro`, `sonar.sources=src`, `sonar.tests=tests`, `sonar.python.coverage.reportPaths=coverage.xml`). New `sonarcloud` job in `ci.yml` (needs `lint-test`): downloads the `coverage-xml` artifact, runs `SonarSource/sonarqube-scan-action@v8.2.1` (current unified SonarQube/SonarCloud action per SonarSource's own repo — the older `sonarcloud-github-action` is its predecessor), then `SonarSource/sonarqube-quality-gate-action@v1.2.0` to actually fail the build on a gate failure, not just report one. Added Quality Gate + Coverage badges to `README.md` (with the project's badge token — safe to embed publicly, scoped to read-only badge display).
+- **Decisions:** Relying on SonarCloud's default "Sonar way" quality gate (≥80% coverage-on-new-code, blocks new critical/blocker issues) rather than authoring a custom gate. When the user connected the repo to SonarCloud, it defaulted to **Automatic Analysis** and auto-provisioned the project under key `AdarshMurali_MarginMaestro` (`<github-org>_<repo>` convention) — our first attempt used the wrong key (`MarginMaestro`), which both missed the real project's data and caused CI to auto-create a second, orphan, unbound project under the literal key. Used Chrome DevTools MCP (with the user logged into their own SonarCloud session in an automated browser window) to find the real project key, turn off Automatic Analysis (required — it conflicts with CI-based analysis and doesn't pick up `coverage.xml`), get the project's badge token, and delete the stray orphan project. Fixed the key in `sonar-project.properties`/`README.md`, re-ran CI — PR #6's SonarCloud analysis now shows **Quality gate: Passed** with real coverage data. Badges themselves will render correctly once merged to `main` (SonarCloud badges reflect the default branch; PR analysis is scoped separately) — same pattern as MM-6's Docker Hub push.
+- **Changed:** new file `sonar-project.properties`; modified `.github/workflows/ci.yml`, `README.md`. SonarCloud project settings: Automatic Analysis turned off; stray `MarginMaestro` project deleted.
+- **Known issues / tech debt:** none — root cause (wrong project key) fully resolved and verified against a real, passing quality gate.
+- **Next step:** **MM-8** — Terraform skeleton for AWS.
 
 ### 2026-07-24 — MM-6: GitHub Actions CI (lint, type-check, test+coverage, build, push to Docker Hub)
 - **Done:** `.github/workflows/ci.yml` with two jobs. `lint-test` (runs on every push and PR): checkout, Python 3.11 with pip caching, `pip install -e ".[dev]"`, `ruff check .` / `black --check .` / `mypy src`, `pytest --cov=src --cov-report=xml --cov-report=term`, uploads `coverage.xml` as a build artifact. `build-and-push` (needs `lint-test`): builds the Docker image via `docker/build-push-action`; on a PR it's build-only (`push: false`, just proves the Dockerfile still builds); on a push to `main` it logs into Docker Hub and pushes `adarshmurali/marginmaestro` tagged `latest` and the commit SHA.
