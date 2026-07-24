@@ -17,14 +17,21 @@ At the end of each story, prepend an entry using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** 0 — Foundations. Jira epic MM-1 + stories MM-2..MM-9 created. MM-2 (scaffold) merged to `main` (PR #1). MM-3 (pre-commit hooks) done on branch `feature/MM-3-precommit-hooks`, not yet pushed/merged.
+- **Phase:** 0 — Foundations. Jira epic MM-1 + stories MM-2..MM-9 created. MM-2 and MM-3 merged to `main`. MM-5 (FastAPI health/ready app) done on branch `feature/MM-5-fastapi-health-ready`, not yet pushed/merged. **Execution order deliberately swapped MM-4 and MM-5** — did MM-5 (the FastAPI app) before MM-4 (Dockerizing it), since Dockerizing an API service that doesn't exist yet made no sense. Jira keys/roadmap text unchanged, only the order they're worked in.
 - **Docs:** complete — README, CLAUDE.md, ARCHITECTURE, AGENTS, DATA_SOURCES, ROADMAP, ADRs, CONTRIBUTING, TESTING.
-- **Next up:** **MM-4** — Dockerize the API service; docker-compose for local stack (Redpanda, ChromaDB, app).
+- **Next up:** **MM-4** — Dockerize the API service (now that it exists); docker-compose for local stack (Redpanda, ChromaDB, app).
 - **Blockers:** none. Note: `ROADMAP.md` MM-# numbering for Phase 0 was corrected to match real Jira keys (epic took MM-1, not a story); later phases still show the original placeholder scheme pending ticket creation.
 
 ---
 
 ## Log
+
+### 2026-07-24 — MM-5: Minimal FastAPI app with /health, /ready, structured logging, correlation-id middleware
+- **Done:** `src/api/main.py` (FastAPI app), `src/api/schemas.py` (`HealthResponse` Pydantic model), `src/api/logging_config.py` (structlog configured in pure mode — JSON renderer, ISO timestamps, `merge_contextvars` processor — no stdlib `logging` interop yet), `src/api/middleware.py` (`CorrelationIdMiddleware`: reads/generates `X-Request-ID`, binds it into structlog context for the request, echoes it in the response header, logs one `request_handled` event per request). `/health` and `/ready` both return `200 {"status": ...}` — `/ready` has no real dependency checks yet since there's nothing to check against (DB/Kafka land in later phases). 12 tests added across `tests/unit/test_health.py` and `tests/unit/test_correlation_id.py` (correlation-id generation, echo-back, and structlog context binding via `structlog.testing.capture_logs`). Manually verified with a live `uvicorn` run — curled both endpoints, confirmed JSON log lines with correct correlation IDs in the output.
+- **Decisions:** Swapped MM-4/MM-5 execution order (see snapshot above) — user-approved. Did not build the MM-9 config loader early; host/port stay hardcoded to `0.0.0.0:8000` defaults for now. Kept structlog un-integrated with stdlib logging (uvicorn's own access logs stay separate) to keep this story's scope minimal.
+- **Changed:** new files `src/api/main.py`, `schemas.py`, `logging_config.py`, `middleware.py`; new tests `tests/unit/test_health.py`, `tests/unit/test_correlation_id.py`.
+- **Known issues / tech debt:** `structlog.testing.capture_logs()` disables all configured processors by default unless passed explicitly (structlog 25.5.0+ behavior) — tests pass `processors=[structlog.contextvars.merge_contextvars]` explicitly; worth remembering for future structlog-based tests. A `StarletteDeprecationWarning` about `httpx`/`starlette.testclient` appears in test output (points at an `httpx2` package) — not addressed now, harmless, revisit if it becomes a hard error on a future Starlette upgrade.
+- **Next step:** **MM-4** — Dockerize the now-real API service; docker-compose for local stack (Redpanda, ChromaDB, app).
 
 ### 2026-07-24 — MM-3: Pre-commit hooks (ruff, black, mypy)
 - **Done:** Added `.pre-commit-config.yaml` with three hooks — `ruff` (astral-sh/ruff-pre-commit v0.16.0), `black` (psf/black 26.5.1), `mypy` (pre-commit/mirrors-mypy v2.3.0, scoped to `files: ^src/`, using the project's `pyproject.toml` config). Hook revs pinned to match the versions already installed in `.venv` (confirmed via `pip show` + `gh api repos/.../tags`). Ran `pre-commit install` (wired into `.git/hooks/pre-commit`) and `pre-commit run --all-files` — all three hooks pass on the current scaffold.
