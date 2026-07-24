@@ -43,6 +43,34 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4.2.0
 
+      - name: Debug secret shape (lengths/flags only, no content)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          echo "username length: ${#DOCKER_USERNAME}"
+          echo "token length: ${#DOCKERHUB_TOKEN}"
+          for name in DOCKER_USERNAME DOCKERHUB_TOKEN; do
+            val="${!name}"
+            case "$val" in
+              *$'\n'*) echo "$name contains newline: true" ;;
+              *) echo "$name contains newline: false" ;;
+            esac
+            case "$val" in
+              *$'\r'*) echo "$name contains carriage-return: true" ;;
+              *) echo "$name contains carriage-return: false" ;;
+            esac
+            case "$val" in
+              '"'*|*'"') echo "$name has leading/trailing double-quote: true" ;;
+              *) echo "$name has leading/trailing double-quote: false" ;;
+            esac
+            case "$val" in
+              ' '*|*' ') echo "$name has leading/trailing space: true" ;;
+              *) echo "$name has leading/trailing space: false" ;;
+            esac
+          done
+
       - name: Log in to Docker Hub
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v4.5.1
