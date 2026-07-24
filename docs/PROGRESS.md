@@ -17,14 +17,21 @@ At the end of each story, prepend an entry using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** 0 — Foundations. Jira epic MM-1 + stories MM-2..MM-9 created. MM-2, MM-3, MM-5 merged to `main` (MM-4/MM-5 execution order was swapped — see MM-5's log entry). MM-4 (Dockerize + compose) done on branch `feature/MM-4-dockerize-compose`, not yet pushed/merged.
+- **Phase:** 0 — Foundations. Jira epic MM-1 + stories MM-2..MM-9 created. MM-2, MM-3, MM-4, MM-5 merged to `main` (MM-4/MM-5 execution order was swapped — see MM-5's log entry). MM-6 (GitHub Actions CI) done on branch `feature/MM-6-github-actions-ci`, not yet pushed/merged. Docker Hub target: `adarshmurali/marginmaestro` (repo not yet created — first push creates it). `DOCKER_USERNAME` and `DOCKERHUB_TOKEN` are already set as GitHub Actions repo secrets (user-provided).
 - **Docs:** complete — README, CLAUDE.md, ARCHITECTURE, AGENTS, DATA_SOURCES, ROADMAP, ADRs, CONTRIBUTING, TESTING.
-- **Next up:** **MM-6** — GitHub Actions CI (install, lint, type-check, pytest --cov, build image, push to Docker Hub).
+- **Next up:** **MM-7** — SonarCloud integration (upload coverage, quality gate, README badge).
 - **Blockers:** none. Note: `ROADMAP.md` MM-# numbering for Phase 0 was corrected to match real Jira keys (epic took MM-1, not a story); later phases still show the original placeholder scheme pending ticket creation.
 
 ---
 
 ## Log
+
+### 2026-07-24 — MM-6: GitHub Actions CI (lint, type-check, test+coverage, build, push to Docker Hub)
+- **Done:** `.github/workflows/ci.yml` with two jobs. `lint-test` (runs on every push and PR): checkout, Python 3.11 with pip caching, `pip install -e ".[dev]"`, `ruff check .` / `black --check .` / `mypy src`, `pytest --cov=src --cov-report=xml --cov-report=term`, uploads `coverage.xml` as a build artifact. `build-and-push` (needs `lint-test`): builds the Docker image via `docker/build-push-action`; on a PR it's build-only (`push: false`, just proves the Dockerfile still builds); on a push to `main` it logs into Docker Hub and pushes `adarshmurali/marginmaestro` tagged `latest` and the commit SHA.
+- **Decisions:** Action versions pinned to current releases (checked via `gh api`, not guessed): `actions/checkout@v7.0.1`, `actions/setup-python@v7.0.0`, `docker/setup-buildx-action@v4.2.0`, `docker/login-action@v4.5.1`, `docker/build-push-action@v7.3.0`, `actions/upload-artifact@v7.0.1`. Docker Hub push is gated to `main`-branch pushes only, not PRs, to avoid pushing preview images for every PR. Coverage upload to SonarCloud itself is MM-7's job — this story only makes sure `coverage.xml` exists and is captured as an artifact.
+- **Changed:** new file `.github/workflows/ci.yml`.
+- **Known issues / tech debt:** none. Verified by actually watching the workflow run on GitHub after pushing (see PR).
+- **Next step:** **MM-7** — SonarCloud integration (upload coverage, quality gate, README badge).
 
 ### 2026-07-24 — MM-4: Dockerize the API service; docker-compose for local stack
 - **Done:** Multi-stage `Dockerfile` (`python:3.11-slim` builder stage → slim runtime stage, non-root `appuser`, venv copied over rather than rebuilt). `.dockerignore` excludes dev/CI cruft from the build context. `docker-compose.yml` (Compose v2, no `version:` key) with three services: `app` (builds from the Dockerfile, `8000:8000`), `redpanda` (`docker.redpanda.com/redpandadata/redpanda:v26.1.14`, single-node `--mode dev-container` with dual internal/external listeners per Redpanda's own quickstart — internal `redpanda:9092` for containers, external `localhost:19092` for host tools; also exposes pandaproxy/schema-registry/admin ports), `chroma` (`chromadb/chroma:1.5.3` pinned, container port 8000 → host 8100 to avoid clashing with `app`, volume at `/data` — the documented default persistence path for this image). Fixed `.env.example`'s `KAFKA_BOOTSTRAP_SERVERS` (was `localhost:9092`, matched neither the new internal nor external listener — now `localhost:19092` with a comment on the in-container override).
