@@ -17,14 +17,21 @@ At the end of each story, prepend an entry using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** 0 — Foundations. Jira epic MM-1 + stories MM-2..MM-9 created. MM-2 (scaffold) done on branch `feature/MM-2-scaffold-project-structure`, not yet pushed/merged.
+- **Phase:** 0 — Foundations. Jira epic MM-1 + stories MM-2..MM-9 created. MM-2 (scaffold) merged to `main` (PR #1). MM-3 (pre-commit hooks) done on branch `feature/MM-3-precommit-hooks`, not yet pushed/merged.
 - **Docs:** complete — README, CLAUDE.md, ARCHITECTURE, AGENTS, DATA_SOURCES, ROADMAP, ADRs, CONTRIBUTING, TESTING.
-- **Next up:** **MM-3** — pre-commit hooks (ruff, black, mypy).
+- **Next up:** **MM-4** — Dockerize the API service; docker-compose for local stack (Redpanda, ChromaDB, app).
 - **Blockers:** none. Note: `ROADMAP.md` MM-# numbering for Phase 0 was corrected to match real Jira keys (epic took MM-1, not a story); later phases still show the original placeholder scheme pending ticket creation.
 
 ---
 
 ## Log
+
+### 2026-07-24 — MM-3: Pre-commit hooks (ruff, black, mypy)
+- **Done:** Added `.pre-commit-config.yaml` with three hooks — `ruff` (astral-sh/ruff-pre-commit v0.16.0), `black` (psf/black 26.5.1), `mypy` (pre-commit/mirrors-mypy v2.3.0, scoped to `files: ^src/`, using the project's `pyproject.toml` config). Hook revs pinned to match the versions already installed in `.venv` (confirmed via `pip show` + `gh api repos/.../tags`). Ran `pre-commit install` (wired into `.git/hooks/pre-commit`) and `pre-commit run --all-files` — all three hooks pass on the current scaffold.
+- **Decisions:** Kept the hook set to exactly ruff/black/mypy per the story's literal scope — did not add generic hygiene hooks (trailing-whitespace, end-of-file-fixer, etc.) from `pre-commit/pre-commit-hooks` to avoid scope creep beyond what MM-3 asked for.
+- **Changed:** new file `.pre-commit-config.yaml`.
+- **Known issues / tech debt:** none.
+- **Next step:** **MM-4** — Dockerize the API service (multi-stage build); `docker-compose` for local stack (Redpanda, ChromaDB, app).
 
 ### 2026-07-24 — MM-2: Scaffold project structure, pyproject.toml, Makefile
 - **Done:** Created `src/` (agents, calc, streaming, rag, api, mcp, persistence — each a top-level package), `tests/` (unit, integration, agent, e2e, mirroring TESTING.md's layers) with a smoke test proving the pytest+coverage pipeline works, placeholder `infra/README.md` and `frontend/README.md`, `pyproject.toml` (Python 3.11+, core deps + optional groups per future phase, ruff/black/mypy/pytest/coverage config), and `Makefile` (install, install-dev, test, test-unit, cov, lint, fmt, clean). Also bootstrapped git: repo had zero commits before this story — created `main` with a baseline commit of the existing docs, then branched `feature/MM-2-scaffold-project-structure` off it.
