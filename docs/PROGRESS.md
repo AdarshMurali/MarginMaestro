@@ -17,7 +17,7 @@ At the end of each story, prepend an entry using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** 0 — Foundations. Jira epic MM-1 + stories MM-2..MM-9 created. MM-2, MM-3, MM-4, MM-5 merged to `main` (MM-4/MM-5 execution order was swapped — see MM-5's log entry). MM-6 (GitHub Actions CI) done on branch `feature/MM-6-github-actions-ci`, not yet pushed/merged. Docker Hub target: `adarshmurali/marginmaestro` (repo not yet created — first push creates it). `DOCKER_USERNAME` and `DOCKERHUB_TOKEN` are already set as GitHub Actions repo secrets (user-provided).
+- **Phase:** 0 — Foundations. Jira epic MM-1 + stories MM-2..MM-9 created. MM-2 through MM-6 all merged to `main` (MM-4/MM-5 execution order was swapped — see MM-5's log entry). CI is fully green including the live Docker Hub push — image is at `adarshmurali/marginmaestro` (`latest` + per-commit-SHA tags).
 - **Docs:** complete — README, CLAUDE.md, ARCHITECTURE, AGENTS, DATA_SOURCES, ROADMAP, ADRs, CONTRIBUTING, TESTING.
 - **Next up:** **MM-7** — SonarCloud integration (upload coverage, quality gate, README badge).
 - **Blockers:** none. Note: `ROADMAP.md` MM-# numbering for Phase 0 was corrected to match real Jira keys (epic took MM-1, not a story); later phases still show the original placeholder scheme pending ticket creation.
@@ -30,7 +30,14 @@ At the end of each story, prepend an entry using this template:
 - **Done:** `.github/workflows/ci.yml` with two jobs. `lint-test` (runs on every push and PR): checkout, Python 3.11 with pip caching, `pip install -e ".[dev]"`, `ruff check .` / `black --check .` / `mypy src`, `pytest --cov=src --cov-report=xml --cov-report=term`, uploads `coverage.xml` as a build artifact. `build-and-push` (needs `lint-test`): builds the Docker image via `docker/build-push-action`; on a PR it's build-only (`push: false`, just proves the Dockerfile still builds); on a push to `main` it logs into Docker Hub and pushes `adarshmurali/marginmaestro` tagged `latest` and the commit SHA.
 - **Decisions:** Action versions pinned to current releases (checked via `gh api`, not guessed): `actions/checkout@v7.0.1`, `actions/setup-python@v7.0.0`, `docker/setup-buildx-action@v4.2.0`, `docker/login-action@v4.5.1`, `docker/build-push-action@v7.3.0`, `actions/upload-artifact@v7.0.1`. Docker Hub push is gated to `main`-branch pushes only, not PRs, to avoid pushing preview images for every PR. Coverage upload to SonarCloud itself is MM-7's job — this story only makes sure `coverage.xml` exists and is captured as an artifact.
 - **Changed:** new file `.github/workflows/ci.yml`.
-- **Known issues / tech debt:** none. Verified by actually watching the workflow run on GitHub after pushing (see PR).
+- **Known issues / tech debt:** none.
+- **Next step:** see the follow-up entry below (Docker Hub login had to be debugged post-merge) before MM-7.
+
+### 2026-07-24 — MM-6 follow-up: fixed Docker Hub login failure after merge
+- **Done:** The first real push-to-`main` run failed at `docker/login-action` with `Error response from daemon: ... malformed HTTP Authorization header`. Added a temporary diagnostic step (prints only secret *lengths* and boolean flags for embedded newline/CR/quote/space — never actual content, to avoid any risk of leaking a secret past GitHub's log masking) to narrow it down. First round ruled out whitespace/newline corruption. Lengths looked suspicious (username 26 chars vs. the expected 12-char `adarshmurali`; token 36 chars vs. the ~40+ expected for a `dckr_pat_...` token), pointing at wrong *values* rather than formatting — user regenerated/re-pasted both `DOCKER_USERNAME` and `DOCKERHUB_TOKEN`, and the next run succeeded. Confirmed live: `adarshmurali/marginmaestro` now has both `latest` and a commit-SHA tag on Docker Hub, `last_pushed` matching the successful run. Removed the diagnostic step afterward — it was explicitly temporary.
+- **Decisions:** Iterated by pushing directly to `main` rather than through a feature-branch PR for this diagnostic — user-approved, justified because the failure only reproduces on an actual push-to-`main` event (PRs skip the login/push steps by design) and the diagnostic itself was non-destructive/read-only in effect.
+- **Changed:** `.github/workflows/ci.yml` (diagnostic step added then removed; net diff from the MM-6 PR is zero).
+- **Known issues / tech debt:** none — root cause was bad secret values, not a workflow bug. Worth remembering for future secret setup: Docker Hub PATs should be copied in full including the `dckr_pat_` prefix from Account Settings → Security → New Access Token, not the account password.
 - **Next step:** **MM-7** — SonarCloud integration (upload coverage, quality gate, README badge).
 
 ### 2026-07-24 — MM-4: Dockerize the API service; docker-compose for local stack
