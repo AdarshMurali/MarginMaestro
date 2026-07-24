@@ -15,3 +15,8 @@ repos:
       - id: mypy
         files: ^src/
         args: [--config-file=pyproject.toml]
+        additional_dependencies:
+          - fastapi
+          - pydantic
+          - pydantic-settings
+          - structlog
