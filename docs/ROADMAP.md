@@ -1,0 +1,140 @@
+# MarginMaestro — Roadmap (Phased, Jira-ready)
+
+Development proceeds **phase by phase**, one story at a time, each finished to the Definition of Done in `CONTRIBUTING.md` before the next begins. Each **phase = a Jira Epic**; each story below is a Jira story. Story keys use `MM-#`.
+
+> **Numbering note:** Jira assigns keys sequentially as tickets are created, not per the gapped scheme originally sketched here. Phase 0's keys below (MM-1–MM-9) are real, created keys. Keys in later phases are still the original placeholder scheme and will be corrected to match reality as each phase's tickets are actually created in Jira.
+
+**Sequencing principle:** always keep a working system. Build the deterministic core first (data → math), then grounding (RAG), then the event/stream, then orchestration, then the human-facing edges (notify/escalate/UI). Optional streaming-analytics (Flink) comes last, only if justified.
+
+> Suggested labels per story: `backend`, `infra`, `agent`, `rag`, `streaming`, `frontend`, `test`, `docs`.
+
+---
+
+## Phase 0 — Foundations & CI/CD (Epic: MM-1)
+
+Goal: an empty-but-production-grade skeleton — anything you build after this inherits quality gates.
+
+- **MM-2** Scaffold project structure (`src/`, `tests/`, `infra/`, `frontend/`), `pyproject.toml`, `Makefile`.
+- **MM-3** Pre-commit hooks: `ruff`, `black`, `mypy`. 
+- **MM-4** Dockerize the API service (multi-stage build); `docker-compose` for local stack (Redpanda, ChromaDB, app).
+- **MM-5** Minimal FastAPI app with `/health` and `/ready` endpoints + structured JSON logging + correlation-id middleware.
+- **MM-6** GitHub Actions CI: install, lint, type-check, `pytest --cov`, build image, push to Docker Hub.
+- **MM-7** SonarCloud integration: upload coverage, configure quality gate (fail < 80% coverage / new critical issues). Add coverage badge to README.
+- **MM-8** Terraform skeleton for AWS (Parameter Store params, IAM least-privilege, placeholders for compute).
+- **MM-9** Config loader reading env locally / AWS Parameter Store in deployed envs (Pydantic settings).
+
+**Exit criteria:** green CI on an empty service, image on Docker Hub, quality gate live.
+
+## Phase 1 — Data foundation (Epic: MM-EPIC-1)
+
+- **MM-10** Synthetic data generators (seeded, versioned): counterparties, portfolios/positions, collateral inventory, ratings.
+- **MM-11** Azure SQL schema + migrations (positions, ratings, collateral, audit, tickets).
+- **MM-12** Free price adapters (`yfinance` + one crypto source) behind a `MarketFeed` interface.
+- **MM-13** FRED adapter for rates/vol reference data.
+- **MM-14** Daily batch loader (scheduled) for EOD/reference data.
+
+**Exit criteria:** databases populated from generators + free feeds; all adapters unit-tested with mocks.
+
+## Phase 2 — Calculation engine (deterministic) (Epic: MM-EPIC-2)
+
+> The financial core. Pure code, no LLM. Exhaustively tested.
+
+- **MM-20** MTM valuation from positions + prices.
+- **MM-21** Variation Margin computation.
+- **MM-22** Initial Margin (SIMM proxy) with documented methodology.
+- **MM-23** Threshold + MTA breach evaluation.
+- **MM-24** Golden-value test suite (hand-computed expected values) → drive coverage.
+
+**Exit criteria:** given a portfolio + prices + CSA terms, the engine returns a correct, tested call amount.
+
+## Phase 3 — RAG pipeline (Epic: MM-EPIC-3)
+
+- **MM-30** Assemble the demo document corpus (CSA templates + synthetic policy/exception/escalation/dispute docs).
+- **MM-31** Ingestion: chunk + embed (local BGE) + load ChromaDB with metadata.
+- **MM-32** Retriever service (filter by counterparty + doc_type), exposed as an MCP tool.
+- **MM-33** **CSA-RAG Agent**: return threshold/MTA/eligible collateral/haircuts with citations; parse to validated structured terms.
+- **MM-34** RAG tests: retrieval precision on seeded questions; citation presence.
+
+**Exit criteria:** "what are CP-7's CSA terms?" returns correct, cited, structured terms.
+
+## Phase 4 — Streaming & Event Agent (Epic: MM-EPIC-4)
+
+- **MM-40** Kafka topics + producer/consumer wiring (Redpanda locally).
+- **MM-41** **Market simulator** producer: scripted scenarios (price shock, vol spike, downgrade) → `market.prices`/`market.events`.
+- **MM-42** **Event Agent**: consume, classify, map event → affected entities (curated universe); emit impact set with idempotency key.
+- **MM-43** Live feed adapter path (`MARKET_FEED_MODE=live`) sharing the same topic.
+- **MM-44** Streaming integration tests with `testcontainers`.
+
+**Exit criteria:** injecting a synthetic shock produces an impact set on the stream, idempotently.
+
+## Phase 5 — Orchestration core (Epic: MM-EPIC-5)
+
+- **MM-50** LangGraph state object + orchestrator skeleton.
+- **MM-51** Wire the happy path: event → calc → CSA-RAG → breach evaluation → (no-call | proceed).
+- **MM-52** **Human approval gate** node (pause/resume; approve/reject/adjust).
+- **MM-53** Idempotent run handling + per-run correlation id.
+- **MM-54** Orchestration tests: assert branch taken (breach vs no-breach, approve vs reject) with mocked LLM/tools.
+
+**Exit criteria:** a synthetic event drives a full evaluate→breach→await-approval flow, tested.
+
+## Phase 6 — Notify, SLA, Escalation (Epic: MM-EPIC-6)
+
+- **MM-60** **Communication Agent** drafts notice; Slack MCP tool sends after approval.
+- **MM-61** SLA timer (`MARGIN_CALL_SLA_MINUTES`) with met/breached outcomes.
+- **MM-62** Escalation path: retrieve escalation procedure (RAG) → open Jira ticket via Jira MCP tool with full context.
+- **MM-63** End-to-end scenario test: shock → call → Slack → SLA breach → Jira ticket.
+
+**Exit criteria:** full lifecycle runs end to end on a synthetic scenario, with real Slack + Jira (free accounts).
+
+## Phase 7 — Reconciliation & Collateral (Epic: MM-EPIC-7)
+
+- **MM-70** Trade-diff engine (deterministic) for dispute detection.
+- **MM-71** **Reconciliation Agent**: isolate breaks + draft rationale grounded in dispute-history RAG.
+- **MM-72** **Collateral Optimizer**: cheapest-to-deliver selection respecting eligibility/haircuts.
+- **MM-73** Tests for dispute isolation and optimizer correctness.
+
+**Exit criteria:** disputes are detected + explained; collateral is selected optimally.
+
+## Phase 8 — Frontend dashboard (Epic: MM-EPIC-8)
+
+- **MM-80** Next.js app on Vercel; connect to API via REST + WebSocket/SSE.
+- **MM-81** Positions & exposure board (status lights) + live price chart.
+- **MM-82** Margin-call feed + lifecycle status.
+- **MM-83** **Agent activity / orchestration trace** (the showpiece).
+- **MM-84** Approval control + SLA/escalation view.
+- **MM-85** "Simulate event" panel to trigger the lifecycle live.
+
+**Exit criteria:** a viewer can inject an event and watch the whole lifecycle unfold on screen.
+
+## Phase 9 — MCP, observability, audit hardening (Epic: MM-EPIC-9)
+
+- **MM-90** Finalize MCP servers (market-data, rag-retriever, slack, jira) with clean schemas.
+- **MM-91** Immutable audit log for every step + an audit view.
+- **MM-92** OpenTelemetry traces (optional) + Prometheus/Grafana panel for agent activity.
+- **MM-93** Resilience: retries, timeouts, dead-letter path for failed events.
+
+**Exit criteria:** every run is fully audited and observable; failures degrade gracefully.
+
+## Phase 10 — Demo polish (Epic: MM-EPIC-10)
+
+- **MM-100** Curated demo scenarios (2–3 counterparties) + one-command demo script.
+- **MM-101** README/architecture diagrams finalized; short demo GIF/video.
+- **MM-102** Deploy: frontend to Vercel + custom domain; backend on AWS via Terraform.
+
+## Phase 11 — OPTIONAL: streaming analytics (Epic: MM-EPIC-11)
+
+> Only if you commit to a genuine windowed/stateful job (ADR-0003). Do not add Flink as a buzzword.
+
+- **MM-110** Flink job: rolling realized-volatility windows per security → feed IM.
+- **MM-111** (Optional) CEP pattern: "N consecutive X% drops in T minutes" → escalation trigger.
+
+**Exit criteria:** a real windowed computation influences IM, justifying Flink in the stack.
+
+---
+
+## Milestones for the resume story
+
+1. **M1 (Phases 0–2):** production-grade skeleton + tested margin math. *"CI/CD, quality gates, deterministic financial core."*
+2. **M2 (Phases 3–6):** grounded, event-driven, full lifecycle with notify + escalate. *"Agentic RAG + streaming + human-in-the-loop."*
+3. **M3 (Phases 7–10):** reconciliation, optimization, live dashboard, deployed demo. *"End-to-end, deployed, demoable."*
+4. **M4 (Phase 11, optional):** streaming analytics. *"Stateful stream processing with Flink."*
