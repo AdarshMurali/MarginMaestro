@@ -1,8 +1,11 @@
+import os
 from typing import Any
 
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings
 from pydantic_settings.sources import PydanticBaseSettingsSource
+
+DEFAULT_AWS_REGION = "ap-south-1"
 
 
 class ParameterStoreSource(PydanticBaseSettingsSource):
@@ -17,7 +20,8 @@ class ParameterStoreSource(PydanticBaseSettingsSource):
         if self._values is None:
             import boto3
 
-            client = boto3.client("ssm")
+            region = os.environ.get("AWS_REGION", DEFAULT_AWS_REGION)
+            client = boto3.client("ssm", region_name=region)
             prefix = f"/marginmaestro/{self._app_env}/"
             values: dict[str, str] = {}
             paginator = client.get_paginator("get_parameters_by_path")
