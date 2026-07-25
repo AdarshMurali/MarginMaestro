@@ -21,3 +21,4 @@ repos:
           - pydantic-settings
           - structlog
           - faker
+          - sqlalchemy
