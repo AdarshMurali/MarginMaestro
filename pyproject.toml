@@ -25,12 +25,14 @@ dev = [
     "black",
     "mypy",
     "pre-commit",
+    "moto",
 ]
 rag = ["chromadb", "sentence-transformers"]
 streaming = ["confluent-kafka"]
 llm = ["langgraph"]
 data = ["yfinance", "pandas", "fredapi"]
 db = ["sqlalchemy", "pyodbc"]
+aws = ["boto3"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -48,6 +50,10 @@ python_version = "3.11"
 mypy_path = "src"
 namespace_packages = true
 explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = "boto3.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
