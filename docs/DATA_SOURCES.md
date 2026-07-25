@@ -22,6 +22,23 @@ All data is **free or synthetic**. No proprietary or employer data is ever used.
 | **Settlement / holiday calendars** | Synthetic or open calendar libs | Free | SQL | SLA / settlement timing |
 | **Audit log & ticket state** | Generated at runtime (system output) | Free | SQL | Audit, Escalation |
 
+### 1a. Securities universe (curated, real — decided Phase 1 planning, 2026-07-25)
+
+30 real, liquid tickers — deliberately curated per the golden-rule-#7 "small fixed set," not open-world:
+
+- **Mega-cap equities:** `AAPL`, `MSFT`, `GOOGL`, `AMZN`, `TSLA`, `NVDA`, `META`, `HPE`, `JPM`, `WFC`, `SPCX`
+- **2026-buzzing (verified via live search, not assumed from stale knowledge):** `PLTR`, `AMD`, `MU`, `SMCI`, `NFLX`, `INTC`
+- **S&P 500 proxy:** `SPY` (the ETF — the raw index isn't a holdable position)
+- **Sector rounding:** `XOM` (energy), `JNJ` (healthcare), `BRK-B`, `V`, `DIS`
+- **Government securities:** `IEF`, `TLT`, `SHY` (US Treasury bond ETFs) — substituting for Indian G-Secs, which have **no free API/ticker access** (they trade via RBI/NSE bond platforms, not `yfinance` or any free retail feed)
+- **Crypto:** `BTC-USD`, `ETH-USD`, `SOL-USD`, `XRP-USD`
+
+Synthetic portfolios (MM-11) sample positions from this pool, so `yfinance`/CoinGecko only ever fetch prices for these 30 tickers, not per-position.
+
+### 1b. Azure SQL: local vs. real (decided 2026-07-25)
+
+The user has a real Azure SQL free-tier instance but has used this month's free quota. Dev/CI uses a local `azure-sql-edge` container (`docker-compose.yml`, added in MM-12) instead — same engine family as real Azure SQL. Connection config (`DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`, already in `.env.example`) is the *only* thing that changes to point at the real instance later; no code path differs between local and Azure.
+
 ## 2. Unstructured data (documents → RAG)
 
 These feed the vector store and are what the RAG agents reason over. For the demo, curate **4–6 well-chosen documents per counterparty** — enough to prove the concept without ballooning ingestion.

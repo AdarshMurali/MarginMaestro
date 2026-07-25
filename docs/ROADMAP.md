@@ -2,7 +2,7 @@
 
 Development proceeds **phase by phase**, one story at a time, each finished to the Definition of Done in `CONTRIBUTING.md` before the next begins. Each **phase = a Jira Epic**; each story below is a Jira story. Story keys use `MM-#`.
 
-> **Numbering note:** Jira assigns keys sequentially as tickets are created, not per the gapped scheme originally sketched here. Phase 0's keys below (MM-1–MM-9) are real, created keys. Keys in later phases are still the original placeholder scheme and will be corrected to match reality as each phase's tickets are actually created in Jira.
+> **Numbering note:** Jira assigns keys sequentially as tickets are created, not per the gapped scheme originally sketched here. Phase 0 (MM-1–MM-9) and Phase 1 (MM-10–MM-15) keys below are real, created keys. Keys in later phases are still the original placeholder scheme and will be corrected to match reality as each phase's tickets are actually created in Jira.
 
 **Sequencing principle:** always keep a working system. Build the deterministic core first (data → math), then grounding (RAG), then the event/stream, then orchestration, then the human-facing edges (notify/escalate/UI). Optional streaming-analytics (Flink) comes last, only if justified.
 
@@ -25,15 +25,17 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 
 **Exit criteria:** green CI on an empty service, image on Docker Hub, quality gate live.
 
-## Phase 1 — Data foundation (Epic: MM-EPIC-1)
+## Phase 1 — Data foundation (Epic: MM-10)
 
-- **MM-10** Synthetic data generators (seeded, versioned): counterparties, portfolios/positions, collateral inventory, ratings.
-- **MM-11** Azure SQL schema + migrations (positions, ratings, collateral, audit, tickets).
-- **MM-12** Free price adapters (`yfinance` + one crypto source) behind a `MarketFeed` interface.
-- **MM-13** FRED adapter for rates/vol reference data.
-- **MM-14** Daily batch loader (scheduled) for EOD/reference data.
+- **MM-11** Synthetic data generators (seeded, versioned): 8 counterparties (Faker), 1 portfolio each with 8-12 positions sampled from a curated 30-ticker real-securities universe, ratings, collateral inventory.
+- **MM-12** Azure SQL schema + migrations (positions, ratings, collateral, audit, tickets) — local `azure-sql-edge` container for now (real Azure SQL free tier exhausted for the month), config-only swap later.
+- **MM-13** Free price adapters (`yfinance` + CoinGecko) behind a `MarketFeed` interface.
+- **MM-14** FRED adapter for rates/vol reference data.
+- **MM-15** Daily batch loader for EOD/reference data (runs locally/CI for now; cloud scheduling deferred to Phase 10).
 
 **Exit criteria:** databases populated from generators + free feeds; all adapters unit-tested with mocks.
+
+**Securities universe (30 real tickers, decided 2026-07-25):** `AAPL`, `MSFT`, `GOOGL`, `AMZN`, `TSLA`, `NVDA`, `META`, `HPE`, `JPM`, `WFC`, `SPCX` (explicit picks); `PLTR`, `AMD`, `MU`, `SMCI`, `NFLX`, `INTC` (2026-buzzing); `SPY` (S&P 500 proxy); `XOM`, `JNJ`, `BRK-B`, `V`, `DIS` (sector rounding); `IEF`, `TLT`, `SHY` (Treasury bond ETFs — substitute for Indian G-Secs, which have no free API/ticker access); `BTC-USD`, `ETH-USD`, `SOL-USD`, `XRP-USD` (crypto).
 
 ## Phase 2 — Calculation engine (deterministic) (Epic: MM-EPIC-2)
 

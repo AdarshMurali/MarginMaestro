@@ -37,7 +37,17 @@ class Settings(BaseSettings):
     kafka_topic_calls: str = "margin.calls"
 
     market_feed_mode: str = "simulated"
-    market_universe: str = "AAPL,MSFT,BTC-USD,ETH-USD"
+    market_universe: str = (
+        "AAPL,MSFT,GOOGL,AMZN,TSLA,NVDA,META,HPE,JPM,WFC,SPCX,"
+        "PLTR,AMD,MU,SMCI,NFLX,INTC,"
+        "SPY,XOM,JNJ,BRK-B,V,DIS,"
+        "IEF,TLT,SHY,"
+        "BTC-USD,ETH-USD,SOL-USD,XRP-USD"
+    )
+
+    @property
+    def market_universe_list(self) -> list[str]:
+        return [ticker.strip() for ticker in self.market_universe.split(",") if ticker.strip()]
 
     slack_bot_token: str | None = None
     slack_channel_id: str | None = None

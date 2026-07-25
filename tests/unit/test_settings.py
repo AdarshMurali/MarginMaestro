@@ -27,6 +27,21 @@ def test_defaults_when_nothing_set(monkeypatch, tmp_path) -> None:
     assert settings.openai_api_key is None
 
 
+def test_market_universe_list_parses_default() -> None:
+    settings = Settings(_env_file=None)
+    tickers = settings.market_universe_list
+    assert len(tickers) == 30
+    assert "AAPL" in tickers
+    assert "SPCX" in tickers
+    assert "BTC-USD" in tickers
+
+
+def test_market_universe_list_parses_custom_value(monkeypatch) -> None:
+    monkeypatch.setenv("MARKET_UNIVERSE", "AAPL, MSFT ,GOOGL")
+    settings = Settings(_env_file=None)
+    assert settings.market_universe_list == ["AAPL", "MSFT", "GOOGL"]
+
+
 def test_env_vars_override_defaults(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "local")
     monkeypatch.setenv("API_PORT", "9000")
