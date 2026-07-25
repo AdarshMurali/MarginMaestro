@@ -6,6 +6,9 @@ install:
 install-dev:
 	pip install -e ".[dev]"
 
+generate-data:
+	python -m persistence.generators.run
+
 test:
 	pytest
 

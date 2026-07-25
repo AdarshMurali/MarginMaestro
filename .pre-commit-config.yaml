@@ -20,3 +20,4 @@ repos:
           - pydantic
           - pydantic-settings
           - structlog
+          - faker

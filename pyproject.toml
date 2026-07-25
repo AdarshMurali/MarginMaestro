@@ -30,7 +30,7 @@ dev = [
 rag = ["chromadb", "sentence-transformers"]
 streaming = ["confluent-kafka"]
 llm = ["langgraph"]
-data = ["yfinance", "pandas", "fredapi"]
+data = ["yfinance", "pandas", "fredapi", "faker"]
 db = ["sqlalchemy", "pyodbc"]
 aws = ["boto3"]
 
