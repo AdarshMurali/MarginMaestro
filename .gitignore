@@ -42,7 +42,6 @@ chroma_db/
 *.tfstate
 *.tfstate.*
 .terraform/
-.terraform.lock.hcl
 
 # ---- OS / IDE ----
 .DS_Store
