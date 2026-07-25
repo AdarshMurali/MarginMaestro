@@ -6,7 +6,7 @@ This project is built **story by story**, with a clean handoff between each. Whe
 
 Every unit of work follows this cycle. Do not start the next story until the current one is fully finished and handed off.
 
-1. **Pick the next story** from [`docs/ROADMAP.md`](docs/ROADMAP.md) / the Jira board. Work one story at a time.
+1. **Pick the next story** from [`docs/ROADMAP.md`](docs/ROADMAP.md) / the Jira board. Work one story at a time. Every story is assigned to the user in Jira from creation — never left unassigned, especially not when marked Done.
 2. **Read the Definition of Done (DoD)** and acceptance criteria *before* writing code.
 3. **Plan** the change (in Claude Code, use plan mode / produce a plan and review it before implementing).
 4. **Write the test first** where practical (TDD), then the implementation.
