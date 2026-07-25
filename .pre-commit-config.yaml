@@ -22,3 +22,5 @@ repos:
           - structlog
           - faker
           - sqlalchemy
+          - httpx
+          - yfinance

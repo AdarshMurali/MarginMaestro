@@ -4,6 +4,15 @@ from persistence.models import AssetClass
 ETF_TICKERS = {"SPY", "IEF", "TLT", "SHY"}
 CRYPTO_TICKERS = {"BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD"}
 
+# CoinGecko's free /simple/price endpoint keys prices by its own coin id,
+# not by ticker symbol.
+COINGECKO_ID_MAP = {
+    "BTC-USD": "bitcoin",
+    "ETH-USD": "ethereum",
+    "SOL-USD": "solana",
+    "XRP-USD": "ripple",
+}
+
 # Government-bond ETFs, weighted heavier for collateral generation since
 # Treasuries are the realistic "eligible collateral" asset class.
 TREASURY_ETF_TICKERS = {"IEF", "TLT", "SHY"}

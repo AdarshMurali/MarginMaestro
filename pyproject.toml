@@ -13,6 +13,7 @@ dependencies = [
     "pydantic",
     "pydantic-settings",
     "structlog",
+    "httpx",
 ]
 
 [project.optional-dependencies]
@@ -20,7 +21,6 @@ dev = [
     "pytest",
     "pytest-cov",
     "pytest-asyncio",
-    "httpx",
     "ruff",
     "black",
     "mypy",
@@ -59,8 +59,15 @@ ignore_missing_imports = true
 module = "faker.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "yfinance.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "live: hits real external network APIs (yfinance, CoinGecko); excluded from default/CI runs",
+]
 
 [tool.coverage.run]
 source = ["src"]
