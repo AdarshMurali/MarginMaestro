@@ -81,10 +81,12 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 
 - **MM-60** **Communication Agent** drafts notice; Slack MCP tool sends after approval.
 - **MM-61** SLA timer (`MARGIN_CALL_SLA_MINUTES`) with met/breached outcomes.
-- **MM-62** Escalation path: retrieve escalation procedure (RAG) → open Jira ticket via Jira MCP tool with full context.
-- **MM-63** End-to-end scenario test: shock → call → Slack → SLA breach → Jira ticket.
+- **MM-62** Escalation path: retrieve escalation procedure (RAG) → open a **ServiceNow** incident with full context.
+- **MM-63** End-to-end scenario test: shock → call → Slack → SLA breach → ServiceNow incident.
 
-**Exit criteria:** full lifecycle runs end to end on a synthetic scenario, with real Slack + Jira (free accounts).
+**Exit criteria:** full lifecycle runs end to end on a synthetic scenario, with real Slack + ServiceNow (free accounts).
+
+> **Note (2026-07-25):** escalation logging targets ServiceNow (the user's free dev instance), not Jira — a better fit for a business/margin-call escalation than an engineering issue tracker. This is scoped narrowly to *this* escalation feature; Jira remains this project's own dev-story tracker (MM-# tickets) and is unaffected. Needs an ADR per `CLAUDE.md`'s "don't swap tech without one" rule, written when this phase actually starts.
 
 ## Phase 7 — Reconciliation & Collateral (Epic: MM-EPIC-7)
 

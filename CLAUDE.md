@@ -27,7 +27,7 @@ It is a **portfolio / proof-of-concept** built to production-engineering standar
 - **Streaming:** Kafka (Redpanda locally). Flink is **deferred** — only if a genuine windowed job is built (see `docs/adr/0003`).
 - **API:** FastAPI. **Frontend:** Next.js on Vercel.
 - **Tools exposed as MCP servers:** market data, Jira, Slack, RAG retriever.
-- **Notifications:** Slack. **Ticketing/escalation:** Jira. **Secrets:** AWS Parameter Store.
+- **Notifications:** Slack. **Ticketing/escalation:** Jira *(planned swap to ServiceNow for this specific feature in Phase 6 — see `docs/ROADMAP.md`'s Phase 6 note; needs an ADR before it actually changes)*. **Secrets:** AWS Parameter Store.
 - **CI/CD:** GitHub Actions + Docker Hub. **Quality:** SonarCloud + pytest-cov. **IaC:** Terraform.
 
 ## Commands (keep these current)
