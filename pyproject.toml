@@ -31,7 +31,7 @@ rag = ["chromadb", "sentence-transformers"]
 streaming = ["confluent-kafka"]
 llm = ["langgraph"]
 data = ["yfinance", "pandas", "fredapi", "faker"]
-db = ["sqlalchemy", "pyodbc"]
+db = ["sqlalchemy", "pyodbc", "alembic"]
 aws = ["boto3"]
 
 [tool.setuptools.packages.find]
