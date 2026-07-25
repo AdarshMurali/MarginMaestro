@@ -37,6 +37,15 @@ def generate_all(seed: int = DEFAULT_SEED, as_of: date | None = None) -> dict[st
     }
 
 
+def _safe_join(base_dir: Path, filename: str) -> Path:
+    """Resolve filename under base_dir, refusing to write outside it."""
+    base_resolved = base_dir.resolve()
+    target = (base_resolved / filename).resolve()
+    if not target.is_relative_to(base_resolved):
+        raise ValueError(f"Refusing to write outside {base_resolved}: {target}")
+    return target
+
+
 def _write_json(path: Path, records: list[BaseModel], seed: int, as_of: date) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {
@@ -58,7 +67,8 @@ def write_all(
     as_of = as_of or datetime.now(UTC).date()
     data = generate_all(seed, as_of)
     for name, records in data.items():
-        _write_json(output_dir / f"{name}.json", records, seed, as_of)
+        target = _safe_join(output_dir, f"{name}.json")
+        _write_json(target, records, seed, as_of)
 
 
 def main() -> None:

@@ -2,6 +2,8 @@ import json
 import random
 from datetime import date
 
+import pytest
+
 from config.settings import get_settings
 from persistence.generators.collateral import generate_collateral
 from persistence.generators.counterparties import generate_counterparties
@@ -11,7 +13,7 @@ from persistence.generators.portfolios import (
     generate_portfolios_and_positions,
 )
 from persistence.generators.ratings import generate_ratings
-from persistence.generators.run import generate_all, write_all
+from persistence.generators.run import _safe_join, generate_all, write_all
 from persistence.models import RatingGrade
 
 SEED = 42
@@ -101,3 +103,13 @@ def test_write_all_produces_valid_json_files(tmp_path) -> None:
         low, high = expected_count_range
         assert low <= payload["count"] <= high
         assert len(payload["records"]) == payload["count"]
+
+
+def test_safe_join_allows_normal_filenames(tmp_path) -> None:
+    result = _safe_join(tmp_path, "counterparties.json")
+    assert result == (tmp_path / "counterparties.json").resolve()
+
+
+def test_safe_join_rejects_path_traversal(tmp_path) -> None:
+    with pytest.raises(ValueError, match="Refusing to write outside"):
+        _safe_join(tmp_path, "../../etc/passwd")
