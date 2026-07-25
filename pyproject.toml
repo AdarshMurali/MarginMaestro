@@ -55,6 +55,10 @@ explicit_package_bases = true
 module = "boto3.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "faker.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
