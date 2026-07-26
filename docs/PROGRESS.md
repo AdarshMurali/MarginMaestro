@@ -17,14 +17,21 @@ At the end of each story, prepend an entry using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** 0 — Foundations. **Complete**, all merged to `main`. Phase 1 — Data foundation, nearly complete. Jira epic MM-10 + stories MM-11..MM-15 created and all assigned to the user (see [[reference_jira_ownership]] — assignee convention fixed retroactively for MM-1 through MM-15). MM-11, MM-12, MM-13, MM-14 merged. MM-15 (batch loader) done on branch `feature/MM-15-batch-loader`, not yet pushed/merged — this closes out Phase 1.
-- **Docs:** complete — README, CLAUDE.md, ARCHITECTURE, AGENTS, DATA_SOURCES, ROADMAP, ADRs, CONTRIBUTING, TESTING. `DATA_SOURCES.md` documents the 30-ticker securities universe (1a) and the local-vs-real Azure SQL approach (1b). `CONTRIBUTING.md` now notes the Jira assignee convention.
-- **Next up:** Phase 1 exit criteria will be met once MM-15 merges (databases populated from generators + free feeds; all adapters unit-tested with mocks — all true). Then a Phase 2 planning/approval pass (calculation engine: MTM/VM/IM, deterministic Python, per golden rule 1) before creating Jira tickets.
+- **Phase:** 0 — Foundations. **Complete**. Phase 1 — Data foundation. **Complete**, all merged (MM-11..MM-15, epic MM-10 marked Done). Phase 2 — Calculation engine, in progress. Jira epic MM-16 + stories MM-17..MM-21 created and assigned to the user. MM-17 (MTM valuation) done on branch `feature/MM-17-mtm-valuation`, not yet pushed/merged.
+- **Docs:** complete — README, CLAUDE.md, ARCHITECTURE, AGENTS, DATA_SOURCES, ROADMAP, ADRs, CONTRIBUTING, TESTING. `DATA_SOURCES.md` documents the 30-ticker securities universe (1a) and the local-vs-real Azure SQL approach (1b). `ROADMAP.md` Phase 2 now has real Jira keys (MM-16..21, replacing the MM-EPIC-2/MM-20..24 placeholder scheme).
+- **Next up:** **MM-18** — Variation Margin computation.
 - **Blockers:** none. Note: `ROADMAP.md` MM-# numbering for Phase 0 and Phase 1 are real, created keys; later phases still show the original placeholder scheme pending ticket creation.
 
 ---
 
 ## Log
+
+### 2026-07-26 — MM-17: MTM valuation from positions + prices — Phase 2 kickoff
+- **Done:** `src/calc/models.py` (`PricingError`, `PositionMTM`, `PortfolioMTM` — the shared calc I/O models this phase will keep extending) and `src/calc/mtm.py` (`compute_mtm(positions, prices) -> PortfolioMTM`: quantity × price per position, summed to a portfolio total). Pure function, no DB/RAG/orchestrator — matches Phase 2's "self-contained deterministic library" scope decision.
+- **Decisions:** Created Jira epic MM-16 + stories MM-17..MM-21 for the whole phase up front (per the phase-workflow protocol), replacing `ROADMAP.md`'s placeholder MM-EPIC-2/MM-20..24 numbering with the real keys. `compute_mtm` scopes to a single portfolio's positions (fails loud on empty input or mismatched `portfolio_id`) rather than accepting mixed portfolios — matches the exit criteria's phrasing ("given *a* portfolio + prices..."). A missing price for any requested ticker raises `PricingError` naming it, same fail-loud convention as `MarketDataUnavailableError`/`RateDataUnavailableError` from Phase 1 — no silent partial MTM. Negative quantities are treated as valid (short positions), not rejected.
+- **Changed:** new `src/calc/models.py`, `src/calc/mtm.py`; new `tests/unit/test_calc_mtm.py` (5 tests, hand-computed arithmetic, e.g. 100×$210 + 50×$550 = $48,500 verified by hand not just asserted against the function's own output).
+- **Known issues / tech debt:** none.
+- **Next step:** **MM-18** — Variation Margin computation (day-over-day MTM change, sourced from two `price_history` snapshots).
 
 ### 2026-07-26 — MM-15: Daily batch loader for EOD/reference data — Phase 1 complete
 - **Done:** Two new tables added to the MM-12 schema — `PriceHistoryORM` (`(ticker, price_date)` PK, price/currency/source) and `ReferenceRateORM` (`(series_id, rate_date)` PK, value), migration `2258d8fea491` generated for real against the local container and applied. `src/persistence/batch_loader.py`: `load_synthetic_reference_data()` (runs MM-11's `generate_all()`, `session.merge()`s each record into ORM rows), `load_prices()` (calls an injected `MarketFeed`, merges into `PriceHistoryORM`), `load_reference_rates()` (calls an injected `FredFeed`, merges into `ReferenceRateORM`), and `run_batch_load()` — the real orchestrator wiring the real DB session + `get_market_feed()` + `FredFeed()` together, writing one `AuditLogORM` row per run (correlation id, `event_type="batch_load"`, payload = record counts). New `make batch-load` target.

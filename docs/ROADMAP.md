@@ -37,15 +37,15 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 
 **Securities universe (30 real tickers, decided 2026-07-25):** `AAPL`, `MSFT`, `GOOGL`, `AMZN`, `TSLA`, `NVDA`, `META`, `HPE`, `JPM`, `WFC`, `SPCX` (explicit picks); `PLTR`, `AMD`, `MU`, `SMCI`, `NFLX`, `INTC` (2026-buzzing); `SPY` (S&P 500 proxy); `XOM`, `JNJ`, `BRK-B`, `V`, `DIS` (sector rounding); `IEF`, `TLT`, `SHY` (Treasury bond ETFs — substitute for Indian G-Secs, which have no free API/ticker access); `BTC-USD`, `ETH-USD`, `SOL-USD`, `XRP-USD` (crypto).
 
-## Phase 2 — Calculation engine (deterministic) (Epic: MM-EPIC-2)
+## Phase 2 — Calculation engine (deterministic) (Epic: MM-16)
 
-> The financial core. Pure code, no LLM. Exhaustively tested.
+> The financial core. Pure code, no LLM. Exhaustively tested. Self-contained pure-Python library (`src/calc/`) — no DB reads, no RAG, no orchestrator; those get wired in Phase 5.
 
-- **MM-20** MTM valuation from positions + prices.
-- **MM-21** Variation Margin computation.
-- **MM-22** Initial Margin (SIMM proxy) with documented methodology.
-- **MM-23** Threshold + MTA breach evaluation.
-- **MM-24** Golden-value test suite (hand-computed expected values) → drive coverage.
+- **MM-17** MTM valuation from positions + prices.
+- **MM-18** Variation Margin computation.
+- **MM-19** Initial Margin (SIMM proxy) with documented methodology — asset-class risk weights (equity 15%, ETF 10%, Treasury ETF 2%, crypto 30%) scaled by a VIX multiplier (MM-14's `VIXCLS`).
+- **MM-20** Threshold + MTA breach evaluation.
+- **MM-21** Golden-value test suite (hand-computed expected values) → drive coverage.
 
 **Exit criteria:** given a portfolio + prices + CSA terms, the engine returns a correct, tested call amount.
 
