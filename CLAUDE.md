@@ -52,7 +52,7 @@ make simulate SCENARIO=price_shock   # inject a synthetic market event
 
 - **Language/runtime:** Python 3.11+ (backend), TypeScript/Next.js (frontend).
 - **Validation:** Pydantic models at every external boundary (feeds, API, tool IO).
-- **Structure (target):** `src/agents/`, `src/calc/`, `src/streaming/`, `src/rag/`, `src/api/`, `src/mcp/`, `src/persistence/`, `src/config/` (shared Pydantic settings — env locally, AWS Parameter Store when deployed; added in MM-9), `tests/`, `infra/` (Terraform), `frontend/`.
+- **Structure (target):** `src/agents/`, `src/calc/`, `src/streaming/`, `src/rag/`, `src/api/`, `src/mcp_servers/` (named to avoid colliding with the third-party `mcp` SDK package this project also depends on), `src/persistence/`, `src/config/` (shared Pydantic settings — env locally, AWS Parameter Store when deployed; added in MM-9), `tests/`, `infra/` (Terraform), `frontend/`.
 - **Errors:** fail loud in calc/agent code; never silently swallow. Events are processed **idempotently** (replaying the same event must not double-raise a call).
 - **Logging:** structured JSON logs; every agent action is logged with a correlation id for the margin-call run.
 - **Commits:** conventional commits + Jira key, e.g. `feat(calc): add VM computation [MM-12]`.
