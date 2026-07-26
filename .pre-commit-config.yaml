@@ -26,3 +26,5 @@ repos:
           - yfinance
           - fredapi
           - pandas
+          - chromadb
+          - openai

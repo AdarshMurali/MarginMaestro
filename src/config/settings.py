@@ -20,10 +20,8 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
 
-    embeddings_provider: str = "local"
-    embeddings_model: str = "BAAI/bge-small-en-v1.5"
-
-    chroma_persist_dir: str = "./chroma_db"
+    chroma_host: str = "localhost"
+    chroma_port: int = 8100
 
     db_host: str | None = None
     db_port: int = 1433

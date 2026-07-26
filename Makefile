@@ -12,6 +12,9 @@ generate-data:
 batch-load:
 	python -m persistence.batch_loader
 
+ingest-docs:
+	python -m rag.ingest
+
 test:
 	pytest
 

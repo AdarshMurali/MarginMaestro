@@ -27,9 +27,9 @@ dev = [
     "pre-commit",
     "moto",
 ]
-rag = ["chromadb", "sentence-transformers"]
+rag = ["chromadb"]
 streaming = ["confluent-kafka"]
-llm = ["langgraph"]
+llm = ["langgraph", "openai"]
 data = ["yfinance", "pandas", "fredapi", "faker"]
 db = ["sqlalchemy", "pyodbc", "alembic"]
 aws = ["boto3"]
