@@ -21,8 +21,8 @@ It is a **portfolio / proof-of-concept** built to production-engineering standar
 ## Tech stack (don't swap without an ADR)
 
 - **Orchestration:** LangGraph (explicit state-graph over agents).
-- **LLM:** Ollama (local) by default; OpenAI `gpt-4o-mini` optional and usage-minimized.
-- **Embeddings:** local `sentence-transformers` / BGE (free).
+- **LLM:** OpenAI `gpt-4o-mini` (usage-minimized) for this project's development — Ollama isn't viable on the dev machine's specs (see ADR-0006). `LLM_PROVIDER=ollama` remains supported in `Settings` for anyone running on hardware where it works.
+- **Embeddings:** OpenAI `text-embedding-3-small` (see ADR-0006 — supersedes the earlier local BGE choice; query/document embeddings must share one model, and Ollama isn't viable on the dev machine anyway).
 - **RAG store:** ChromaDB. **Relational:** Azure SQL (free tier).
 - **Streaming:** Kafka (Redpanda locally). Flink is **deferred** — only if a genuine windowed job is built (see `docs/adr/0003`).
 - **API:** FastAPI. **Frontend:** Next.js on Vercel.

@@ -41,18 +41,25 @@ The user has a real Azure SQL free-tier instance but has used this month's free 
 
 ## 2. Unstructured data (documents → RAG)
 
-These feed the vector store and are what the RAG agents reason over. For the demo, curate **4–6 well-chosen documents per counterparty** — enough to prove the concept without ballooning ingestion.
+These feed the vector store and are what the RAG agents reason over. Each document type is built in the phase that actually consumes it — building a document nobody queries yet produces untested, unverified corpus, so **Phase 3 builds only what CSA-RAG needs** (see 2a); the rest are built alongside Phase 6/7.
 
-| Document | Role | Source for demo | Consumed by |
-|---|---|---|---|
-| **CSA / Credit Support Annex** (part of the client agreement family) | Threshold, MTA, eligible collateral, haircuts, rating triggers | ISDA public CSA templates + synthetic fill-in | CSA-RAG |
-| **Client / master agreement** | Governing terms (CSA sits within this — treat as one family, don't double-count) | ISDA templates / SEC EDGAR | CSA-RAG |
-| **Margin policy docs** | Internal policy: timing, valuation, thresholds | Synthetic (written for the project) | Orchestrator, CSA-RAG |
-| **Eligible collateral & haircut schedule** | Source of truth for optimizer | Synthetic (often inside CSA) | Collateral Optimizer |
-| **Exception rules** | How to handle edge cases / dispute exceptions | Synthetic | Reconciliation |
-| **Escalation procedures** | When/how to escalate non-response | Synthetic | SLA / Escalation |
-| **Historical margin dispute notes** | Precedent for resolving disputes (retrieve similar past cases) | Synthetic corpus | Reconciliation |
-| **SIMM / IM methodology** | Grounds the IM computation | ISDA SIMM public methodology + synthetic notes | Calculation (reference) |
+| Document | Role | Source for demo | Consumed by | Built in |
+|---|---|---|---|---|
+| **CSA / Credit Support Annex** (part of the client agreement family) | Threshold, MTA, eligible collateral, haircuts, rating triggers | Seeded generator, one per counterparty (varies — not a template) | CSA-RAG | Phase 3 (MM-23) |
+| **Client / master agreement** | Governing terms (CSA sits within this — treat as one family, don't double-count) | Folded into the CSA document itself | CSA-RAG | Phase 3 (MM-23) |
+| **Margin policy docs** | Internal policy: timing, valuation, thresholds — firm-wide, not counterparty-specific | Synthetic (hand-authored for the project) | Orchestrator, CSA-RAG | Phase 3 (MM-23) |
+| **Eligible collateral & haircut schedule** | Source of truth for optimizer | Folded into the per-counterparty CSA document | Collateral Optimizer | Phase 3 (MM-23) |
+| **Exception rules** | How to handle edge cases / dispute exceptions — firm-wide policy | Synthetic | Reconciliation | Phase 7 |
+| **Escalation procedures** | When/how to escalate non-response — firm-wide policy | Synthetic | SLA / Escalation | Phase 6 |
+| **Historical margin dispute notes** | Precedent for resolving disputes (retrieve similar past cases) — tied to specific past events, not 1:1 per counterparty | Synthetic corpus | Reconciliation | Phase 7 |
+| **SIMM / IM methodology** | Reference notes on the IM proxy's methodology — not currently queried by any agent | ISDA SIMM public methodology + synthetic notes | (deferred — no consumer yet) | Deferred |
+
+### 2a. Document corpus & storage (decided Phase 3 planning, 2026-07-26)
+
+- **9 documents total for Phase 3:** 8 per-counterparty CSA docs (`src/rag/csa_corpus.py`, seeded/reproducible — threshold, MTA, eligible collateral, haircuts, and rating triggers all *vary* per counterparty, so retrieval is a real test, not a lookup table in disguise) + 1 shared, hand-authored margin policy doc.
+- **Storage: S3**, not just local disk — a new bucket (`infra/s3.tf`: private, versioned, SSE-encrypted) is the durable source of truth for citations and re-ingestion. ChromaDB only ever holds a derived, rebuildable index (chunks + vectors) of what's in S3 — it is never the source of truth for the raw document text.
+- **Embeddings: OpenAI `text-embedding-3-small`**, not local BGE — see ADR-0006 (supersedes ADR-0004's local-embeddings rationale). Query and document embeddings must come from the same model for similarity search to be meaningful at all, and this machine's RAM constraints (see the WSL2 memory-cap troubleshooting from Phase 1) make a locally-hosted embedding model an added burden that a cheap hosted API avoids.
+- **LLM reasoning: OpenAI `gpt-4o-mini`**, not Ollama — Ollama isn't installed and this machine (8GB RAM) isn't a good fit for running a local LLM alongside everything else already competing for memory.
 
 ## 3. Events (triggers)
 
@@ -67,7 +74,7 @@ The **market simulator** and the **live feed adapter** implement one `MarketFeed
 ## 4. Vector store design (ChromaDB)
 
 - **Chunking:** semantic/section-based for legal docs; keep clauses intact where possible.
-- **Embeddings:** local `BAAI/bge-small-en-v1.5` (free, no API cost).
+- **Embeddings:** OpenAI `text-embedding-3-small` (see ADR-0006 — superseded local `BAAI/bge-small-en-v1.5`; negligible cost at this corpus size, avoids a local model's memory footprint, and keeps query/document embeddings in the same vector space by construction since there's only one embedding call path).
 - **Metadata per chunk:** `counterparty_id`, `doc_type`, `effective_date`, `source_file`, `section`.
 - **Retrieval:** filter by `counterparty_id` + `doc_type` before similarity search → precise, cited answers.
 - **Why Chroma:** free, container-friendly, ample for this document volume. `pgvector` is the alternative if co-locating vectors with relational data is preferred (ADR-0004).
