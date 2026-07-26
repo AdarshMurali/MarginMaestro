@@ -9,6 +9,8 @@ services:
       - .env
     environment:
       KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
     depends_on:
       - redpanda
       - chroma
