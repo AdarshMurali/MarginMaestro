@@ -25,7 +25,11 @@ class TestUploadCorpus:
             Bucket="test-documents-bucket",
             CreateBucketConfiguration={"LocationConstraint": "ap-south-1"},
         )
-        settings = Settings(_env_file=None, s3_documents_bucket="test-documents-bucket")
+        settings = Settings(
+            _env_file=None,
+            s3_documents_bucket="test-documents-bucket",
+            s3_documents_bucket_owner="123456789012",
+        )
 
         uploaded_keys = upload_corpus(corpus_dir, settings=settings)
 
@@ -44,3 +48,19 @@ class TestUploadCorpus:
 
         with pytest.raises(ValueError, match="S3_DOCUMENTS_BUCKET"):
             upload_corpus(corpus_dir, settings=settings)
+
+    def test_missing_bucket_owner_config_raises(self, corpus_dir) -> None:
+        settings = Settings(
+            _env_file=None,
+            s3_documents_bucket="test-documents-bucket",
+            s3_documents_bucket_owner=None,
+        )
+
+        with pytest.raises(ValueError, match="S3_DOCUMENTS_BUCKET_OWNER"):
+            upload_corpus(corpus_dir, settings=settings)
+
+    # No moto-based test for a mismatched ExpectedBucketOwner: moto does not
+    # enforce this check (a wrong owner silently succeeds against the mock),
+    # so such a test would only assert moto's behavior, not this code's.
+    # Verified manually against the real bucket instead -- a mismatched owner
+    # correctly raises AccessDenied (see docs/PROGRESS.md).

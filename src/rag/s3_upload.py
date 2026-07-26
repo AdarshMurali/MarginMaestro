@@ -14,11 +14,18 @@ def upload_corpus(local_dir: Path, settings: Settings | None = None) -> list[str
     settings = settings or get_settings()
     if not settings.s3_documents_bucket:
         raise ValueError("S3_DOCUMENTS_BUCKET is not configured")
+    if not settings.s3_documents_bucket_owner:
+        raise ValueError("S3_DOCUMENTS_BUCKET_OWNER is not configured")
 
     client = boto3.client("s3")
     uploaded_keys: list[str] = []
     for path in sorted(local_dir.rglob("*.md")):
         key = path.relative_to(local_dir).as_posix()
-        client.upload_file(str(path), settings.s3_documents_bucket, key)
+        client.upload_file(
+            str(path),
+            settings.s3_documents_bucket,
+            key,
+            ExtraArgs={"ExpectedBucketOwner": settings.s3_documents_bucket_owner},
+        )
         uploaded_keys.append(key)
     return uploaded_keys
