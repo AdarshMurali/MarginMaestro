@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     kafka_topic_events: str = "market.events"
     kafka_topic_calls: str = "margin.calls"
 
+    fred_api_key: str | None = None
+
     market_feed_mode: str = "simulated"
     market_universe: str = (
         "AAPL,MSFT,GOOGL,AMZN,TSLA,NVDA,META,HPE,JPM,WFC,SPCX,"

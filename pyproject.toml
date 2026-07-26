@@ -63,6 +63,14 @@ ignore_missing_imports = true
 module = "yfinance.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "fredapi.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pandas.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
