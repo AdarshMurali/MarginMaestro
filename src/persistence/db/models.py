@@ -92,6 +92,28 @@ class AuditLogORM(Base):
     created_at: Mapped[datetime]
 
 
+class PriceHistoryORM(Base):
+    """Daily EOD price snapshot per ticker (MM-15 batch loader)."""
+
+    __tablename__ = "price_history"
+
+    ticker: Mapped[str] = mapped_column(String(20), primary_key=True)
+    price_date: Mapped[date] = mapped_column(primary_key=True)
+    price: Mapped[float]
+    currency: Mapped[str] = mapped_column(String(10), default="USD")
+    source: Mapped[str] = mapped_column(String(20))
+
+
+class ReferenceRateORM(Base):
+    """Daily FRED reference rate/yield/VIX snapshot (MM-15 batch loader)."""
+
+    __tablename__ = "reference_rates"
+
+    series_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    rate_date: Mapped[date] = mapped_column(primary_key=True)
+    value: Mapped[float]
+
+
 class TicketORM(Base):
     """Escalation ticket state (MM-62, Phase 6)."""
 
