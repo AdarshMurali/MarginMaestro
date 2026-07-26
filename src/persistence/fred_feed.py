@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
 from fredapi import Fred
@@ -55,4 +55,8 @@ class FredFeed:
         return observations
 
     def get_latest(self, series_id: str) -> RateObservation:
-        return self.get_series(series_id)[-1]
+        # Bounded to a recent window rather than the full history -- some of
+        # these series (e.g. DGS10) go back decades, and fetching everything
+        # just to read the last row risks slow/incomplete responses.
+        recent_start = datetime.now(UTC).date() - timedelta(days=60)
+        return self.get_series(series_id, start=recent_start)[-1]

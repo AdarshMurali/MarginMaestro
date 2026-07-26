@@ -9,6 +9,9 @@ install-dev:
 generate-data:
 	python -m persistence.generators.run
 
+batch-load:
+	python -m persistence.batch_loader
+
 test:
 	pytest
 
