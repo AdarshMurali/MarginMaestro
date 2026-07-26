@@ -76,8 +76,9 @@ Legend — **Type:** `code` (deterministic), `llm` (reasoning/RAG/drafting), `hy
 ## SLA & Escalation (orchestrator-driven)
 
 - **Type:** code + RAG for procedure
-- **Responsibility:** After notification, run the SLA timer (`MARGIN_CALL_SLA_MINUTES`). If the call is met, record and close. If not, follow the **escalation-procedures** document (retrieved via RAG) and open a **Jira ticket** with full context.
-- **Tools:** timer (code); RAG retriever (escalation procedures); Jira MCP tool.
+- **Responsibility:** After notification, run the SLA timer (`MARGIN_CALL_SLA_MINUTES`). If the call is met, record and close. If not, follow the **escalation-procedures** document (retrieved via RAG) and open a **ServiceNow** incident with full context.
+- **Tools:** timer (code); RAG retriever (escalation procedures); ServiceNow MCP tool.
+- **Note:** planned swap from Jira to ServiceNow for this escalation path only (see `docs/ROADMAP.md` Phase 6 note); Jira remains the dev-story tracker (MM-# tickets) and is unaffected. Needs an ADR before it actually changes.
 
 ## Audit (cross-cutting)
 
@@ -97,5 +98,5 @@ Legend — **Type:** `code` (deterministic), `llm` (reasoning/RAG/drafting), `hy
 | Reconciliation | rationale only | rag-retriever | trades (SQL), dispute notes (Chroma) |
 | Collateral Optimizer | narration only | — | inventory (SQL), CSA terms |
 | Communication | drafting | slack | approved call |
-| SLA/Escalation | procedure only | rag-retriever, jira | escalation docs (Chroma) |
+| SLA/Escalation | procedure only | rag-retriever, servicenow | escalation docs (Chroma) |
 | Audit | no | — | writes audit (SQL) |
