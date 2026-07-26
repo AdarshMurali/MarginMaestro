@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from persistence.models import AssetClass
 
@@ -34,3 +34,14 @@ class InitialMargin(BaseModel):
     vix_level: float
     vix_multiplier: float
     initial_margin: float
+
+
+class CSATerms(BaseModel):
+    threshold: float = Field(ge=0)
+    mta: float = Field(ge=0)
+    currency: str = "USD"
+
+
+class BreachResult(BaseModel):
+    breached: bool
+    call_amount: float
