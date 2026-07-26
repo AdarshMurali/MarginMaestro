@@ -15,6 +15,9 @@ batch-load:
 ingest-docs:
 	python -m rag.ingest
 
+mcp-rag-retriever:
+	python -m mcp_servers.rag_retriever
+
 test:
 	pytest
 
