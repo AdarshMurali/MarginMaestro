@@ -17,14 +17,21 @@ At the end of each story, prepend an entry using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** 0 — Foundations. **Complete**. Phase 1 — Data foundation. **Complete**, all merged (MM-11..MM-15, epic MM-10 marked Done). Phase 2 — Calculation engine, in progress. Jira epic MM-16 + stories MM-17..MM-21 created and assigned to the user. MM-17 merged. MM-18 (Variation Margin) done on branch `feature/MM-18-variation-margin`, not yet pushed/merged.
+- **Phase:** 0 — Foundations. **Complete**. Phase 1 — Data foundation. **Complete**, all merged (MM-11..MM-15, epic MM-10 marked Done). Phase 2 — Calculation engine, in progress. Jira epic MM-16 + stories MM-17..MM-21 created and assigned to the user. MM-17, MM-18 merged. MM-19 (Initial Margin) done on branch `feature/MM-19-initial-margin`, not yet pushed/merged.
 - **Docs:** complete — README, CLAUDE.md, ARCHITECTURE, AGENTS, DATA_SOURCES, ROADMAP, ADRs, CONTRIBUTING, TESTING. `DATA_SOURCES.md` documents the 30-ticker securities universe (1a) and the local-vs-real Azure SQL approach (1b). `ROADMAP.md` Phase 2 now has real Jira keys (MM-16..21, replacing the MM-EPIC-2/MM-20..24 placeholder scheme).
-- **Next up:** **MM-19** — Initial Margin (SIMM proxy).
+- **Next up:** **MM-20** — Threshold + MTA breach evaluation.
 - **Blockers:** none. Note: `ROADMAP.md` MM-# numbering for Phase 0 and Phase 1 are real, created keys; later phases still show the original placeholder scheme pending ticket creation.
 
 ---
 
 ## Log
+
+### 2026-07-26 — MM-19: Initial Margin (SIMM proxy) with documented methodology
+- **Done:** `src/calc/im.py` — `compute_initial_margin(mtm, vix_level) -> InitialMargin`: notional (`abs(mtm)`) × asset-class risk weight (equity 15%, ETF 10%, crypto 30%, with a Treasury-ETF override of 2% via `persistence.generators.securities.TREASURY_ETF_TICKERS`), summed across positions and scaled by a VIX multiplier (`vix_level / 20.0`, floored at 0.5, capped at 3.0). New `InitialMargin` model in `src/calc/models.py`. `PositionMTM` (MM-17) gained an `asset_class` field — needed to look up the risk weight, threaded through from `Position.asset_class` in `compute_mtm()`.
+- **Decisions:** This is an explicitly documented SIMM *proxy*, not a certified ISDA SIMM engine — directionally correct only, per `CLAUDE.md` golden rule 1 / ADR-0005. Risk weights and the VIX baseline/floor/cap are illustrative constants confirmed with the user during Phase 2 planning, not calibrated to any real methodology. Uses `abs(mtm)` so short positions carry IM too (margin applies regardless of direction). Composes on `compute_mtm()`'s `PortfolioMTM` output, consistent with MM-18's pattern, rather than re-deriving notional from raw positions/prices. Non-positive `vix_level` fails loud (`PricingError`) rather than producing a nonsensical multiplier.
+- **Changed:** `src/calc/models.py` (`InitialMargin`; `PositionMTM` gained `asset_class`); `src/calc/mtm.py` (threads `asset_class` through); new `src/calc/im.py`; new `tests/unit/test_calc_im.py` (6 tests: baseline/elevated/floored/capped VIX, crypto + short-position absolute notional, non-positive VIX raises); `tests/unit/test_calc_vm.py`'s fixture helper updated for the new required field.
+- **Known issues / tech debt:** none.
+- **Next step:** **MM-20** — Threshold + MTA breach evaluation, the last piece before MM-21's golden-value suite ties MTM→VM→IM→breach together end-to-end.
 
 ### 2026-07-26 — MM-18: Variation Margin computation
 - **Done:** `src/calc/vm.py` — `compute_variation_margin(mtm_today, mtm_prior) -> VariationMargin`: takes two `PortfolioMTM` snapshots (MM-17's output — e.g. sourced from today's and yesterday's `price_history` rows) and returns the day-over-day change. New `VariationMargin` model (`portfolio_id`, `mtm_today`, `mtm_prior`, `variation_margin`) added to `src/calc/models.py`.

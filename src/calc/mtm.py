@@ -30,6 +30,7 @@ def compute_mtm(positions: list[Position], prices: dict[str, float]) -> Portfoli
             PositionMTM(
                 position_id=position.id,
                 ticker=position.ticker,
+                asset_class=position.asset_class,
                 quantity=position.quantity,
                 price=price,
                 mtm=position.quantity * price,

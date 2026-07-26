@@ -2,6 +2,7 @@ import pytest
 
 from calc.models import PortfolioMTM, PositionMTM, PricingError
 from calc.vm import compute_variation_margin
+from persistence.models import AssetClass
 
 
 def _portfolio_mtm(portfolio_id: str, total_mtm: float) -> PortfolioMTM:
@@ -9,7 +10,12 @@ def _portfolio_mtm(portfolio_id: str, total_mtm: float) -> PortfolioMTM:
         portfolio_id=portfolio_id,
         positions=[
             PositionMTM(
-                position_id="POS-1", ticker="AAPL", quantity=1, price=total_mtm, mtm=total_mtm
+                position_id="POS-1",
+                ticker="AAPL",
+                asset_class=AssetClass.EQUITY,
+                quantity=1,
+                price=total_mtm,
+                mtm=total_mtm,
             )
         ],
         total_mtm=total_mtm,
