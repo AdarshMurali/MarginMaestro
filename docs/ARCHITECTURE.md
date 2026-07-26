@@ -59,7 +59,7 @@ The hard parts are not the arithmetic — they are interpreting bespoke legal ag
 (10) SLA timer              wait up to MARGIN_CALL_SLA_MINUTES
         │
         ├── met ─────▶ record collateral received → settle → close
-        └── not met ─▶ (11) Escalate per escalation-procedures doc → open Jira ticket
+        └── not met ─▶ (11) Escalate per escalation-procedures doc → open ServiceNow incident
         │
         ▼
 (12) Audit                  every step above written to the immutable audit log
@@ -152,7 +152,7 @@ SIMM methodology, collateral schedule)                       ▼
 1. **Ingress:** ticks/events → Kafka. Reference data (positions, ratings, collateral inventory, CSAs) loaded to Azure SQL / Chroma.
 2. **Processing:** Event Agent → Orchestrator → specialist agents; math from SQL data, terms from Chroma.
 3. **Decision:** breach evaluation → human approval.
-4. **Egress:** Slack notification; Jira ticket on escalation; audit log to SQL.
+4. **Egress:** Slack notification; ServiceNow incident on escalation; audit log to SQL.
 5. **Presentation:** FastAPI exposes state; Next.js dashboard streams updates (WebSocket/SSE).
 
 ## 9. Component / deployment view
@@ -171,7 +171,7 @@ SIMM methodology, collateral schedule)                       ▼
 │  Config/secrets: AWS Parameter Store (SecureString)          │
 │  Azure SQL (free tier): positions, ratings, audit, tickets   │
 └──────────────────────────────────────────────────────────────┘
-        │ Slack API           │ Jira API           │ LLM (Ollama local / OpenAI)
+        │ Slack API           │ ServiceNow API     │ LLM (Ollama local / OpenAI)
         ▼                     ▼                    ▼
    client notices        escalations           reasoning only
 ```
@@ -180,7 +180,7 @@ All services are **containerized** (Docker), images pushed to **Docker Hub**, de
 
 ## 10. Cross-cutting concerns
 
-**Security & secrets.** No secrets in code; all via AWS Parameter Store (SecureString) in deployed envs, `.env` locally. Least-privilege IAM for AWS resources. Slack/Jira tokens scoped minimally.
+**Security & secrets.** No secrets in code; all via AWS Parameter Store (SecureString) in deployed envs, `.env` locally. Least-privilege IAM for AWS resources. Slack/ServiceNow tokens scoped minimally.
 
 **Observability.** Structured JSON logging with a per-run correlation id; every agent action logged. Health/readiness endpoints on the API. Optional OpenTelemetry traces + a Prometheus/Grafana panel to visualize agent activity.
 

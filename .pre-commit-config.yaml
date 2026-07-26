@@ -24,3 +24,5 @@ repos:
           - sqlalchemy
           - httpx
           - yfinance
+          - fredapi
+          - pandas
