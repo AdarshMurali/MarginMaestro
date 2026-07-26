@@ -17,14 +17,22 @@ At the end of each story, prepend an entry using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** 0 — Foundations. **Complete**. Phase 1 — Data foundation. **Complete**, all merged (MM-11..MM-15, epic MM-10 marked Done). Phase 2 — Calculation engine, in progress. Jira epic MM-16 + stories MM-17..MM-21 created and assigned to the user. MM-17, MM-18, MM-19 merged. MM-20 (breach evaluation) done on branch `feature/MM-20-breach-evaluation`, not yet pushed/merged.
+- **Phase:** 0 — Foundations. **Complete**. Phase 1 — Data foundation. **Complete**, all merged (MM-11..MM-15, epic MM-10 marked Done). Phase 2 — Calculation engine, nearly complete. Jira epic MM-16 + stories MM-17..MM-21 created and assigned to the user. MM-17, MM-18, MM-19, MM-20 merged. MM-21 (golden-value suite) done on branch `feature/MM-21-golden-value-suite`, not yet pushed/merged — this closes out Phase 2.
 - **Docs:** complete — README, CLAUDE.md, ARCHITECTURE, AGENTS, DATA_SOURCES, ROADMAP, ADRs, CONTRIBUTING, TESTING. `DATA_SOURCES.md` documents the 30-ticker securities universe (1a) and the local-vs-real Azure SQL approach (1b). `ROADMAP.md` Phase 2 now has real Jira keys (MM-16..21, replacing the MM-EPIC-2/MM-20..24 placeholder scheme).
-- **Next up:** **MM-21** — Golden-value test suite (chains MTM→VM→IM→breach end-to-end); closes out Phase 2.
+- **Next up:** Phase 2 exit criteria will be met once MM-21 merges (given a portfolio + prices + CSA terms, the engine returns a correct, tested call amount — proven by the golden suite). Then a Phase 3 planning/approval pass (RAG pipeline: CSA document ingestion + retrieval) before creating Jira tickets.
 - **Blockers:** none. Note: `ROADMAP.md` MM-# numbering for Phase 0 and Phase 1 are real, created keys; later phases still show the original placeholder scheme pending ticket creation.
 
 ---
 
 ## Log
+
+### 2026-07-26 — MM-21: Golden-value test suite — Phase 2 complete
+- **Done:** `tests/unit/test_calc_golden.py` — chains `compute_mtm()` → `compute_variation_margin()` → `compute_initial_margin()` → `evaluate_breach()` end-to-end using real (not mocked) functions, against one shared 4-position portfolio (equity + ETF + Treasury ETF + crypto) with hand-computed expected values asserted at *every* stage, not just the final result: MTM today ($93,800), MTM prior ($90,500), VM ($3,300), IM at VIX=20 ($16,496), exposure ($19,796). Four scenarios vary threshold/MTA/collateral against that same fixed exposure: no breach (threshold above exposure), no call (shortfall below MTA), collateral reducing a breach to exactly the MTA, and a full breach with no collateral.
+- **Decisions:** Reused one shared position/price fixture across all four scenarios (varying only the CSA terms/collateral per test) rather than four independent portfolios — keeps the arithmetic traceable by hand and makes clear that the same exposure produces different outcomes purely from CSA terms, which is the actual point of a "golden value" suite. Each intermediate value (MTM/VM/IM) is asserted via a shared `_compute_exposure()` helper so a regression in any earlier calc module fails at the stage it actually breaks, not just at the final breach assertion.
+- **Changed:** new `tests/unit/test_calc_golden.py` (4 tests, chaining all of MM-17..MM-20).
+- **Known issues / tech debt:** none. `src/calc/` (models, mtm, vm, im, breach) is at 100% coverage across the whole calc unit suite (27 tests).
+- **Phase 2 exit criteria met:** given a portfolio + prices + CSA terms, the engine returns a correct, tested call amount — proven end-to-end by this suite, not just per-module.
+- **Next step:** Phase 3 planning/approval pass — the RAG pipeline (CSA document ingestion, ChromaDB, retriever, CSA-RAG Agent) is next per `docs/ROADMAP.md`.
 
 ### 2026-07-26 — MM-20: Threshold + MTA breach evaluation
 - **Done:** `src/calc/breach.py` — `evaluate_breach(exposure, collateral_held, csa_terms) -> BreachResult`. Standard CSA mechanics: `required_support = max(0, exposure - threshold)`; `delivery_amount = required_support - collateral_held`; a call is triggered only when there's an actual shortfall (`delivery_amount > 0`) that also clears the MTA materiality gate (`delivery_amount >= mta`). New `CSATerms` (threshold, mta, currency, both fields `ge=0`) and `BreachResult` (breached, call_amount) models in `src/calc/models.py`.
