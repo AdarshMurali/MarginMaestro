@@ -49,13 +49,15 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 
 **Exit criteria:** given a portfolio + prices + CSA terms, the engine returns a correct, tested call amount.
 
-## Phase 3 — RAG pipeline (Epic: MM-EPIC-3)
+## Phase 3 — RAG pipeline (Epic: MM-22)
 
-- **MM-30** Assemble the demo document corpus (CSA templates + synthetic policy/exception/escalation/dispute docs).
-- **MM-31** Ingestion: chunk + embed (local BGE) + load ChromaDB with metadata.
-- **MM-32** Retriever service (filter by counterparty + doc_type), exposed as an MCP tool.
-- **MM-33** **CSA-RAG Agent**: return threshold/MTA/eligible collateral/haircuts with citations; parse to validated structured terms.
-- **MM-34** RAG tests: retrieval precision on seeded questions; citation presence.
+> Documents live in S3 (source of truth for citations + re-ingestion); embedded with OpenAI `text-embedding-3-small` (query and document embeddings must share one model — see ADR-0006, superseding ADR-0004's local-BGE decision); agent reasoning via OpenAI `gpt-4o-mini` (Ollama not viable on this dev machine). Corpus: 8 per-counterparty CSA docs + 1 shared margin policy doc (9 total) — only the document types Phase 3 actually consumes; exception rules/escalation procedures/dispute notes/SIMM methodology are built in the phases that consume them (6, 7).
+
+- **MM-23** Assemble the demo document corpus (S3-backed): 8 seeded per-counterparty CSA docs + 1 shared margin policy doc.
+- **MM-24** Ingestion: chunk + embed (OpenAI) + load ChromaDB with metadata.
+- **MM-25** Retriever service (filter by counterparty + doc_type), exposed as an MCP tool.
+- **MM-26** **CSA-RAG Agent**: return threshold/MTA/eligible collateral/haircuts with citations; parse to validated structured terms.
+- **MM-27** RAG tests: retrieval precision on seeded questions; citation presence.
 
 **Exit criteria:** "what are CP-7's CSA terms?" returns correct, cited, structured terms.
 

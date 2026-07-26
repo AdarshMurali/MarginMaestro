@@ -38,6 +38,9 @@ class Settings(BaseSettings):
 
     fred_api_key: str | None = None
 
+    s3_documents_bucket: str | None = None
+    s3_documents_bucket_owner: str | None = None
+
     market_feed_mode: str = "simulated"
     market_universe: str = (
         "AAPL,MSFT,GOOGL,AMZN,TSLA,NVDA,META,HPE,JPM,WFC,SPCX,"
