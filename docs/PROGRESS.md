@@ -17,14 +17,21 @@ At the end of each story, prepend an entry using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** 0 — Foundations. **Complete**. Phase 1 — Data foundation. **Complete**, all merged (MM-11..MM-15, epic MM-10 marked Done). Phase 2 — Calculation engine, in progress. Jira epic MM-16 + stories MM-17..MM-21 created and assigned to the user. MM-17 (MTM valuation) done on branch `feature/MM-17-mtm-valuation`, not yet pushed/merged.
+- **Phase:** 0 — Foundations. **Complete**. Phase 1 — Data foundation. **Complete**, all merged (MM-11..MM-15, epic MM-10 marked Done). Phase 2 — Calculation engine, in progress. Jira epic MM-16 + stories MM-17..MM-21 created and assigned to the user. MM-17 merged. MM-18 (Variation Margin) done on branch `feature/MM-18-variation-margin`, not yet pushed/merged.
 - **Docs:** complete — README, CLAUDE.md, ARCHITECTURE, AGENTS, DATA_SOURCES, ROADMAP, ADRs, CONTRIBUTING, TESTING. `DATA_SOURCES.md` documents the 30-ticker securities universe (1a) and the local-vs-real Azure SQL approach (1b). `ROADMAP.md` Phase 2 now has real Jira keys (MM-16..21, replacing the MM-EPIC-2/MM-20..24 placeholder scheme).
-- **Next up:** **MM-18** — Variation Margin computation.
+- **Next up:** **MM-19** — Initial Margin (SIMM proxy).
 - **Blockers:** none. Note: `ROADMAP.md` MM-# numbering for Phase 0 and Phase 1 are real, created keys; later phases still show the original placeholder scheme pending ticket creation.
 
 ---
 
 ## Log
+
+### 2026-07-26 — MM-18: Variation Margin computation
+- **Done:** `src/calc/vm.py` — `compute_variation_margin(mtm_today, mtm_prior) -> VariationMargin`: takes two `PortfolioMTM` snapshots (MM-17's output — e.g. sourced from today's and yesterday's `price_history` rows) and returns the day-over-day change. New `VariationMargin` model (`portfolio_id`, `mtm_today`, `mtm_prior`, `variation_margin`) added to `src/calc/models.py`.
+- **Decisions:** Deliberately composes on `compute_mtm()`'s output (`PortfolioMTM`) rather than taking raw floats — retains `portfolio_id` for a fail-loud mismatch check (same convention as MM-17) and keeps the today/prior values traceable in the result rather than just the delta. No new persistence/DB work — Phase 2 stays a pure calculation library; sourcing the two `price_history` snapshots is Phase 5's (orchestrator) job.
+- **Changed:** `src/calc/models.py` (`VariationMargin`); new `src/calc/vm.py`; new `tests/unit/test_calc_vm.py` (4 tests: rise, drop, unchanged, mismatched-portfolio, all hand-computed).
+- **Known issues / tech debt:** none.
+- **Next step:** **MM-19** — Initial Margin (SIMM proxy): asset-class risk weights scaled by a VIX multiplier (MM-14's `VIXCLS`).
 
 ### 2026-07-26 — MM-17: MTM valuation from positions + prices — Phase 2 kickoff
 - **Done:** `src/calc/models.py` (`PricingError`, `PositionMTM`, `PortfolioMTM` — the shared calc I/O models this phase will keep extending) and `src/calc/mtm.py` (`compute_mtm(positions, prices) -> PortfolioMTM`: quantity × price per position, summed to a portfolio total). Pure function, no DB/RAG/orchestrator — matches Phase 2's "self-contained deterministic library" scope decision.

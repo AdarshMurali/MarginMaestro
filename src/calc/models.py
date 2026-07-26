@@ -17,3 +17,10 @@ class PortfolioMTM(BaseModel):
     portfolio_id: str
     positions: list[PositionMTM]
     total_mtm: float
+
+
+class VariationMargin(BaseModel):
+    portfolio_id: str
+    mtm_today: float
+    mtm_prior: float
+    variation_margin: float
