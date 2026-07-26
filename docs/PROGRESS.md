@@ -17,14 +17,21 @@ At the end of each story, prepend an entry using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** 0 — Foundations. **Complete**. Phase 1 — Data foundation. **Complete**, all merged (MM-11..MM-15, epic MM-10 marked Done). Phase 2 — Calculation engine, in progress. Jira epic MM-16 + stories MM-17..MM-21 created and assigned to the user. MM-17, MM-18 merged. MM-19 (Initial Margin) done on branch `feature/MM-19-initial-margin`, not yet pushed/merged.
+- **Phase:** 0 — Foundations. **Complete**. Phase 1 — Data foundation. **Complete**, all merged (MM-11..MM-15, epic MM-10 marked Done). Phase 2 — Calculation engine, in progress. Jira epic MM-16 + stories MM-17..MM-21 created and assigned to the user. MM-17, MM-18, MM-19 merged. MM-20 (breach evaluation) done on branch `feature/MM-20-breach-evaluation`, not yet pushed/merged.
 - **Docs:** complete — README, CLAUDE.md, ARCHITECTURE, AGENTS, DATA_SOURCES, ROADMAP, ADRs, CONTRIBUTING, TESTING. `DATA_SOURCES.md` documents the 30-ticker securities universe (1a) and the local-vs-real Azure SQL approach (1b). `ROADMAP.md` Phase 2 now has real Jira keys (MM-16..21, replacing the MM-EPIC-2/MM-20..24 placeholder scheme).
-- **Next up:** **MM-20** — Threshold + MTA breach evaluation.
+- **Next up:** **MM-21** — Golden-value test suite (chains MTM→VM→IM→breach end-to-end); closes out Phase 2.
 - **Blockers:** none. Note: `ROADMAP.md` MM-# numbering for Phase 0 and Phase 1 are real, created keys; later phases still show the original placeholder scheme pending ticket creation.
 
 ---
 
 ## Log
+
+### 2026-07-26 — MM-20: Threshold + MTA breach evaluation
+- **Done:** `src/calc/breach.py` — `evaluate_breach(exposure, collateral_held, csa_terms) -> BreachResult`. Standard CSA mechanics: `required_support = max(0, exposure - threshold)`; `delivery_amount = required_support - collateral_held`; a call is triggered only when there's an actual shortfall (`delivery_amount > 0`) that also clears the MTA materiality gate (`delivery_amount >= mta`). New `CSATerms` (threshold, mta, currency, both fields `ge=0`) and `BreachResult` (breached, call_amount) models in `src/calc/models.py`.
+- **Decisions:** The `delivery_amount > 0` gate (not just `>= mta`) exists specifically so `mta=0` doesn't turn "exactly covered, zero shortfall" into a spurious zero-dollar breach — verified with a dedicated test. Over-collateralization never produces a negative call (call direction only; returning excess collateral is out of scope, confirmed in the original Phase 2 design). `exposure` is taken as a plain float rather than composed from `VariationMargin`/`InitialMargin` internally — MM-21's golden suite will do that composition explicitly (VM + IM) since combining them is a chaining concern, not something `evaluate_breach` itself needs to own.
+- **Changed:** `src/calc/models.py` (`CSATerms`, `BreachResult`); new `src/calc/breach.py`; new `tests/unit/test_calc_breach.py` (8 tests, hand-computed: no breach below threshold, no breach at exact threshold, shortfall below MTA doesn't call, shortfall clearing MTA breaches, existing collateral reduces/eliminates the call, over-collateralization never goes negative, zero threshold/MTA still requires a positive shortfall).
+- **Known issues / tech debt:** none.
+- **Next step:** **MM-21** — Golden-value test suite, chaining MTM→VM→IM→breach end-to-end through 3-4 hand-computed worked scenarios. Closes out Phase 2.
 
 ### 2026-07-26 — MM-19: Initial Margin (SIMM proxy) with documented methodology
 - **Done:** `src/calc/im.py` — `compute_initial_margin(mtm, vix_level) -> InitialMargin`: notional (`abs(mtm)`) × asset-class risk weight (equity 15%, ETF 10%, crypto 30%, with a Treasury-ETF override of 2% via `persistence.generators.securities.TREASURY_ETF_TICKERS`), summed across positions and scaled by a VIX multiplier (`vix_level / 20.0`, floored at 0.5, capped at 3.0). New `InitialMargin` model in `src/calc/models.py`. `PositionMTM` (MM-17) gained an `asset_class` field — needed to look up the risk weight, threaded through from `Position.asset_class` in `compute_mtm()`.
