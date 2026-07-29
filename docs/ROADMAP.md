@@ -109,6 +109,7 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 - **MM-83** **Agent activity / orchestration trace** (the showpiece).
 - **MM-84** Approval control + SLA/escalation view.
 - **MM-85** "Simulate event" panel to trigger the lifecycle live.
+- **TBD** UI/UX design pass (visual design system, copy/tone/taglines) + user login & roles (e.g. Approver vs Viewer) — not yet scoped, to be planned when Phase 8 starts.
 
 **Exit criteria:** a viewer can inject an event and watch the whole lifecycle unfold on screen.
 
