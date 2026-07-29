@@ -27,7 +27,7 @@ dev = [
     "pre-commit",
     "moto",
 ]
-rag = ["chromadb", "mcp"]
+rag = ["chromadb", "mcp<2.0"]
 streaming = ["confluent-kafka"]
 llm = ["langgraph", "openai"]
 data = ["yfinance", "pandas", "fredapi", "faker"]
