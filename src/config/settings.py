@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = "localhost:19092"
     kafka_topic_prices: str = "market.prices"
     kafka_topic_events: str = "market.events"
+    kafka_topic_impact: str = "market.impact"
     kafka_topic_calls: str = "margin.calls"
 
     fred_api_key: str | None = None

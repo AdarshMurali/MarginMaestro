@@ -20,3 +20,17 @@ class MarketEvent(BaseModel):
     tickers: list[str] = []
     description: str
     occurred_at: datetime
+
+
+class ImpactSet(BaseModel):
+    """The Event Agent's (MM-31) output: which counterparties a classified
+    market event affects. Published on its own topic (market.impact), not
+    back onto market.events, so the Event Agent never re-consumes its own
+    output. event_id ties back to the originating price tick or MarketEvent
+    and doubles as the idempotency key."""
+
+    event_id: str
+    event_type: MarketEventType
+    counterparty_ids: list[str]
+    reason: str
+    occurred_at: datetime
