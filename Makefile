@@ -1,4 +1,4 @@
-.PHONY: install install-dev test test-unit cov lint fmt clean
+.PHONY: install install-dev test test-unit cov lint fmt clean simulate
 
 install:
 	pip install -e .
@@ -14,6 +14,9 @@ batch-load:
 
 ingest-docs:
 	python -m rag.ingest
+
+simulate:
+	python -m streaming.simulate_cli --scenario $(SCENARIO)
 
 mcp-rag-retriever:
 	python -m mcp_servers.rag_retriever

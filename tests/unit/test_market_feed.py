@@ -128,10 +128,11 @@ class TestGetMarketFeed:
         settings = Settings(_env_file=None, market_feed_mode="live")
         assert isinstance(get_market_feed(settings), CompositeMarketFeed)
 
-    def test_simulated_mode_not_yet_implemented(self) -> None:
+    def test_simulated_mode_returns_simulated_feed(self) -> None:
+        from streaming.simulator import SimulatedMarketFeed
+
         settings = Settings(_env_file=None, market_feed_mode="simulated")
-        with pytest.raises(NotImplementedError):
-            get_market_feed(settings)
+        assert isinstance(get_market_feed(settings), SimulatedMarketFeed)
 
     def test_unknown_mode_raises_value_error(self) -> None:
         settings = Settings(_env_file=None, market_feed_mode="bogus")
