@@ -61,13 +61,13 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 
 **Exit criteria:** "what are CP-7's CSA terms?" returns correct, cited, structured terms.
 
-## Phase 4 — Streaming & Event Agent (Epic: MM-EPIC-4)
+## Phase 4 — Streaming & Event Agent (Epic: MM-28)
 
-- **MM-40** Kafka topics + producer/consumer wiring (Redpanda locally).
-- **MM-41** **Market simulator** producer: scripted scenarios (price shock, vol spike, downgrade) → `market.prices`/`market.events`.
-- **MM-42** **Event Agent**: consume, classify, map event → affected entities (curated universe); emit impact set with idempotency key.
-- **MM-43** Live feed adapter path (`MARKET_FEED_MODE=live`) sharing the same topic.
-- **MM-44** Streaming integration tests with `testcontainers`.
+- **MM-29** Kafka topics + producer/consumer wiring (Redpanda locally).
+- **MM-30** **Market simulator** producer: scripted scenarios (price shock, vol spike, downgrade) → `market.prices`/`market.events`.
+- **MM-31** **Event Agent**: consume, classify, map event → affected entities (curated universe); emit impact set with idempotency key.
+- **MM-32** Live feed adapter path (`MARKET_FEED_MODE=live`) sharing the same topic.
+- **MM-33** Streaming integration tests with `testcontainers`.
 
 **Exit criteria:** injecting a synthetic shock produces an impact set on the stream, idempotently.
 
