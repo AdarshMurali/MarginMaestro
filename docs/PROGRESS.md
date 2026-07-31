@@ -17,7 +17,7 @@ At the end of each story, prepend an entry using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** 0 — Foundations. **Complete**. Phase 1 — Data foundation. **Complete** (epic MM-10 Done). Phase 2 — Calculation engine. **Complete** (epic MM-16 Done). Phase 3 — RAG pipeline. MM-23, MM-24, MM-25, MM-26 merged (PR #23, `c41ee0e`). MM-27 done on branch `feature/MM-27-rag-precision-tests`, not yet pushed/merged — closes Phase 3.
+- **Phase:** 0 — Foundations. **Complete**. Phase 1 — Data foundation. **Complete** (epic MM-10 Done). Phase 2 — Calculation engine. **Complete** (epic MM-16 Done). Phase 3 — RAG pipeline. **Complete** (epic MM-22 Done). MM-23..MM-27 all merged (MM-27 via PR #24, `dd4e455`).
 - **Docs:** complete — README, CLAUDE.md, ARCHITECTURE, AGENTS, DATA_SOURCES, ROADMAP, ADRs (now through 0006), CONTRIBUTING, TESTING. `ROADMAP.md` Phase 3 now has real Jira keys (MM-22..27). `ROADMAP.md` Phase 8 has a new placeholder line flagging UI/UX design + user login/roles as unscoped (to be planned when Phase 8 starts). `CLAUDE.md`'s embeddings/LLM lines updated per ADR-0006. `CLAUDE.md`'s structure line says `src/mcp_servers/` (renamed from `src/mcp/` in MM-25).
 - **Next up:** Phase 4 — start planning per the phase workflow protocol (plan + get user approval before coding).
 - **Blockers:** none, but see MM-27's known issue below — `test_ingest_live.py` (MM-24) currently fails with a real S3 `AccessDenied` on `ListObjectsV2`, unrelated to MM-27, likely AWS credential/permission drift since MM-24 was last verified live. Note: `ROADMAP.md` MM-# numbering for Phase 0 and Phase 1 are real, created keys; later phases still show the original placeholder scheme pending ticket creation.
