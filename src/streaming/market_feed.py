@@ -127,8 +127,7 @@ def get_market_feed(settings: Settings | None = None) -> MarketFeed:
     if settings.market_feed_mode == "live":
         return CompositeMarketFeed()
     if settings.market_feed_mode == "simulated":
-        raise NotImplementedError(
-            "Simulated market feed lands in Phase 4 (market simulator story); "
-            "set MARKET_FEED_MODE=live to use the real yfinance/CoinGecko adapters."
-        )
+        from streaming.simulator import SimulatedMarketFeed
+
+        return SimulatedMarketFeed()
     raise ValueError(f"Unknown MARKET_FEED_MODE: {settings.market_feed_mode!r}")
