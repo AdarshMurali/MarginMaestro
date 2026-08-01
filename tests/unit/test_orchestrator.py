@@ -12,10 +12,14 @@ from agents.orchestrator import (
     _latest_vix,
     _load_positions,
     _route_after_breach,
+    await_approval,
     build_orchestrator_graph,
     compute_exposure,
     evaluate_breach_node,
     fetch_csa_terms,
+    resume_run,
+    start_run,
+    thread_id_for,
 )
 from calc.models import BreachResult, CSATerms, InitialMargin, PricingError, VariationMargin
 from config.settings import Settings
@@ -296,9 +300,10 @@ class TestBuildOrchestratorGraph:
                 market_feed=market_feed,
                 settings=Settings(_env_file=None),
             )
-            result = graph.invoke(_state())
+            result = start_run(graph, _state())
 
         assert result["breach_result"].breached is True
+        assert "__interrupt__" in result  # paused at await_approval, not auto-approved
 
     def test_no_breach_scenario_ends_without_call(self, session_factory) -> None:
         _seed_position(session_factory, "CP-1", "TSLA", 100)
@@ -332,6 +337,128 @@ class TestBuildOrchestratorGraph:
                 market_feed=market_feed,
                 settings=Settings(_env_file=None),
             )
-            result = graph.invoke(_state())
+            result = start_run(graph, _state())
 
         assert result["breach_result"].breached is False
+        assert "__interrupt__" not in result  # no-breach ends the run outright
+
+    def test_pause_then_resume_completes_the_run_with_the_approval_decision(
+        self, session_factory
+    ) -> None:
+        _seed_position(session_factory, "CP-1", "TSLA", 1000)
+        with session_factory() as session:
+            session.add(
+                PriceHistoryORM(
+                    ticker="TSLA",
+                    price_date=date(2026, 7, 30),
+                    price=100.0,
+                    currency="USD",
+                    source="yfinance",
+                )
+            )
+            session.add(
+                ReferenceRateORM(series_id="VIXCLS", rate_date=date(2026, 7, 30), value=20.0)
+            )
+            session.add(
+                CollateralItemORM(
+                    id="C1",
+                    counterparty_id="CP-1",
+                    collateral_type="cash",
+                    value_usd=0.0,
+                    haircut_pct=0.0,
+                )
+            )
+            session.commit()
+
+        market_feed = MagicMock()
+        market_feed.get_prices.return_value = {
+            "TSLA": PriceQuote(
+                ticker="TSLA", price=500.0, as_of=datetime.now(UTC), source="yfinance"
+            )
+        }
+        state = _state()
+
+        with patch(
+            "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+        ):
+            graph = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=market_feed,
+                settings=Settings(_env_file=None),
+            )
+            paused = start_run(graph, state)
+            assert "__interrupt__" in paused
+
+            resumed = resume_run(
+                graph, thread_id_for(state.impact, state.counterparty_id), {"decision": "approved"}
+            )
+
+        assert "__interrupt__" not in resumed
+        assert resumed["approval_decision"] == "approved"
+        assert resumed["adjusted_call_amount"] is None
+
+    def test_resume_with_adjusted_decision_carries_the_adjusted_amount(
+        self, session_factory
+    ) -> None:
+        _seed_position(session_factory, "CP-1", "TSLA", 1000)
+        with session_factory() as session:
+            session.add(
+                PriceHistoryORM(
+                    ticker="TSLA",
+                    price_date=date(2026, 7, 30),
+                    price=100.0,
+                    currency="USD",
+                    source="yfinance",
+                )
+            )
+            session.add(
+                ReferenceRateORM(series_id="VIXCLS", rate_date=date(2026, 7, 30), value=20.0)
+            )
+            session.add(
+                CollateralItemORM(
+                    id="C1",
+                    counterparty_id="CP-1",
+                    collateral_type="cash",
+                    value_usd=0.0,
+                    haircut_pct=0.0,
+                )
+            )
+            session.commit()
+
+        market_feed = MagicMock()
+        market_feed.get_prices.return_value = {
+            "TSLA": PriceQuote(
+                ticker="TSLA", price=500.0, as_of=datetime.now(UTC), source="yfinance"
+            )
+        }
+        state = _state()
+
+        with patch(
+            "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+        ):
+            graph = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=market_feed,
+                settings=Settings(_env_file=None),
+            )
+            start_run(graph, state)
+            resumed = resume_run(
+                graph,
+                thread_id_for(state.impact, state.counterparty_id),
+                {"decision": "adjusted", "adjusted_call_amount": 42_000.0},
+            )
+
+        assert resumed["approval_decision"] == "adjusted"
+        assert resumed["adjusted_call_amount"] == 42_000.0
+
+
+class TestAwaitApproval:
+    def test_raises_if_breach_result_missing(self) -> None:
+        with pytest.raises(PricingError):
+            await_approval(_state())
+
+
+class TestThreadIdFor:
+    def test_combines_event_id_and_counterparty_id(self) -> None:
+        state = _state("CP-7")
+        assert thread_id_for(state.impact, state.counterparty_id) == "evt-1:CP-7"

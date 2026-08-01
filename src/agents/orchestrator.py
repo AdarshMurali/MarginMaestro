@@ -1,8 +1,12 @@
 from datetime import UTC, datetime
 from typing import Literal
 
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command, interrupt
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -44,6 +48,7 @@ class MarginCallState(BaseModel):
     csa_terms: CSATerms | None = None
     breach_result: BreachResult | None = None
     approval_decision: Literal["approved", "rejected", "adjusted"] | None = None
+    adjusted_call_amount: float | None = None
 
 
 def _load_positions(session: Session, counterparty_id: str) -> list[Position]:
@@ -142,8 +147,33 @@ def evaluate_breach_node(state: MarginCallState, session: Session) -> dict:
 
 
 def await_approval(state: MarginCallState) -> dict:
-    """Placeholder -- real interrupt()/Command(resume=...) gate lands in MM-37."""
-    return {}
+    """Pauses the graph (LangGraph interrupt()) carrying the proposed call
+    amount, resuming on Command(resume={"decision": ..., "adjusted_call_amount":
+    ...}). "decision" must be one of MarginCallState.approval_decision's
+    literals; "adjusted_call_amount" only matters when decision == "adjusted".
+    Provisional endpoint -- see MM-37 note in docs/ROADMAP.md."""
+    if state.breach_result is None:
+        raise PricingError("await_approval requires breach_result to already be set")
+
+    payload = {
+        "correlation_id": state.correlation_id,
+        "counterparty_id": state.counterparty_id,
+        "call_amount": state.breach_result.call_amount,
+        "currency": state.csa_terms.currency if state.csa_terms else "USD",
+    }
+    resume = interrupt(payload)
+
+    decision = resume["decision"]
+    return {
+        "approval_decision": decision,
+        # Explicit key even when None: LangGraph's Pydantic-schema state only
+        # returns channels that were actually written at least once (exclude_unset
+        # semantics) -- omitting this key on non-"adjusted" decisions would leave
+        # it missing from invoke()'s result dict entirely, not just None.
+        "adjusted_call_amount": (
+            resume.get("adjusted_call_amount") if decision == "adjusted" else None
+        ),
+    }
 
 
 def _route_after_breach(state: MarginCallState) -> str:
@@ -152,18 +182,43 @@ def _route_after_breach(state: MarginCallState) -> str:
     return END
 
 
+def thread_id_for(impact: ImpactSet, counterparty_id: str) -> str:
+    """The checkpointer's run key. Matches MM-38's planned event_id +
+    counterparty_id idempotency key -- adopted early here since interrupt()/
+    resume needs a stable thread_id regardless."""
+    return f"{impact.event_id}:{counterparty_id}"
+
+
+def start_run(graph: CompiledStateGraph, state: MarginCallState) -> dict:
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id_for(state.impact, state.counterparty_id)}
+    }
+    return graph.invoke(state, config=config)
+
+
+def resume_run(graph: CompiledStateGraph, thread_id: str, resume_payload: dict) -> dict:
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    return graph.invoke(Command(resume=resume_payload), config=config)
+
+
 def build_orchestrator_graph(
     session_factory: sessionmaker[Session] | None = None,
     market_feed: MarketFeed | None = None,
     settings: Settings | None = None,
+    checkpointer: BaseCheckpointSaver | None = None,
 ) -> CompiledStateGraph:
     """Each DB-touching node opens its own short-lived session (matching
     persistence.batch_loader's convention) rather than holding one open across
     the whole run -- await_approval can pause for a long time (up to
-    MARGIN_CALL_SLA_MINUTES), and a session shouldn't sit open through that."""
+    MARGIN_CALL_SLA_MINUTES), and a session shouldn't sit open through that.
+
+    checkpointer defaults to an in-memory one -- MM-38 swaps in a persisted
+    (Azure SQL) one so a paused run survives a process restart; in-memory is
+    enough for interrupt()/resume to work within a single process for now."""
     settings = settings or get_settings()
     session_factory = session_factory or get_session_factory(settings)
     market_feed = market_feed or get_market_feed(settings)
+    checkpointer = checkpointer or InMemorySaver()
 
     def _compute_exposure_node(state: MarginCallState) -> dict:
         with session_factory() as session:
@@ -190,4 +245,4 @@ def build_orchestrator_graph(
     )
     graph.add_edge("await_approval", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
