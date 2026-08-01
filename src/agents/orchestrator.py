@@ -1,13 +1,14 @@
 from datetime import UTC, datetime
 from typing import Literal
+from uuid import uuid4
 
+import structlog
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, interrupt
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -25,6 +26,7 @@ from calc.models import (
 from calc.mtm import compute_mtm
 from calc.vm import compute_variation_margin
 from config.settings import Settings, get_settings
+from persistence.db.checkpoint_saver import AzureSQLSaver
 from persistence.db.engine import get_session_factory
 from persistence.db.models import CollateralItemORM, PortfolioORM, PositionORM, ReferenceRateORM
 from persistence.models import AssetClass, Position
@@ -32,13 +34,16 @@ from streaming.event_agent import latest_close_before
 from streaming.market_feed import MarketFeed, get_market_feed
 from streaming.schemas import ImpactSet
 
+logger = structlog.get_logger()
+
 
 class MarginCallState(BaseModel):
     """One graph run per (ImpactSet, counterparty_id) pair -- an ImpactSet
     naming several counterparties fans out into separate runs, not one run
-    juggling all of them. Run identity/idempotency keying lands in MM-38."""
+    juggling all of them. Run identity is thread_id_for(impact,
+    counterparty_id); see get_or_start_run() for idempotent dispatch."""
 
-    correlation_id: str
+    correlation_id: str = Field(default_factory=lambda: uuid4().hex)
     impact: ImpactSet
     counterparty_id: str
 
@@ -164,6 +169,12 @@ def await_approval(state: MarginCallState) -> dict:
     resume = interrupt(payload)
 
     decision = resume["decision"]
+    # Logged only here, not before interrupt(): LangGraph replays this whole
+    # node function from the top on resume, so anything before interrupt()
+    # would double-log (once on the pausing call, once per resume).
+    logger.bind(correlation_id=state.correlation_id, counterparty_id=state.counterparty_id).info(
+        "await_approval_resumed", decision=decision
+    )
     return {
         "approval_decision": decision,
         # Explicit key even when None: LangGraph's Pydantic-schema state only
@@ -190,15 +201,52 @@ def thread_id_for(impact: ImpactSet, counterparty_id: str) -> str:
 
 
 def start_run(graph: CompiledStateGraph, state: MarginCallState) -> dict:
-    config: RunnableConfig = {
-        "configurable": {"thread_id": thread_id_for(state.impact, state.counterparty_id)}
-    }
-    return graph.invoke(state, config=config)
+    thread_id = thread_id_for(state.impact, state.counterparty_id)
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    log = logger.bind(
+        correlation_id=state.correlation_id,
+        thread_id=thread_id,
+        counterparty_id=state.counterparty_id,
+    )
+    log.info("orchestrator_run_started", event_id=state.impact.event_id)
+    result = graph.invoke(state, config=config)
+    log.info(
+        (
+            "orchestrator_run_paused_for_approval"
+            if "__interrupt__" in result
+            else "orchestrator_run_ended"
+        ),
+    )
+    return result
 
 
 def resume_run(graph: CompiledStateGraph, thread_id: str, resume_payload: dict) -> dict:
     config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-    return graph.invoke(Command(resume=resume_payload), config=config)
+    log = logger.bind(thread_id=thread_id)
+    log.info("orchestrator_run_resume_requested", decision=resume_payload.get("decision"))
+    result = graph.invoke(Command(resume=resume_payload), config=config)
+    log.info("orchestrator_run_ended", approval_decision=result.get("approval_decision"))
+    return result
+
+
+def get_or_start_run(graph: CompiledStateGraph, state: MarginCallState) -> dict:
+    """Idempotent entry point: replaying the same (event_id, counterparty_id)
+    must not double-raise a margin call (CLAUDE.md's idempotency rule). If a
+    run already exists for this thread_id -- still paused or already
+    finished -- returns its current state instead of invoking the graph
+    again."""
+    thread_id = thread_id_for(state.impact, state.counterparty_id)
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    snapshot = graph.get_state(config)
+    if snapshot.values:
+        logger.bind(correlation_id=state.correlation_id, thread_id=thread_id).info(
+            "orchestrator_run_already_exists"
+        )
+        result = dict(snapshot.values)
+        if snapshot.interrupts:
+            result["__interrupt__"] = list(snapshot.interrupts)
+        return result
+    return start_run(graph, state)
 
 
 def build_orchestrator_graph(
@@ -212,24 +260,48 @@ def build_orchestrator_graph(
     the whole run -- await_approval can pause for a long time (up to
     MARGIN_CALL_SLA_MINUTES), and a session shouldn't sit open through that.
 
-    checkpointer defaults to an in-memory one -- MM-38 swaps in a persisted
-    (Azure SQL) one so a paused run survives a process restart; in-memory is
-    enough for interrupt()/resume to work within a single process for now."""
+    checkpointer defaults to AzureSQLSaver (MM-38) -- persisted to this
+    project's own SQL database, so a paused run survives a process restart.
+    Still overridable (e.g. InMemorySaver in tests that don't care about
+    restart survival)."""
     settings = settings or get_settings()
     session_factory = session_factory or get_session_factory(settings)
     market_feed = market_feed or get_market_feed(settings)
-    checkpointer = checkpointer or InMemorySaver()
+    checkpointer = checkpointer or AzureSQLSaver(session_factory)
 
     def _compute_exposure_node(state: MarginCallState) -> dict:
+        log = logger.bind(
+            correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
+        )
         with session_factory() as session:
-            return compute_exposure(state, session, market_feed)
+            result = compute_exposure(state, session, market_feed)
+        log.info(
+            "compute_exposure_completed",
+            variation_margin=result["variation_margin"].variation_margin,
+            initial_margin=result["initial_margin"].initial_margin,
+        )
+        return result
 
     def _fetch_csa_terms_node(state: MarginCallState) -> dict:
-        return fetch_csa_terms(state, settings)
+        log = logger.bind(
+            correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
+        )
+        result = fetch_csa_terms(state, settings)
+        log.info("fetch_csa_terms_completed", threshold=result["csa_terms"].threshold)
+        return result
 
     def _evaluate_breach_node(state: MarginCallState) -> dict:
+        log = logger.bind(
+            correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
+        )
         with session_factory() as session:
-            return evaluate_breach_node(state, session)
+            result = evaluate_breach_node(state, session)
+        log.info(
+            "evaluate_breach_completed",
+            breached=result["breach_result"].breached,
+            call_amount=result["breach_result"].call_amount,
+        )
+        return result
 
     graph = StateGraph(MarginCallState)
     graph.add_node("compute_exposure", _compute_exposure_node)

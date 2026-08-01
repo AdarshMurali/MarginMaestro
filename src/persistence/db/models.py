@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import JSON, ForeignKey, String
+from sqlalchemy import JSON, ForeignKey, LargeBinary, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -123,6 +123,43 @@ class ReferenceRateORM(Base):
     series_id: Mapped[str] = mapped_column(String(20), primary_key=True)
     rate_date: Mapped[date] = mapped_column(primary_key=True)
     value: Mapped[float]
+
+
+class CheckpointORM(Base):
+    """Persisted LangGraph checkpoint (MM-38) -- lets an awaiting-approval
+    orchestrator run survive a process restart. One row per checkpoint step;
+    channel_values are stored inline with the checkpoint (not split into a
+    separate per-channel blob table) since this orchestrator's graph is
+    small/linear and doesn't need cross-checkpoint blob dedup."""
+
+    __tablename__ = "orchestrator_checkpoints"
+
+    thread_id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    checkpoint_ns: Mapped[str] = mapped_column(String(200), primary_key=True, default="")
+    checkpoint_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    parent_checkpoint_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    checkpoint_type: Mapped[str] = mapped_column(String(50))
+    checkpoint_blob: Mapped[bytes] = mapped_column(LargeBinary)
+    metadata_type: Mapped[str] = mapped_column(String(50))
+    metadata_blob: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime]
+
+
+class CheckpointWriteORM(Base):
+    """Pending/intra-step writes for a CheckpointORM row (MM-38) -- mirrors
+    LangGraph's put_writes() contract."""
+
+    __tablename__ = "orchestrator_checkpoint_writes"
+
+    thread_id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    checkpoint_ns: Mapped[str] = mapped_column(String(200), primary_key=True, default="")
+    checkpoint_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    idx: Mapped[int] = mapped_column(primary_key=True)
+    channel: Mapped[str] = mapped_column(String(200))
+    write_type: Mapped[str] = mapped_column(String(50))
+    write_blob: Mapped[bytes] = mapped_column(LargeBinary)
+    task_path: Mapped[str] = mapped_column(String(500), default="")
 
 
 class TicketORM(Base):
