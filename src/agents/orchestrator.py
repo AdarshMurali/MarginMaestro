@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import uuid4
 
@@ -56,6 +56,8 @@ class MarginCallState(BaseModel):
     approval_decision: Literal["approved", "rejected", "adjusted"] | None = None
     adjusted_call_amount: float | None = None
     notification_result: NotificationResult | None = None
+    notification_sent_at: datetime | None = None
+    sla_outcome: Literal["met", "breached"] | None = None
 
 
 def _load_positions(session: Session, counterparty_id: str) -> list[Position]:
@@ -212,7 +214,38 @@ def send_notification(state: MarginCallState, settings: Settings) -> dict:
         settings=settings,
     )
     result = send_slack_notice(notice_text, settings=settings)
-    return {"notification_result": result}
+    return {"notification_result": result, "notification_sent_at": datetime.now(UTC)}
+
+
+def await_sla_response(state: MarginCallState, settings: Settings) -> dict:
+    """SLA timer (MM-42, docs/AGENTS.md "SLA & Escalation"): pauses
+    (interrupt()) after notification, resolving "met" if a response signal
+    arrives before the deadline, or "breached" once the deadline has passed.
+    No real counterparty-facing channel exists in this demo, so "responded"
+    is a provisional signal -- see the /respond endpoint's note in
+    docs/ROADMAP.md. Resuming with neither signal (a periodic external check,
+    not yet a real scheduler) just re-pauses if the deadline hasn't passed."""
+    if state.notification_sent_at is None:
+        raise PricingError("await_sla_response requires notification_sent_at to already be set")
+
+    deadline = state.notification_sent_at + timedelta(minutes=settings.margin_call_sla_minutes)
+    log = logger.bind(correlation_id=state.correlation_id, counterparty_id=state.counterparty_id)
+    while True:
+        payload = {
+            "correlation_id": state.correlation_id,
+            "counterparty_id": state.counterparty_id,
+            "deadline": deadline.isoformat(),
+        }
+        # A resume payload must be non-empty: LangGraph's Command(resume=...)
+        # does not correctly resolve an interrupt() call when given `{}` --
+        # confirmed by a direct repro before relying on this pattern.
+        resume = interrupt(payload)
+        if resume.get("responded"):
+            log.info("sla_met")
+            return {"sla_outcome": "met"}
+        if datetime.now(UTC) >= deadline:
+            log.info("sla_breached", deadline=deadline.isoformat())
+            return {"sla_outcome": "breached"}
 
 
 def _route_after_breach(state: MarginCallState) -> str:
@@ -348,12 +381,16 @@ def build_orchestrator_graph(
         )
         return result
 
+    def _await_sla_response_node(state: MarginCallState) -> dict:
+        return await_sla_response(state, settings)
+
     graph = StateGraph(MarginCallState)
     graph.add_node("compute_exposure", _compute_exposure_node)
     graph.add_node("fetch_csa_terms", _fetch_csa_terms_node)
     graph.add_node("evaluate_breach", _evaluate_breach_node)
     graph.add_node("await_approval", await_approval)
     graph.add_node("send_notification", _send_notification_node)
+    graph.add_node("await_sla_response", _await_sla_response_node)
 
     graph.add_edge(START, "compute_exposure")
     graph.add_edge("compute_exposure", "fetch_csa_terms")
@@ -366,6 +403,7 @@ def build_orchestrator_graph(
         _route_after_approval,
         {"send_notification": "send_notification", END: END},
     )
-    graph.add_edge("send_notification", END)
+    graph.add_edge("send_notification", "await_sla_response")
+    graph.add_edge("await_sla_response", END)
 
     return graph.compile(checkpointer=checkpointer)

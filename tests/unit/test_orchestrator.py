@@ -15,6 +15,7 @@ from agents.orchestrator import (
     _route_after_approval,
     _route_after_breach,
     await_approval,
+    await_sla_response,
     build_orchestrator_graph,
     compute_exposure,
     evaluate_breach_node,
@@ -318,6 +319,17 @@ class TestSendNotification:
         with pytest.raises(PricingError):
             send_notification(_state(), Settings(_env_file=None))
 
+    def test_records_notification_sent_at(self) -> None:
+        state = _state()
+        state.breach_result = BreachResult(breached=True, call_amount=474_000.0)
+        state.csa_terms = CSATerms(threshold=1_000.0, mta=100.0, currency="USD")
+        state.approval_decision = "approved"
+
+        with _patch_draft_notice(), _patch_send_slack_notice():
+            result = send_notification(state, Settings(_env_file=None))
+
+        assert isinstance(result["notification_sent_at"], datetime)
+
 
 class TestBuildOrchestratorGraph:
     def test_compiles(self, session_factory) -> None:
@@ -462,14 +474,17 @@ class TestBuildOrchestratorGraph:
             paused = start_run(graph, state)
             assert "__interrupt__" in paused
 
-            resumed = resume_run(
-                graph, thread_id_for(state.impact, state.counterparty_id), {"decision": "approved"}
-            )
+            thread_id = thread_id_for(state.impact, state.counterparty_id)
+            approved = resume_run(graph, thread_id, {"decision": "approved"})
+            assert "__interrupt__" in approved  # now paused at await_sla_response instead
+
+            resumed = resume_run(graph, thread_id, {"responded": True})
 
         assert "__interrupt__" not in resumed
         assert resumed["approval_decision"] == "approved"
         assert resumed["adjusted_call_amount"] is None
         assert resumed["notification_result"].slack_channel == "C0BMCAL6L74"
+        assert resumed["sla_outcome"] == "met"
 
     def test_resume_with_adjusted_decision_carries_the_adjusted_amount(
         self, session_factory
@@ -624,8 +639,67 @@ class TestRestartSurvival:
                 {"decision": "approved"},
             )
 
-        assert "__interrupt__" not in resumed
+        # Now paused at await_sla_response instead of finished -- still proves
+        # the restart-survival point: graph2 correctly picked up where graph1
+        # left off and advanced to the next step.
+        assert "__interrupt__" in resumed
         assert resumed["approval_decision"] == "approved"
+
+
+class TestSlaTimer:
+    def _resume_to_sla_pause(self, session_factory, settings: Settings) -> tuple:
+        _seed_breach_scenario(session_factory)
+        state = _state()
+
+        with (
+            patch(
+                "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+            ),
+            _patch_draft_notice(),
+            _patch_send_slack_notice(),
+        ):
+            graph = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=_breach_market_feed(),
+                settings=settings,
+            )
+            thread_id = thread_id_for(state.impact, state.counterparty_id)
+            start_run(graph, state)
+            paused_at_sla = resume_run(graph, thread_id, {"decision": "approved"})
+        return graph, thread_id, paused_at_sla
+
+    def test_stays_pending_before_the_deadline_when_checked(self, session_factory) -> None:
+        graph, thread_id, paused_at_sla = self._resume_to_sla_pause(
+            session_factory, Settings(_env_file=None, margin_call_sla_minutes=60)
+        )
+        assert "__interrupt__" in paused_at_sla
+
+        still_pending = resume_run(graph, thread_id, {"check": True})
+
+        assert "__interrupt__" in still_pending
+        assert "sla_outcome" not in still_pending
+
+    def test_resolves_breached_once_the_deadline_has_passed(self, session_factory) -> None:
+        graph, thread_id, paused_at_sla = self._resume_to_sla_pause(
+            session_factory, Settings(_env_file=None, margin_call_sla_minutes=0)
+        )
+        assert "__interrupt__" in paused_at_sla
+
+        resolved = resume_run(graph, thread_id, {"check": True})
+
+        assert "__interrupt__" not in resolved
+        assert resolved["sla_outcome"] == "breached"
+
+    def test_resolves_met_when_responded_before_the_deadline(self, session_factory) -> None:
+        graph, thread_id, paused_at_sla = self._resume_to_sla_pause(
+            session_factory, Settings(_env_file=None, margin_call_sla_minutes=60)
+        )
+        assert "__interrupt__" in paused_at_sla
+
+        resolved = resume_run(graph, thread_id, {"responded": True})
+
+        assert "__interrupt__" not in resolved
+        assert resolved["sla_outcome"] == "met"
 
 
 class TestGetOrStartRun:
@@ -691,6 +765,12 @@ class TestAwaitApproval:
     def test_raises_if_breach_result_missing(self) -> None:
         with pytest.raises(PricingError):
             await_approval(_state())
+
+
+class TestAwaitSlaResponse:
+    def test_raises_if_notification_sent_at_missing(self) -> None:
+        with pytest.raises(PricingError):
+            await_sla_response(_state(), Settings(_env_file=None))
 
 
 class TestThreadIdFor:
