@@ -122,11 +122,17 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 
 **Exit criteria:** every run is fully audited and observable; failures degrade gracefully.
 
-## Phase 10 — Demo polish (Epic: MM-EPIC-10)
+## Phase 10 — Deployment & Demo polish (Epic: MM-EPIC-10)
+
+> **Note (2026-08-01):** deployment previously existed only as a single underspecified line (`MM-102`) here. Expanded into real stories below. **Deliberately hybrid-cloud**: everything moves to AWS *except* the relational store, which stays on **Azure SQL** — that's not a leftover, it's `CLAUDE.md`'s stack choice (Azure SQL free tier), unaffected by this phase. Compute platform itself is still an open decision (`infra/compute.tf` has sat deliberately empty since MM-8, per that story's own note) — MM-102 below is where it actually gets made.
 
 - **MM-100** Curated demo scenarios (2–3 counterparties) + one-command demo script.
 - **MM-101** README/architecture diagrams finalized; short demo GIF/video.
-- **MM-102** Deploy: frontend to Vercel + custom domain; backend on AWS via Terraform.
+- **MM-102** Backend deploy to AWS via Terraform — compute platform decision (ECS Fargate / EC2 / App Runner / Lambda — `infra/compute.tf`'s deferred choice from MM-8), containers built by the existing CI pipeline (already pushes to Docker Hub), IAM role attached to `iac/iam.tf`'s existing least-privilege policy (also sitting unattached since MM-8).
+- **MM-103** Frontend deploy to Vercel + custom domain, wired to the deployed backend's real URL (not localhost).
+- **MM-104** Secrets end-to-end for real: AWS Parameter Store (provisioned MM-8, `ParameterStoreSource` implemented MM-9) actually exercised against the deployed compute environment for the first time — until now only unit-tested/local-env-var-sourced.
+
+**Exit criteria:** the solution is live and reachable at a public URL; only the relational DB (Azure SQL) sits outside AWS.
 
 ## Phase 11 — OPTIONAL: streaming analytics (Epic: MM-EPIC-11)
 
@@ -136,6 +142,16 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 - **MM-111** (Optional) CEP pattern: "N consecutive X% drops in T minutes" → escalation trigger.
 
 **Exit criteria:** a real windowed computation influences IM, justifying Flink in the stack.
+
+## Phase 12 — OPTIONAL: Open-source Kubernetes deployment (Epic: MM-EPIC-12)
+
+> Good-to-have stretch goal, added 2026-08-01. Proves the architecture isn't AWS-locked by running the same containers on **OKD** (the free, open-source upstream project OpenShift is built from) instead of AWS's managed compute — not Red Hat's hosted OpenShift, and not a generic unrelated k3s/minikube setup. Only pursue after Phase 10's AWS deployment is real and working; this is additive portability, not a replacement for it.
+
+- **MM-120** Package the full stack for Kubernetes (Helm chart or raw manifests) — API, RAG store, relational DB connection, streaming, all services from Phase 10's container images.
+- **MM-121** Stand up a free OKD cluster (local, e.g. via CRC/`oc cluster`, or a free-tier hosted option if one exists) and deploy the packaged stack to it.
+- **MM-122** Verify the deployed-on-OKD instance runs the same end-to-end lifecycle as the AWS deployment (reuse MM-44's E2E scenario against this environment).
+
+**Exit criteria:** the same solution runs unmodified (config-only differences) on an open-source Kubernetes distribution, demonstrating platform portability.
 
 ---
 
