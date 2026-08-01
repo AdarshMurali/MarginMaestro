@@ -24,6 +24,9 @@ mcp-rag-retriever:
 event-agent:
 	python -m streaming.event_agent
 
+publish-live-prices:
+	python -m streaming.live_feed_cli --tickers "$(TICKERS)"
+
 test:
 	pytest
 
