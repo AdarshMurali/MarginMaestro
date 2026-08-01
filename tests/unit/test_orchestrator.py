@@ -17,6 +17,7 @@ from agents.orchestrator import (
     compute_exposure,
     evaluate_breach_node,
     fetch_csa_terms,
+    get_or_start_run,
     resume_run,
     start_run,
     thread_id_for,
@@ -450,6 +451,135 @@ class TestBuildOrchestratorGraph:
 
         assert resumed["approval_decision"] == "adjusted"
         assert resumed["adjusted_call_amount"] == 42_000.0
+
+
+def _seed_breach_scenario(session_factory) -> None:
+    _seed_position(session_factory, "CP-1", "TSLA", 1000)
+    with session_factory() as session:
+        session.add(
+            PriceHistoryORM(
+                ticker="TSLA",
+                price_date=date(2026, 7, 30),
+                price=100.0,
+                currency="USD",
+                source="yfinance",
+            )
+        )
+        session.add(ReferenceRateORM(series_id="VIXCLS", rate_date=date(2026, 7, 30), value=20.0))
+        session.add(
+            CollateralItemORM(
+                id="C1",
+                counterparty_id="CP-1",
+                collateral_type="cash",
+                value_usd=0.0,
+                haircut_pct=0.0,
+            )
+        )
+        session.commit()
+
+
+def _breach_market_feed() -> MagicMock:
+    market_feed = MagicMock()
+    market_feed.get_prices.return_value = {
+        "TSLA": PriceQuote(ticker="TSLA", price=500.0, as_of=datetime.now(UTC), source="yfinance")
+    }
+    return market_feed
+
+
+class TestRestartSurvival:
+    """MM-38's actual point: a paused run must survive the orchestrator
+    process restarting, not just resuming within the same graph object."""
+
+    def test_a_freshly_built_graph_resumes_a_run_paused_by_a_different_graph_object(
+        self, session_factory
+    ) -> None:
+        _seed_breach_scenario(session_factory)
+        state = _state()
+
+        with patch(
+            "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+        ):
+            graph1 = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=_breach_market_feed(),
+                settings=Settings(_env_file=None),
+            )
+            paused = start_run(graph1, state)
+            assert "__interrupt__" in paused
+
+            # Simulate a process restart: a brand new graph/checkpointer, same DB.
+            graph2 = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=_breach_market_feed(),
+                settings=Settings(_env_file=None),
+            )
+            resumed = resume_run(
+                graph2,
+                thread_id_for(state.impact, state.counterparty_id),
+                {"decision": "approved"},
+            )
+
+        assert "__interrupt__" not in resumed
+        assert resumed["approval_decision"] == "approved"
+
+
+class TestGetOrStartRun:
+    def test_starts_a_new_run_when_none_exists(self, session_factory) -> None:
+        _seed_breach_scenario(session_factory)
+        market_feed = _breach_market_feed()
+        state = _state()
+
+        with patch(
+            "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+        ):
+            graph = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=market_feed,
+                settings=Settings(_env_file=None),
+            )
+            result = get_or_start_run(graph, state)
+
+        assert "__interrupt__" in result
+        market_feed.get_prices.assert_called_once()
+
+    def test_replaying_the_same_run_does_not_recompute_exposure(self, session_factory) -> None:
+        """CLAUDE.md's idempotency rule: replaying the same event must not
+        double-raise a call. Re-dispatching the same (event_id,
+        counterparty_id) must not re-invoke the calc pipeline."""
+        _seed_breach_scenario(session_factory)
+        market_feed = _breach_market_feed()
+        state = _state()
+
+        with patch(
+            "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+        ):
+            graph = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=market_feed,
+                settings=Settings(_env_file=None),
+            )
+            first = get_or_start_run(graph, state)
+            second = get_or_start_run(graph, state)
+
+        assert "__interrupt__" in first
+        assert "__interrupt__" in second
+        market_feed.get_prices.assert_called_once()
+
+
+class TestMarginCallState:
+    def test_correlation_id_is_auto_generated_when_not_provided(self) -> None:
+        impact = ImpactSet(
+            event_id="evt-x",
+            event_type=MarketEventType.PRICE_SHOCK,
+            counterparty_ids=["CP-1"],
+            reason="test",
+            occurred_at=datetime.now(UTC),
+        )
+        state_a = MarginCallState(impact=impact, counterparty_id="CP-1")
+        state_b = MarginCallState(impact=impact, counterparty_id="CP-1")
+
+        assert state_a.correlation_id
+        assert state_a.correlation_id != state_b.correlation_id
 
 
 class TestAwaitApproval:
