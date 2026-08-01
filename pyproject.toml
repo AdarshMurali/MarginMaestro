@@ -34,6 +34,7 @@ llm = ["langgraph", "openai"]
 data = ["yfinance", "pandas", "fredapi", "faker"]
 db = ["sqlalchemy", "pyodbc", "alembic"]
 aws = ["boto3"]
+notify = ["slack-sdk"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

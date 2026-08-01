@@ -81,12 +81,12 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 
 **Exit criteria:** a synthetic event drives a full evaluate→breach→await-approval flow, tested.
 
-## Phase 6 — Notify, SLA, Escalation (Epic: MM-EPIC-6)
+## Phase 6 — Notify, SLA, Escalation (Epic: MM-40)
 
-- **MM-60** **Communication Agent** drafts notice; Slack MCP tool sends after approval.
-- **MM-61** SLA timer (`MARGIN_CALL_SLA_MINUTES`) with met/breached outcomes.
-- **MM-62** Escalation path: retrieve escalation procedure (RAG) → open a **ServiceNow** incident with full context.
-- **MM-63** End-to-end scenario test: shock → call → Slack → SLA breach → ServiceNow incident.
+- **MM-41** **Communication Agent** drafts notice; Slack MCP tool sends after approval.
+- **MM-42** SLA timer (`MARGIN_CALL_SLA_MINUTES`) with met/breached outcomes.
+- **MM-43** Escalation path: retrieve escalation procedure (RAG) → open a **ServiceNow** incident with full context.
+- **MM-44** End-to-end scenario test: shock → call → Slack → SLA breach → ServiceNow incident.
 
 **Exit criteria:** full lifecycle runs end to end on a synthetic scenario, with real Slack + ServiceNow (free accounts).
 

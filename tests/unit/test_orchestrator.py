@@ -6,11 +6,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from agents.communication import NotificationResult
 from agents.orchestrator import (
     MarginCallState,
     _collateral_held,
     _latest_vix,
     _load_positions,
+    _route_after_approval,
     _route_after_breach,
     await_approval,
     build_orchestrator_graph,
@@ -19,6 +21,7 @@ from agents.orchestrator import (
     fetch_csa_terms,
     get_or_start_run,
     resume_run,
+    send_notification,
     start_run,
     thread_id_for,
 )
@@ -88,6 +91,23 @@ def _csa_result(counterparty_id: str = "CP-1", threshold: float = 100_000.0) -> 
         haircuts={"cash": 0.0},
         rating_triggers=[],
         citations=[],
+    )
+
+
+def _patch_draft_notice():
+    return patch(
+        "agents.orchestrator.draft_margin_call_notice", return_value="Mock margin call notice."
+    )
+
+
+def _patch_send_slack_notice():
+    return patch(
+        "agents.orchestrator.send_slack_notice",
+        return_value=NotificationResult(
+            notice_text="Mock margin call notice.",
+            slack_channel="C0BMCAL6L74",
+            slack_ts="123.456",
+        ),
     )
 
 
@@ -251,6 +271,54 @@ class TestRouteAfterBreach:
         assert _route_after_breach(state) != "await_approval"
 
 
+class TestRouteAfterApproval:
+    def test_routes_to_send_notification_when_approved(self) -> None:
+        state = _state()
+        state.approval_decision = "approved"
+        assert _route_after_approval(state) == "send_notification"
+
+    def test_routes_to_send_notification_when_adjusted(self) -> None:
+        state = _state()
+        state.approval_decision = "adjusted"
+        assert _route_after_approval(state) == "send_notification"
+
+    def test_routes_to_end_when_rejected(self) -> None:
+        state = _state()
+        state.approval_decision = "rejected"
+        assert _route_after_approval(state) != "send_notification"
+
+
+class TestSendNotification:
+    def test_uses_adjusted_call_amount_when_decision_is_adjusted(self) -> None:
+        state = _state()
+        state.breach_result = BreachResult(breached=True, call_amount=474_000.0)
+        state.csa_terms = CSATerms(threshold=1_000.0, mta=100.0, currency="USD")
+        state.approval_decision = "adjusted"
+        state.adjusted_call_amount = 42_000.0
+
+        with _patch_draft_notice() as mock_draft, _patch_send_slack_notice():
+            send_notification(state, Settings(_env_file=None))
+
+        args, _ = mock_draft.call_args
+        assert args[1] == 42_000.0
+
+    def test_uses_breach_call_amount_when_decision_is_approved(self) -> None:
+        state = _state()
+        state.breach_result = BreachResult(breached=True, call_amount=474_000.0)
+        state.csa_terms = CSATerms(threshold=1_000.0, mta=100.0, currency="USD")
+        state.approval_decision = "approved"
+
+        with _patch_draft_notice() as mock_draft, _patch_send_slack_notice():
+            send_notification(state, Settings(_env_file=None))
+
+        args, _ = mock_draft.call_args
+        assert args[1] == 474_000.0
+
+    def test_raises_if_breach_result_or_csa_terms_missing(self) -> None:
+        with pytest.raises(PricingError):
+            send_notification(_state(), Settings(_env_file=None))
+
+
 class TestBuildOrchestratorGraph:
     def test_compiles(self, session_factory) -> None:
         graph = build_orchestrator_graph(
@@ -379,8 +447,12 @@ class TestBuildOrchestratorGraph:
         }
         state = _state()
 
-        with patch(
-            "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+        with (
+            patch(
+                "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+            ),
+            _patch_draft_notice(),
+            _patch_send_slack_notice(),
         ):
             graph = build_orchestrator_graph(
                 session_factory=session_factory,
@@ -397,6 +469,7 @@ class TestBuildOrchestratorGraph:
         assert "__interrupt__" not in resumed
         assert resumed["approval_decision"] == "approved"
         assert resumed["adjusted_call_amount"] is None
+        assert resumed["notification_result"].slack_channel == "C0BMCAL6L74"
 
     def test_resume_with_adjusted_decision_carries_the_adjusted_amount(
         self, session_factory
@@ -434,8 +507,12 @@ class TestBuildOrchestratorGraph:
         }
         state = _state()
 
-        with patch(
-            "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+        with (
+            patch(
+                "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+            ),
+            _patch_draft_notice(),
+            _patch_send_slack_notice(),
         ):
             graph = build_orchestrator_graph(
                 session_factory=session_factory,
@@ -451,6 +528,7 @@ class TestBuildOrchestratorGraph:
 
         assert resumed["approval_decision"] == "adjusted"
         assert resumed["adjusted_call_amount"] == 42_000.0
+        assert resumed["notification_result"].slack_channel == "C0BMCAL6L74"
 
     def test_resume_with_rejected_decision_completes_the_run(self, session_factory) -> None:
         _seed_breach_scenario(session_factory)
@@ -519,8 +597,12 @@ class TestRestartSurvival:
         _seed_breach_scenario(session_factory)
         state = _state()
 
-        with patch(
-            "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+        with (
+            patch(
+                "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+            ),
+            _patch_draft_notice(),
+            _patch_send_slack_notice(),
         ):
             graph1 = build_orchestrator_graph(
                 session_factory=session_factory,
