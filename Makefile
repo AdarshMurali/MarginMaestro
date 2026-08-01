@@ -21,6 +21,9 @@ simulate:
 mcp-rag-retriever:
 	python -m mcp_servers.rag_retriever
 
+event-agent:
+	python -m streaming.event_agent
+
 test:
 	pytest
 

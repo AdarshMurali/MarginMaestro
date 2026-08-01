@@ -92,6 +92,17 @@ class AuditLogORM(Base):
     created_at: Mapped[datetime]
 
 
+class ProcessedEventORM(Base):
+    """Dedup record for the Event Agent (MM-31): an event_id present here has
+    already had its impact set emitted -- redelivery of the same message is a
+    no-op. Distinct from AuditLogORM, which is reserved for Phase 9 (MM-91)."""
+
+    __tablename__ = "processed_events"
+
+    event_id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    processed_at: Mapped[datetime]
+
+
 class PriceHistoryORM(Base):
     """Daily EOD price snapshot per ticker (MM-15 batch loader)."""
 
