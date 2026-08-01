@@ -14,6 +14,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from agents.communication import NotificationResult, draft_margin_call_notice, send_slack_notice
 from agents.csa_rag import answer_csa_terms
+from agents.escalation import (
+    IncidentResult,
+    open_servicenow_incident,
+    retrieve_escalation_procedure,
+)
 from calc.breach import evaluate_breach
 from calc.im import compute_initial_margin
 from calc.models import (
@@ -58,6 +63,7 @@ class MarginCallState(BaseModel):
     notification_result: NotificationResult | None = None
     notification_sent_at: datetime | None = None
     sla_outcome: Literal["met", "breached"] | None = None
+    escalation_result: IncidentResult | None = None
 
 
 def _load_positions(session: Session, counterparty_id: str) -> list[Position]:
@@ -191,6 +197,17 @@ def await_approval(state: MarginCallState) -> dict:
     }
 
 
+def _effective_call_amount(state: MarginCallState) -> float:
+    """The amount actually communicated to the counterparty: the adjusted
+    figure when the approval decision adjusted it, else the computed breach
+    amount. Shared by send_notification and escalate so both always agree
+    on what was actually called for."""
+    assert state.breach_result is not None  # callers already guard this
+    if state.approval_decision == "adjusted" and state.adjusted_call_amount is not None:
+        return state.adjusted_call_amount
+    return state.breach_result.call_amount
+
+
 def send_notification(state: MarginCallState, settings: Settings) -> dict:
     """Communication Agent (MM-41, docs/AGENTS.md #6): only reached after
     await_approval when the decision is "approved"/"adjusted" -- routing
@@ -201,11 +218,7 @@ def send_notification(state: MarginCallState, settings: Settings) -> dict:
             "send_notification requires breach_result and csa_terms to already be set on state"
         )
 
-    call_amount = (
-        state.adjusted_call_amount
-        if state.approval_decision == "adjusted" and state.adjusted_call_amount is not None
-        else state.breach_result.call_amount
-    )
+    call_amount = _effective_call_amount(state)
     notice_text = draft_margin_call_notice(
         state.counterparty_id,
         call_amount,
@@ -248,9 +261,42 @@ def await_sla_response(state: MarginCallState, settings: Settings) -> dict:
             return {"sla_outcome": "breached"}
 
 
+def escalate(state: MarginCallState, settings: Settings) -> dict:
+    """SLA & Escalation (MM-43, docs/AGENTS.md "SLA & Escalation"): only
+    reached when the SLA was breached (_route_after_sla) -- retrieves the
+    escalation-procedures document (RAG) and opens a ServiceNow incident
+    with full run context (docs/adr/0007)."""
+    if state.breach_result is None or state.csa_terms is None or state.notification_sent_at is None:
+        raise PricingError(
+            "escalate requires breach_result, csa_terms, and notification_sent_at to already "
+            "be set on state"
+        )
+
+    deadline = state.notification_sent_at + timedelta(minutes=settings.margin_call_sla_minutes)
+    procedure_excerpt = retrieve_escalation_procedure(settings=settings)
+    result = open_servicenow_incident(
+        state.correlation_id,
+        state.counterparty_id,
+        _effective_call_amount(state),
+        state.csa_terms.currency,
+        state.csa_terms.threshold,
+        state.notification_sent_at,
+        deadline,
+        procedure_excerpt,
+        settings=settings,
+    )
+    return {"escalation_result": result}
+
+
 def _route_after_breach(state: MarginCallState) -> str:
     if state.breach_result is not None and state.breach_result.breached:
         return "await_approval"
+    return END
+
+
+def _route_after_sla(state: MarginCallState) -> str:
+    if state.sla_outcome == "breached":
+        return "escalate"
     return END
 
 
@@ -384,6 +430,17 @@ def build_orchestrator_graph(
     def _await_sla_response_node(state: MarginCallState) -> dict:
         return await_sla_response(state, settings)
 
+    def _escalate_node(state: MarginCallState) -> dict:
+        log = logger.bind(
+            correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
+        )
+        result = escalate(state, settings)
+        log.info(
+            "escalate_completed",
+            incident_number=result["escalation_result"].incident_number,
+        )
+        return result
+
     graph = StateGraph(MarginCallState)
     graph.add_node("compute_exposure", _compute_exposure_node)
     graph.add_node("fetch_csa_terms", _fetch_csa_terms_node)
@@ -391,6 +448,7 @@ def build_orchestrator_graph(
     graph.add_node("await_approval", await_approval)
     graph.add_node("send_notification", _send_notification_node)
     graph.add_node("await_sla_response", _await_sla_response_node)
+    graph.add_node("escalate", _escalate_node)
 
     graph.add_edge(START, "compute_exposure")
     graph.add_edge("compute_exposure", "fetch_csa_terms")
@@ -404,6 +462,9 @@ def build_orchestrator_graph(
         {"send_notification": "send_notification", END: END},
     )
     graph.add_edge("send_notification", "await_sla_response")
-    graph.add_edge("await_sla_response", END)
+    graph.add_conditional_edges(
+        "await_sla_response", _route_after_sla, {"escalate": "escalate", END: END}
+    )
+    graph.add_edge("escalate", END)
 
     return graph.compile(checkpointer=checkpointer)

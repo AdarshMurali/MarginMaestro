@@ -63,6 +63,10 @@ class Settings(BaseSettings):
 
     margin_call_sla_minutes: int = 60
 
+    servicenow_instance_url: str | None = None
+    servicenow_username: str | None = None
+    servicenow_password: str | None = None
+
     @classmethod
     def settings_customise_sources(
         cls,

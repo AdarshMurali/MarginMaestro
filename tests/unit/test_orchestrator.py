@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agents.communication import NotificationResult
+from agents.escalation import IncidentResult
 from agents.orchestrator import (
     MarginCallState,
     _collateral_held,
@@ -14,10 +15,12 @@ from agents.orchestrator import (
     _load_positions,
     _route_after_approval,
     _route_after_breach,
+    _route_after_sla,
     await_approval,
     await_sla_response,
     build_orchestrator_graph,
     compute_exposure,
+    escalate,
     evaluate_breach_node,
     fetch_csa_terms,
     get_or_start_run,
@@ -109,6 +112,20 @@ def _patch_send_slack_notice():
             slack_channel="C0BMCAL6L74",
             slack_ts="123.456",
         ),
+    )
+
+
+def _patch_retrieve_escalation_procedure():
+    return patch(
+        "agents.orchestrator.retrieve_escalation_procedure",
+        return_value="[Escalation Trigger]\nMock escalation procedure text.",
+    )
+
+
+def _patch_open_servicenow_incident():
+    return patch(
+        "agents.orchestrator.open_servicenow_incident",
+        return_value=IncidentResult(incident_number="INC0010001", sys_id="abc123", urgency="2"),
     )
 
 
@@ -329,6 +346,55 @@ class TestSendNotification:
             result = send_notification(state, Settings(_env_file=None))
 
         assert isinstance(result["notification_sent_at"], datetime)
+
+
+class TestRouteAfterSla:
+    def test_routes_to_escalate_when_breached(self) -> None:
+        state = _state()
+        state.sla_outcome = "breached"
+        assert _route_after_sla(state) == "escalate"
+
+    def test_routes_to_end_when_met(self) -> None:
+        state = _state()
+        state.sla_outcome = "met"
+        assert _route_after_sla(state) != "escalate"
+
+
+class TestEscalate:
+    def _breached_state(self) -> MarginCallState:
+        state = _state()
+        state.breach_result = BreachResult(breached=True, call_amount=474_000.0)
+        state.csa_terms = CSATerms(threshold=1_000.0, mta=100.0, currency="USD")
+        state.approval_decision = "approved"
+        state.notification_sent_at = datetime.now(UTC)
+        state.sla_outcome = "breached"
+        return state
+
+    def test_uses_adjusted_call_amount_when_decision_is_adjusted(self) -> None:
+        state = self._breached_state()
+        state.approval_decision = "adjusted"
+        state.adjusted_call_amount = 42_000.0
+
+        with (
+            _patch_retrieve_escalation_procedure(),
+            _patch_open_servicenow_incident() as mock_open,
+        ):
+            escalate(state, Settings(_env_file=None))
+
+        args, _ = mock_open.call_args
+        assert args[2] == 42_000.0
+
+    def test_returns_the_incident_result(self) -> None:
+        state = self._breached_state()
+
+        with _patch_retrieve_escalation_procedure(), _patch_open_servicenow_incident():
+            result = escalate(state, Settings(_env_file=None))
+
+        assert result["escalation_result"].incident_number == "INC0010001"
+
+    def test_raises_if_required_state_missing(self) -> None:
+        with pytest.raises(PricingError):
+            escalate(_state(), Settings(_env_file=None))
 
 
 class TestBuildOrchestratorGraph:
@@ -685,10 +751,12 @@ class TestSlaTimer:
         )
         assert "__interrupt__" in paused_at_sla
 
-        resolved = resume_run(graph, thread_id, {"check": True})
+        with _patch_retrieve_escalation_procedure(), _patch_open_servicenow_incident():
+            resolved = resume_run(graph, thread_id, {"check": True})
 
         assert "__interrupt__" not in resolved
         assert resolved["sla_outcome"] == "breached"
+        assert resolved["escalation_result"].incident_number == "INC0010001"
 
     def test_resolves_met_when_responded_before_the_deadline(self, session_factory) -> None:
         graph, thread_id, paused_at_sla = self._resume_to_sla_pause(

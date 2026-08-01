@@ -90,7 +90,7 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 
 **Exit criteria:** full lifecycle runs end to end on a synthetic scenario, with real Slack + ServiceNow (free accounts).
 
-> **Note (2026-07-25):** escalation logging targets ServiceNow (the user's free dev instance), not Jira — a better fit for a business/margin-call escalation than an engineering issue tracker. This is scoped narrowly to *this* escalation feature; Jira remains this project's own dev-story tracker (MM-# tickets) and is unaffected. Needs an ADR per `CLAUDE.md`'s "don't swap tech without one" rule, written when this phase actually starts.
+> **Note (2026-07-25, resolved 2026-08-01 by `docs/adr/0007`):** escalation logging targets ServiceNow (the user's free dev instance), not Jira — a better fit for a business/margin-call escalation than an engineering issue tracker. This is scoped narrowly to *this* escalation feature; Jira remains this project's own dev-story tracker (MM-# tickets) and is unaffected.
 
 ## Phase 7 — Reconciliation & Collateral (Epic: MM-EPIC-7)
 
