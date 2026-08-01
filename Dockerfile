@@ -28,7 +28,8 @@ COPY src ./src
 # imports streaming.market_feed -> yfinance, hence `data` too). rag: chromadb
 # for the CSA-RAG agent's retriever, which transitively imports
 # rag.s3_upload -> boto3 (aws extra), even though the API never calls it.
-RUN pip install --no-cache-dir ".[db,llm,streaming,rag,aws,data]"
+# notify: slack-sdk for the Communication Agent (MM-41).
+RUN pip install --no-cache-dir ".[db,llm,streaming,rag,aws,data,notify]"
 
 
 FROM python:3.11-slim-bookworm

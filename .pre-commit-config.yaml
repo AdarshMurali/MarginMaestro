@@ -29,4 +29,5 @@ repos:
           - chromadb
           - openai
           - langgraph
-          - mcp
+          - mcp<2.0
+          - slack-sdk

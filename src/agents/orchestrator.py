@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from agents.communication import NotificationResult, draft_margin_call_notice, send_slack_notice
 from agents.csa_rag import answer_csa_terms
 from calc.breach import evaluate_breach
 from calc.im import compute_initial_margin
@@ -54,6 +55,7 @@ class MarginCallState(BaseModel):
     breach_result: BreachResult | None = None
     approval_decision: Literal["approved", "rejected", "adjusted"] | None = None
     adjusted_call_amount: float | None = None
+    notification_result: NotificationResult | None = None
 
 
 def _load_positions(session: Session, counterparty_id: str) -> list[Position]:
@@ -187,9 +189,41 @@ def await_approval(state: MarginCallState) -> dict:
     }
 
 
+def send_notification(state: MarginCallState, settings: Settings) -> dict:
+    """Communication Agent (MM-41, docs/AGENTS.md #6): only reached after
+    await_approval when the decision is "approved"/"adjusted" -- routing
+    (_route_after_approval) keeps "rejected" from ever calling this, matching
+    AGENTS.md's "never sends before/without approval" note."""
+    if state.breach_result is None or state.csa_terms is None:
+        raise PricingError(
+            "send_notification requires breach_result and csa_terms to already be set on state"
+        )
+
+    call_amount = (
+        state.adjusted_call_amount
+        if state.approval_decision == "adjusted" and state.adjusted_call_amount is not None
+        else state.breach_result.call_amount
+    )
+    notice_text = draft_margin_call_notice(
+        state.counterparty_id,
+        call_amount,
+        state.csa_terms.currency,
+        state.csa_terms,
+        settings=settings,
+    )
+    result = send_slack_notice(notice_text, settings=settings)
+    return {"notification_result": result}
+
+
 def _route_after_breach(state: MarginCallState) -> str:
     if state.breach_result is not None and state.breach_result.breached:
         return "await_approval"
+    return END
+
+
+def _route_after_approval(state: MarginCallState) -> str:
+    if state.approval_decision in ("approved", "adjusted"):
+        return "send_notification"
     return END
 
 
@@ -303,11 +337,23 @@ def build_orchestrator_graph(
         )
         return result
 
+    def _send_notification_node(state: MarginCallState) -> dict:
+        log = logger.bind(
+            correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
+        )
+        result = send_notification(state, settings)
+        log.info(
+            "send_notification_completed",
+            slack_channel=result["notification_result"].slack_channel,
+        )
+        return result
+
     graph = StateGraph(MarginCallState)
     graph.add_node("compute_exposure", _compute_exposure_node)
     graph.add_node("fetch_csa_terms", _fetch_csa_terms_node)
     graph.add_node("evaluate_breach", _evaluate_breach_node)
     graph.add_node("await_approval", await_approval)
+    graph.add_node("send_notification", _send_notification_node)
 
     graph.add_edge(START, "compute_exposure")
     graph.add_edge("compute_exposure", "fetch_csa_terms")
@@ -315,6 +361,11 @@ def build_orchestrator_graph(
     graph.add_conditional_edges(
         "evaluate_breach", _route_after_breach, {"await_approval": "await_approval", END: END}
     )
-    graph.add_edge("await_approval", END)
+    graph.add_conditional_edges(
+        "await_approval",
+        _route_after_approval,
+        {"send_notification": "send_notification", END: END},
+    )
+    graph.add_edge("send_notification", END)
 
     return graph.compile(checkpointer=checkpointer)
