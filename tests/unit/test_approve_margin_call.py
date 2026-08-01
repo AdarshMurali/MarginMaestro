@@ -51,3 +51,43 @@ class TestApproveMarginCall:
         response = client.post("/margin-calls/evt-1:CP-1/approve", json={"decision": "maybe"})
 
         assert response.status_code == 422
+
+
+class TestRespondToMarginCall:
+    def test_resumes_with_a_responded_signal(self) -> None:
+        with (
+            patch("api.main.get_orchestrator_graph", return_value=MagicMock()) as mock_get_graph,
+            patch("api.main.resume_run", return_value={"sla_outcome": "met"}) as mock_resume,
+        ):
+            response = client.post("/margin-calls/evt-1:CP-1/respond")
+
+        assert response.status_code == 200
+        assert response.json() == {"thread_id": "evt-1:CP-1", "sla_outcome": "met"}
+        mock_resume.assert_called_once_with(
+            mock_get_graph.return_value, "evt-1:CP-1", {"responded": True}
+        )
+
+
+class TestCheckMarginCallSla:
+    def test_resumes_with_a_check_signal(self) -> None:
+        with (
+            patch("api.main.get_orchestrator_graph", return_value=MagicMock()) as mock_get_graph,
+            patch("api.main.resume_run", return_value={"sla_outcome": "breached"}) as mock_resume,
+        ):
+            response = client.post("/margin-calls/evt-1:CP-1/check-sla")
+
+        assert response.status_code == 200
+        assert response.json() == {"thread_id": "evt-1:CP-1", "sla_outcome": "breached"}
+        mock_resume.assert_called_once_with(
+            mock_get_graph.return_value, "evt-1:CP-1", {"check": True}
+        )
+
+    def test_still_pending_returns_null_outcome(self) -> None:
+        with (
+            patch("api.main.get_orchestrator_graph", return_value=MagicMock()),
+            patch("api.main.resume_run", return_value={"__interrupt__": []}),
+        ):
+            response = client.post("/margin-calls/evt-1:CP-1/check-sla")
+
+        assert response.status_code == 200
+        assert response.json()["sla_outcome"] is None

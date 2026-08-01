@@ -84,7 +84,7 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 ## Phase 6 — Notify, SLA, Escalation (Epic: MM-40)
 
 - **MM-41** **Communication Agent** drafts notice; Slack MCP tool sends after approval.
-- **MM-42** SLA timer (`MARGIN_CALL_SLA_MINUTES`) with met/breached outcomes.
+- **MM-42** SLA timer (`MARGIN_CALL_SLA_MINUTES`) with met/breached outcomes. *(2026-08-01: no real counterparty-facing response channel exists in this demo, so "met" is signaled via a provisional `POST /margin-calls/{thread_id}/respond` endpoint standing in for the counterparty -- same "ships now, revisit at Phase 8's UI or when a real signal source exists" pattern as MM-37's approval endpoint. Deadline re-checks go through `POST /margin-calls/{thread_id}/check-sla`, a no-op if called before the deadline -- there's no real scheduler calling it periodically yet.)*
 - **MM-43** Escalation path: retrieve escalation procedure (RAG) → open a **ServiceNow** incident with full context.
 - **MM-44** End-to-end scenario test: shock → call → Slack → SLA breach → ServiceNow incident.
 
