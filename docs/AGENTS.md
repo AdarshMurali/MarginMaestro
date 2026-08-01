@@ -78,7 +78,7 @@ Legend — **Type:** `code` (deterministic), `llm` (reasoning/RAG/drafting), `hy
 - **Type:** code + RAG for procedure
 - **Responsibility:** After notification, run the SLA timer (`MARGIN_CALL_SLA_MINUTES`). If the call is met, record and close. If not, follow the **escalation-procedures** document (retrieved via RAG) and open a **ServiceNow** incident with full context.
 - **Tools:** timer (code); RAG retriever (escalation procedures); ServiceNow MCP tool.
-- **Note:** planned swap from Jira to ServiceNow for this escalation path only (see `docs/ROADMAP.md` Phase 6 note); Jira remains the dev-story tracker (MM-# tickets) and is unaffected. Needs an ADR before it actually changes.
+- **Note:** ServiceNow (not Jira) for this escalation path only, per `docs/adr/0007`; Jira remains the dev-story tracker (MM-# tickets) and is unaffected.
 
 ## Audit (cross-cutting)
 

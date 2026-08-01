@@ -4,7 +4,7 @@
 
 ## What this project is
 
-**MarginMaestro** automates the end-to-end **margin call lifecycle** using **LLM agent orchestration**, a **RAG pipeline** over legal/policy documents, and a **real-time streaming** backbone. A market event moves prices → exposure is recomputed → if a threshold breaks, a margin call is raised, a human approves it, the client is notified via Slack, an SLA timer runs, and non-response escalates to Jira — with a full audit trail throughout.
+**MarginMaestro** automates the end-to-end **margin call lifecycle** using **LLM agent orchestration**, a **RAG pipeline** over legal/policy documents, and a **real-time streaming** backbone. A market event moves prices → exposure is recomputed → if a threshold breaks, a margin call is raised, a human approves it, the client is notified via Slack, an SLA timer runs, and non-response escalates to ServiceNow — with a full audit trail throughout.
 
 It is a **portfolio / proof-of-concept** built to production-engineering standards. Data is **free + synthetic**. Margin math is **directionally correct**, not a certified risk model.
 
@@ -26,8 +26,8 @@ It is a **portfolio / proof-of-concept** built to production-engineering standar
 - **RAG store:** ChromaDB. **Relational:** Azure SQL (free tier).
 - **Streaming:** Kafka (Redpanda locally). Flink is **deferred** — only if a genuine windowed job is built (see `docs/adr/0003`).
 - **API:** FastAPI. **Frontend:** Next.js on Vercel.
-- **Tools exposed as MCP servers:** market data, Jira, Slack, RAG retriever.
-- **Notifications:** Slack. **Ticketing/escalation:** Jira *(planned swap to ServiceNow for this specific feature in Phase 6 — see `docs/ROADMAP.md`'s Phase 6 note; needs an ADR before it actually changes)*. **Secrets:** AWS Parameter Store.
+- **Tools exposed as MCP servers:** market data, Jira, Slack, ServiceNow, RAG retriever.
+- **Notifications:** Slack. **Escalation incidents:** ServiceNow (see `docs/adr/0007` — scoped to the SLA-escalation path only). **Dev-story tracker:** Jira (`MM-#` tickets; unaffected by the ServiceNow decision). **Secrets:** AWS Parameter Store.
 - **CI/CD:** GitHub Actions + Docker Hub. **Quality:** SonarCloud + pytest-cov. **IaC:** Terraform.
 
 ## Commands (keep these current)
