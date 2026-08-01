@@ -452,6 +452,29 @@ class TestBuildOrchestratorGraph:
         assert resumed["approval_decision"] == "adjusted"
         assert resumed["adjusted_call_amount"] == 42_000.0
 
+    def test_resume_with_rejected_decision_completes_the_run(self, session_factory) -> None:
+        _seed_breach_scenario(session_factory)
+        state = _state()
+
+        with patch(
+            "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+        ):
+            graph = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=_breach_market_feed(),
+                settings=Settings(_env_file=None),
+            )
+            start_run(graph, state)
+            resumed = resume_run(
+                graph,
+                thread_id_for(state.impact, state.counterparty_id),
+                {"decision": "rejected"},
+            )
+
+        assert "__interrupt__" not in resumed
+        assert resumed["approval_decision"] == "rejected"
+        assert resumed["adjusted_call_amount"] is None
+
 
 def _seed_breach_scenario(session_factory) -> None:
     _seed_position(session_factory, "CP-1", "TSLA", 1000)
