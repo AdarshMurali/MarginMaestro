@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from config.settings import get_settings
+from config.settings import Settings, get_settings
 from persistence.models import RatingGrade
 from streaming.market_feed import CompositeMarketFeed, MarketFeed, PriceQuote
 from streaming.producer import EventProducer
@@ -80,10 +80,11 @@ def run_scenario(
     scenario: MarketEventType,
     producer: EventProducer | None = None,
     base_feed: MarketFeed | None = None,
+    settings: Settings | None = None,
 ) -> None:
     """Publishes a scripted scenario onto market.prices (price_shock/vol_spike) or
     market.events (downgrade). Used by `make simulate SCENARIO=...`."""
-    settings = get_settings()
+    settings = settings or get_settings()
     producer = producer or EventProducer(settings)
 
     if scenario is MarketEventType.DOWNGRADE:
