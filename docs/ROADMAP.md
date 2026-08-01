@@ -71,13 +71,13 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 
 **Exit criteria:** injecting a synthetic shock produces an impact set on the stream, idempotently.
 
-## Phase 5 — Orchestration core (Epic: MM-EPIC-5)
+## Phase 5 — Orchestration core (Epic: MM-34)
 
-- **MM-50** LangGraph state object + orchestrator skeleton.
-- **MM-51** Wire the happy path: event → calc → CSA-RAG → breach evaluation → (no-call | proceed).
-- **MM-52** **Human approval gate** node (pause/resume; approve/reject/adjust).
-- **MM-53** Idempotent run handling + per-run correlation id.
-- **MM-54** Orchestration tests: assert branch taken (breach vs no-breach, approve vs reject) with mocked LLM/tools.
+- **MM-35** LangGraph state object + orchestrator skeleton.
+- **MM-36** Wire the happy path: event → calc → CSA-RAG → breach evaluation → (no-call | proceed).
+- **MM-37** **Human approval gate** node (pause/resume; approve/reject/adjust) + minimal approval endpoint. *(2026-08-01: ships now so a human can actually exercise this before Phase 8's UI exists; flagged as provisional -- revisit its design at Phase 8, or whenever else becomes relevant, and get explicit user approval before considering it closed/final.)*
+- **MM-38** Idempotent run handling + per-run correlation id, with **persisted** (Azure SQL) LangGraph checkpointing -- an awaiting-approval run must survive a process restart, given `MARGIN_CALL_SLA_MINUTES` is long enough for that to matter.
+- **MM-39** Orchestration tests: assert branch taken (breach vs no-breach, approve vs reject) with mocked LLM/tools.
 
 **Exit criteria:** a synthetic event drives a full evaluate→breach→await-approval flow, tested.
 
