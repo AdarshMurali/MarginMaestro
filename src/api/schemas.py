@@ -91,6 +91,10 @@ class MarginCallSummary(BaseModel):
     currency: str = "USD"
     approval_decision: str | None = None
     sla_outcome: str | None = None
+    notification_sent_at: datetime | None = None
+    # notification_sent_at + Settings.margin_call_sla_minutes -- computed
+    # server-side so the frontend doesn't need to know the SLA policy.
+    sla_deadline: datetime | None = None
 
 
 class MarginCallFeedResponse(BaseModel):

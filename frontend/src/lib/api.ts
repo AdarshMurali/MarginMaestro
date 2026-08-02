@@ -64,6 +64,8 @@ export interface MarginCallSummary {
   currency: string;
   approval_decision: string | null;
   sla_outcome: string | null;
+  notification_sent_at: string | null;
+  sla_deadline: string | null;
 }
 
 export interface MarginCallFeedResponse {
@@ -94,6 +96,18 @@ async function getJson<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function postJson<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    throw new Error(`POST ${path} failed: ${res.status} ${res.statusText}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export function getHealth(): Promise<HealthResponse> {
   return getJson<HealthResponse>("/health");
 }
@@ -120,4 +134,36 @@ export function getMarginCallTrace(threadId: string): Promise<MarginCallTraceRes
   return getJson<MarginCallTraceResponse>(
     `/margin-calls/${encodeURIComponent(threadId)}/trace`,
   );
+}
+
+export type ApprovalDecision = "approved" | "rejected" | "adjusted";
+
+export interface ApprovalResponse {
+  thread_id: string;
+  approval_decision: string | null;
+  adjusted_call_amount: number | null;
+}
+
+export interface SlaResponse {
+  thread_id: string;
+  sla_outcome: string | null;
+}
+
+export function postApproval(
+  threadId: string,
+  decision: ApprovalDecision,
+  adjustedCallAmount?: number,
+): Promise<ApprovalResponse> {
+  return postJson<ApprovalResponse>(`/margin-calls/${encodeURIComponent(threadId)}/approve`, {
+    decision,
+    adjusted_call_amount: adjustedCallAmount ?? null,
+  });
+}
+
+export function postRespond(threadId: string): Promise<SlaResponse> {
+  return postJson<SlaResponse>(`/margin-calls/${encodeURIComponent(threadId)}/respond`);
+}
+
+export function postCheckSla(threadId: string): Promise<SlaResponse> {
+  return postJson<SlaResponse>(`/margin-calls/${encodeURIComponent(threadId)}/check-sla`);
 }

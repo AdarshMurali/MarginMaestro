@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -202,6 +202,7 @@ class TestListMarginCalls:
         _seed_scenario(session_factory, "CP-MET")
         _seed_scenario(session_factory, "CP-ESCALATED")
         _seed_scenario(session_factory, "CP-AWAITINGSLA")
+        _seed_scenario(session_factory, "CP-ADJUSTED")
 
         notify_patches = _patch_notify()
         with (
@@ -253,6 +254,14 @@ class TestListMarginCalls:
                 {"decision": "approved"},
             )
 
+            adjusted_state = _state("evt-adjusted", "CP-ADJUSTED")
+            start_run(graph, adjusted_state)
+            resume_run(
+                graph,
+                thread_id_for(adjusted_state.impact, "CP-ADJUSTED"),
+                {"decision": "adjusted", "adjusted_call_amount": 42_000.0},
+            )
+
             esc_state = _state("evt-escalated", "CP-ESCALATED")
             sla_zero_graph = build_orchestrator_graph(
                 session_factory=session_factory,
@@ -292,11 +301,20 @@ class TestListMarginCalls:
             "CP-MET",
             "CP-ESCALATED",
             "CP-AWAITINGSLA",
+            "CP-ADJUSTED",
         }
-        assert (
-            by_counterparty["CP-AWAITINGSLA"].status
-            == MarginCallLifecycleStatus.AWAITING_SLA_RESPONSE
-        )
+        # Found live (MM-55): call_amount must reflect the *adjusted* figure
+        # once approval_decision is "adjusted", not the original breach
+        # amount that's no longer what was actually called for.
+        assert by_counterparty["CP-ADJUSTED"].approval_decision == "adjusted"
+        assert by_counterparty["CP-ADJUSTED"].call_amount == pytest.approx(42_000.0)
+        awaiting = by_counterparty["CP-AWAITINGSLA"]
+        assert awaiting.status == MarginCallLifecycleStatus.AWAITING_SLA_RESPONSE
+        assert awaiting.notification_sent_at is not None
+        # Settings(_env_file=None) defaults margin_call_sla_minutes to 60.
+        assert awaiting.sla_deadline == awaiting.notification_sent_at + timedelta(minutes=60)
+        assert by_counterparty["CP-MET"].sla_deadline is not None
+        assert by_counterparty["CP-PENDING"].sla_deadline is None
         assert by_counterparty["CP-NOBREACH"].status == MarginCallLifecycleStatus.NO_BREACH
         # evaluate_breach always returns a BreachResult, even when not
         # breached -- call_amount is a real 0.0, not None (None means "no
