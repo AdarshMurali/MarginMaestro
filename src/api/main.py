@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from agents.orchestrator import build_orchestrator_graph, resume_run
 from api.exposure import build_exposure_board, get_price_history
 from api.logging_config import configure_logging
+from api.margin_call_trace import get_margin_call_trace
 from api.margin_calls import list_margin_calls
 from api.middleware import CorrelationIdMiddleware
 from api.schemas import (
@@ -16,6 +17,7 @@ from api.schemas import (
     ExposureBoardResponse,
     HealthResponse,
     MarginCallFeedResponse,
+    MarginCallTraceResponse,
     PriceHistoryResponse,
     SlaResponse,
 )
@@ -88,6 +90,15 @@ async def margin_call_feed() -> MarginCallFeedResponse:
     graph = get_orchestrator_graph()
     with session_factory() as session:
         return list_margin_calls(graph, session)
+
+
+@app.get("/margin-calls/{thread_id}/trace", response_model=MarginCallTraceResponse)
+async def margin_call_trace(thread_id: str) -> MarginCallTraceResponse:
+    graph = get_orchestrator_graph()
+    trace = get_margin_call_trace(graph, thread_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail=f"No run found for thread_id {thread_id!r}")
+    return trace
 
 
 @app.get("/exposure", response_model=ExposureBoardResponse)

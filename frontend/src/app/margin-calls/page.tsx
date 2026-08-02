@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import { Logo } from "@/components/logo";
 import { LifecycleStatusLight } from "@/components/lifecycle-status-light";
@@ -38,7 +39,15 @@ function MarginCallCard({ item }: { item: MarginCallSummary }) {
             {item.sla_outcome ?? "--"}
           </div>
         </div>
-        <div className="text-xs text-muted-foreground">{formatDateTime(item.occurred_at)}</div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">{formatDateTime(item.occurred_at)}</span>
+          <Link
+            href={`/margin-calls/${encodeURIComponent(item.thread_id)}/trace`}
+            className="text-xs text-primary underline underline-offset-4"
+          >
+            View agent trace &rarr;
+          </Link>
+        </div>
       </CardContent>
     </Card>
   );
