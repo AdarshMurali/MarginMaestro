@@ -98,6 +98,24 @@ class MarginCallFeedResponse(BaseModel):
     margin_calls: list[MarginCallSummary]
 
 
+class TraceStepStatus(StrEnum):
+    COMPLETED = "completed"
+    IN_PROGRESS = "in_progress"
+
+
+class TraceStep(BaseModel):
+    step: int
+    node: str
+    status: TraceStepStatus
+    completed_at: datetime | None = None
+    summary: str
+
+
+class MarginCallTraceResponse(BaseModel):
+    thread_id: str
+    steps: list[TraceStep]
+
+
 class ApprovalRequest(BaseModel):
     """decision must be one of MarginCallState.approval_decision's literals.
     adjusted_call_amount is only read when decision == "adjusted"."""

@@ -71,6 +71,21 @@ export interface MarginCallFeedResponse {
   margin_calls: MarginCallSummary[];
 }
 
+export type TraceStepStatus = "completed" | "in_progress";
+
+export interface TraceStep {
+  step: number;
+  node: string;
+  status: TraceStepStatus;
+  completed_at: string | null;
+  summary: string;
+}
+
+export interface MarginCallTraceResponse {
+  thread_id: string;
+  steps: TraceStep[];
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`);
   if (!res.ok) {
@@ -99,4 +114,10 @@ export function getPriceHistory(ticker: string, days = 30): Promise<PriceHistory
 
 export function getMarginCallFeed(): Promise<MarginCallFeedResponse> {
   return getJson<MarginCallFeedResponse>("/margin-calls");
+}
+
+export function getMarginCallTrace(threadId: string): Promise<MarginCallTraceResponse> {
+  return getJson<MarginCallTraceResponse>(
+    `/margin-calls/${encodeURIComponent(threadId)}/trace`,
+  );
 }
