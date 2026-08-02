@@ -1,11 +1,22 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
+from api.auth import require_approver
 from api.main import app
 from api.schemas import SimulatedCounterpartyResult, SimulateEventResponse
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _authenticated_as_approver():
+    """Role-gating itself is covered separately in tests/unit/test_auth.py
+    against the real (non-overridden) dependency."""
+    app.dependency_overrides[require_approver] = lambda: "test-approver"
+    yield
+    app.dependency_overrides.pop(require_approver, None)
 
 
 class TestSimulateEndpoint:

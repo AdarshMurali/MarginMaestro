@@ -35,6 +35,7 @@ data = ["yfinance", "pandas", "fredapi", "faker"]
 db = ["sqlalchemy", "pyodbc", "alembic"]
 aws = ["boto3"]
 notify = ["slack-sdk"]
+auth = ["bcrypt", "pyjwt"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

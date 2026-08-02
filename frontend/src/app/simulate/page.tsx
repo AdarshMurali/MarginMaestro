@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 
 import { Logo } from "@/components/logo";
 import { StatusLight } from "@/components/status-light";
@@ -35,17 +36,20 @@ const SCENARIOS: { value: SimulateScenario; label: string; description: string }
 ];
 
 export default function SimulatePage() {
+  const { data: session } = useSession();
+  const canAct = session?.user.role === "approver";
   const [scenario, setScenario] = useState<SimulateScenario>("price_shock");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SimulateEventResponse | null>(null);
 
   const trigger = async () => {
+    if (!session) return;
     setBusy(true);
     setError(null);
     setResult(null);
     try {
-      const response = await postSimulateEvent(scenario);
+      const response = await postSimulateEvent(session.backendAccessToken, scenario);
       setResult(response);
     } catch {
       setError("Simulation failed -- is the API running?");
@@ -86,9 +90,12 @@ export default function SimulatePage() {
           <p className="text-xs text-muted-foreground">
             {SCENARIOS.find((s) => s.value === scenario)?.description}
           </p>
-          <Button disabled={busy} onClick={trigger} className="w-fit">
+          <Button disabled={busy || !canAct} onClick={trigger} className="w-fit">
             {busy ? "Simulating..." : "Trigger simulation"}
           </Button>
+          {!canAct && (
+            <p className="text-xs text-muted-foreground">Viewer role -- read-only.</p>
+          )}
           {error && <p className="text-sm text-status-danger">{error}</p>}
         </CardContent>
       </Card>

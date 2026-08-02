@@ -1,11 +1,12 @@
 from functools import lru_cache
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy.orm import Session, sessionmaker
 
 from agents.orchestrator import build_orchestrator_graph, resume_run
+from api.auth import require_approver, verify_credentials
 from api.exposure import build_exposure_board, get_price_history
 from api.logging_config import configure_logging
 from api.margin_call_trace import get_margin_call_trace
@@ -14,6 +15,8 @@ from api.middleware import CorrelationIdMiddleware
 from api.schemas import (
     ApprovalRequest,
     ApprovalResponse,
+    AuthVerifyRequest,
+    AuthVerifyResponse,
     ExposureBoardResponse,
     HealthResponse,
     MarginCallFeedResponse,
@@ -64,10 +67,26 @@ async def ready() -> HealthResponse:
     return HealthResponse(status="ready")
 
 
+@app.post("/auth/verify", response_model=AuthVerifyResponse)
+async def auth_verify(body: AuthVerifyRequest) -> AuthVerifyResponse:
+    """Called server-side by the frontend's NextAuth Credentials provider --
+    never called directly by a browser. The only place this backend sees a
+    plaintext password."""
+    session_factory = get_db_session_factory()
+    with session_factory() as session:
+        role = verify_credentials(body.username, body.password, session)
+    if role is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    return AuthVerifyResponse(username=body.username, role=role)
+
+
 @app.post("/margin-calls/{thread_id}/approve", response_model=ApprovalResponse)
-async def approve_margin_call(thread_id: str, body: ApprovalRequest) -> ApprovalResponse:
-    """PROVISIONAL (see MM-37 note in docs/ROADMAP.md): no auth, no audit
-    trail yet. Revisit before treating as final."""
+async def approve_margin_call(
+    thread_id: str, body: ApprovalRequest, _approver: str = Depends(require_approver)
+) -> ApprovalResponse:
+    """PROVISIONAL (see MM-37 note in docs/ROADMAP.md): audit trail
+    (who/when, not just role-gating) is still Phase 9's MM-91. Revisit
+    before treating as final."""
     graph = get_orchestrator_graph()
     resume_payload = {"decision": body.decision, "adjusted_call_amount": body.adjusted_call_amount}
     result = resume_run(graph, thread_id, resume_payload)
@@ -79,7 +98,9 @@ async def approve_margin_call(thread_id: str, body: ApprovalRequest) -> Approval
 
 
 @app.post("/margin-calls/{thread_id}/respond", response_model=SlaResponse)
-async def respond_to_margin_call(thread_id: str) -> SlaResponse:
+async def respond_to_margin_call(
+    thread_id: str, _approver: str = Depends(require_approver)
+) -> SlaResponse:
     """PROVISIONAL (MM-42): stands in for a real counterparty-facing response
     channel, which doesn't exist in this demo -- simulates the counterparty
     fulfilling the call within the SLA window. See docs/ROADMAP.md's Phase 6
@@ -97,7 +118,9 @@ async def margin_call_feed() -> MarginCallFeedResponse:
 
 
 @app.post("/simulate", response_model=SimulateEventResponse)
-async def simulate_event(body: SimulateEventRequest) -> SimulateEventResponse:
+async def simulate_event(
+    body: SimulateEventRequest, _approver: str = Depends(require_approver)
+) -> SimulateEventResponse:
     session_factory = get_db_session_factory()
     settings = get_settings()
     with session_factory() as session:
@@ -132,7 +155,9 @@ async def price_history(ticker: str, days: int = 30) -> PriceHistoryResponse:
 
 
 @app.post("/margin-calls/{thread_id}/check-sla", response_model=SlaResponse)
-async def check_margin_call_sla(thread_id: str) -> SlaResponse:
+async def check_margin_call_sla(
+    thread_id: str, _approver: str = Depends(require_approver)
+) -> SlaResponse:
     """PROVISIONAL (MM-42): re-evaluates whether the SLA deadline has passed.
     A no-op (stays pending) if called before the deadline -- there's no real
     scheduler calling this periodically yet; a human or a future cron would

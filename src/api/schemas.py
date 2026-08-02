@@ -148,6 +148,16 @@ class SimulateEventResponse(BaseModel):
     affected_counterparties: list[SimulatedCounterpartyResult]
 
 
+class AuthVerifyRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthVerifyResponse(BaseModel):
+    username: str
+    role: str
+
+
 class ApprovalRequest(BaseModel):
     """decision must be one of MarginCallState.approval_decision's literals.
     adjusted_call_amount is only read when decision == "adjusted"."""
