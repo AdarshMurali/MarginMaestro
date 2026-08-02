@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 
-import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -205,7 +204,6 @@ export default function ApprovalsPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-6 py-12">
-      <Logo size={32} />
       <h1 className="text-xl font-semibold">Approvals &amp; SLA</h1>
 
       {error && (

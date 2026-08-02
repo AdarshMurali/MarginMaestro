@@ -5,7 +5,6 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 
 import { AgentTrace } from "@/components/agent-trace";
-import { Logo } from "@/components/logo";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getMarginCallTrace, type MarginCallTraceResponse } from "@/lib/api";
 
@@ -35,7 +34,6 @@ export default function MarginCallTracePage() {
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-12">
-      <Logo size={32} />
       <div className="flex flex-col gap-1">
         <Link href="/margin-calls" className="text-sm text-primary underline underline-offset-4">
           &larr; Back to margin calls

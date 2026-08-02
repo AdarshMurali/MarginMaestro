@@ -10,7 +10,7 @@ export function SessionBar() {
   if (status !== "authenticated") return null;
 
   return (
-    <div className="flex items-center justify-end gap-3 px-6 py-2 text-xs text-muted-foreground">
+    <div className="flex items-center gap-3 text-xs text-muted-foreground">
       <span>
         Signed in as <span className="font-mono">{session.user.name}</span> (
         {session.user.role})

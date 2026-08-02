@@ -4,7 +4,6 @@ import { useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 
-import { Logo } from "@/components/logo";
 import { StatusLight } from "@/components/status-light";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,7 +59,6 @@ export default function SimulatePage() {
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-12">
-      <Logo size={32} />
       <h1 className="text-xl font-semibold">Simulate Event</h1>
       <p className="text-sm text-muted-foreground">
         Triggers the real orchestrator lifecycle for every real counterparty currently

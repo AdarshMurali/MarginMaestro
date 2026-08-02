@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { Logo } from "@/components/logo";
 import { LifecycleStatusLight } from "@/components/lifecycle-status-light";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getMarginCallFeed, type MarginCallFeedResponse, type MarginCallSummary } from "@/lib/api";
@@ -73,7 +72,6 @@ export default function MarginCallsPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-6 py-12">
-      <Logo size={32} />
       <h1 className="text-xl font-semibold">Margin Calls</h1>
 
       {error && (
