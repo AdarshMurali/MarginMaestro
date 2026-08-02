@@ -1,14 +1,25 @@
 from functools import lru_cache
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langgraph.graph.state import CompiledStateGraph
+from sqlalchemy.orm import Session, sessionmaker
 
 from agents.orchestrator import build_orchestrator_graph, resume_run
+from api.exposure import build_exposure_board, get_price_history
 from api.logging_config import configure_logging
 from api.middleware import CorrelationIdMiddleware
-from api.schemas import ApprovalRequest, ApprovalResponse, HealthResponse, SlaResponse
+from api.schemas import (
+    ApprovalRequest,
+    ApprovalResponse,
+    ExposureBoardResponse,
+    HealthResponse,
+    PriceHistoryResponse,
+    SlaResponse,
+)
 from config.settings import get_settings
+from persistence.db.engine import get_session_factory
+from streaming.market_feed import MarketDataUnavailableError, get_market_feed
 
 configure_logging()
 
@@ -28,6 +39,11 @@ def get_orchestrator_graph() -> CompiledStateGraph:
     """Module-level singleton so the (currently in-memory, MM-38 makes this
     persisted) checkpointer is shared across requests within this process."""
     return build_orchestrator_graph()
+
+
+@lru_cache
+def get_db_session_factory() -> sessionmaker[Session]:
+    return get_session_factory()
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -62,6 +78,22 @@ async def respond_to_margin_call(thread_id: str) -> SlaResponse:
     note; revisit before treating as final."""
     result = resume_run(get_orchestrator_graph(), thread_id, {"responded": True})
     return SlaResponse(thread_id=thread_id, sla_outcome=result.get("sla_outcome"))
+
+
+@app.get("/exposure", response_model=ExposureBoardResponse)
+async def exposure_board() -> ExposureBoardResponse:
+    session_factory = get_db_session_factory()
+    market_feed = get_market_feed()
+    with session_factory() as session:
+        return build_exposure_board(session, market_feed)
+
+
+@app.get("/prices/{ticker}/history", response_model=PriceHistoryResponse)
+async def price_history(ticker: str, days: int = 30) -> PriceHistoryResponse:
+    try:
+        return get_price_history(ticker, days=days)
+    except MarketDataUnavailableError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post("/margin-calls/{thread_id}/check-sla", response_model=SlaResponse)

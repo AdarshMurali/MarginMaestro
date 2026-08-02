@@ -7,7 +7,12 @@ Run explicitly with: pytest -m live tests/integration/test_market_feed_live.py
 
 import pytest
 
-from streaming.market_feed import CoinGeckoFeed, CompositeMarketFeed, YFinanceFeed
+from streaming.market_feed import (
+    CoinGeckoFeed,
+    CompositeMarketFeed,
+    YFinanceFeed,
+    get_price_history,
+)
 
 pytestmark = pytest.mark.live
 
@@ -30,3 +35,18 @@ def test_composite_feed_prices_mixed_universe_subset() -> None:
 
     assert len(result) == 3
     assert all(quote.price > 0 for quote in result.values())
+
+
+def test_get_price_history_returns_real_daily_closes_for_equity() -> None:
+    result = get_price_history("AAPL", days=30)
+
+    assert len(result) > 5
+    assert all(point.price > 0 for point in result)
+    assert result == sorted(result, key=lambda p: p.date)
+
+
+def test_get_price_history_returns_real_daily_closes_for_crypto() -> None:
+    result = get_price_history("BTC-USD", days=30)
+
+    assert len(result) > 5
+    assert all(point.price > 0 for point in result)
