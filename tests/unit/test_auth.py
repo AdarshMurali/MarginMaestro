@@ -137,9 +137,13 @@ class TestGatingAgainstTheRealDependency:
     client = TestClient(app)
 
     def test_approve_without_a_token_is_rejected(self) -> None:
-        response = self.client.post(
-            "/margin-calls/evt-1:CP-1/approve", json={"decision": "approved"}
-        )
+        with patch(
+            "api.auth.get_settings",
+            return_value=Settings(_env_file=None, auth_backend_secret=TEST_SECRET),
+        ):
+            response = self.client.post(
+                "/margin-calls/evt-1:CP-1/approve", json={"decision": "approved"}
+            )
 
         assert response.status_code == 401
 
