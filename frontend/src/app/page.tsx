@@ -90,6 +90,9 @@ export default function Home() {
       <Link href="/margin-calls" className="text-sm text-primary underline underline-offset-4">
         View Margin Calls feed (MM-53) &rarr;
       </Link>
+      <Link href="/approvals" className="text-sm text-primary underline underline-offset-4">
+        View Approvals &amp; SLA (MM-55) &rarr;
+      </Link>
     </main>
   );
 }
