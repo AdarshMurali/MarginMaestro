@@ -64,6 +64,13 @@ class SimulatedMarketFeed:
         return results
 
 
+def scenario_tickers(scenario: MarketEventType) -> list[str]:
+    """Tickers a price-driven scenario shocks -- shared by the Kafka
+    publisher (run_scenario, below) and MM-56's direct-orchestrator simulate
+    endpoint, so both stay defined by this one scenario table."""
+    return list(_PRICE_SCENARIOS[scenario].ticker_deltas)
+
+
 def _build_downgrade_event() -> MarketEvent:
     return MarketEvent(
         event_id=str(uuid4()),
