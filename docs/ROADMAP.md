@@ -103,15 +103,18 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 
 **Exit criteria:** disputes are detected + explained; collateral is selected optimally.
 
-## Phase 8 — Frontend dashboard (Epic: MM-EPIC-8)
+## Phase 8 — Frontend dashboard (Epic: MM-50)
 
-- **MM-80** Next.js app on Vercel; connect to API via REST + WebSocket/SSE.
-- **MM-81** Positions & exposure board (status lights) + live price chart.
-- **MM-82** Margin-call feed + lifecycle status.
-- **MM-83** **Agent activity / orchestration trace** (the showpiece).
-- **MM-84** Approval control + SLA/escalation view.
-- **MM-85** "Simulate event" panel to trigger the lifecycle live.
-- **TBD** UI/UX design pass (visual design system, copy/tone/taglines) + user login & roles (e.g. Approver vs Viewer) — not yet scoped, to be planned when Phase 8 starts.
+> **Note (2026-08-02):** design pass completed before coding, per [[feedback_phase_workflow]]. Dark-only theme (charcoal-navy background, amber/gold brand accent, green/amber/red/blue status colors), Next.js + Tailwind + shadcn/ui + Tremor (charts) + Framer Motion (Agent Trace only), NextAuth Credentials provider with seeded Approver/Viewer demo accounts (no external auth vendor), typographic "MM" monogram logo/favicon (inline SVG, no external design asset). Six tabs: Home, Positions & Exposure, Margin Calls, Agent Trace, Approvals & SLA, Simulate Event. Tagline *"Stop reading documents. Start making decisions."* placed in header + near RAG-citation surfaces.
+
+- **MM-51** Next.js app on Vercel; design system (Tailwind theme tokens, dark palette, shadcn setup, "MM" logo/favicon SVGs, typography incl. monospace for figures); connect to API via REST + WebSocket/SSE.
+- **MM-52** Positions & exposure board (status lights) + live price chart.
+- **MM-53** Margin-call feed + lifecycle status.
+- **MM-54** **Agent activity / orchestration trace** (the showpiece).
+- **MM-55** Approval control + SLA/escalation view.
+- **MM-56** "Simulate event" panel to trigger the lifecycle live.
+- **MM-57** Auth: NextAuth Credentials provider, seeded Approver/Viewer accounts (Azure SQL), role-gated approval actions.
+- **MM-58** Home/overview page (KPI strip, live activity ticker, "Simulate an event" CTA) + nav shell + copywriting pass (tagline placement, empty states).
 
 **Exit criteria:** a viewer can inject an event and watch the whole lifecycle unfold on screen.
 
