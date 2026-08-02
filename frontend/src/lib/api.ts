@@ -43,6 +43,34 @@ export interface PriceHistoryResponse {
   points: PricePoint[];
 }
 
+export type MarginCallLifecycleStatus =
+  | "evaluating"
+  | "no_breach"
+  | "awaiting_approval"
+  | "rejected"
+  | "awaiting_sla_response"
+  | "sla_met"
+  | "escalated";
+
+export interface MarginCallSummary {
+  thread_id: string;
+  correlation_id: string;
+  counterparty_id: string;
+  event_type: string;
+  reason: string;
+  occurred_at: string;
+  status: MarginCallLifecycleStatus;
+  call_amount: number | null;
+  currency: string;
+  approval_decision: string | null;
+  sla_outcome: string | null;
+}
+
+export interface MarginCallFeedResponse {
+  as_of: string;
+  margin_calls: MarginCallSummary[];
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`);
   if (!res.ok) {
@@ -67,4 +95,8 @@ export function getPriceHistory(ticker: string, days = 30): Promise<PriceHistory
   return getJson<PriceHistoryResponse>(
     `/prices/${encodeURIComponent(ticker)}/history?days=${days}`,
   );
+}
+
+export function getMarginCallFeed(): Promise<MarginCallFeedResponse> {
+  return getJson<MarginCallFeedResponse>("/margin-calls");
 }

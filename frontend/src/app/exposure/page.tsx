@@ -22,11 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getExposureBoard, type CounterpartyExposure, type ExposureBoardResponse } from "@/lib/api";
-
-function formatUsd(value: number | null, currency: string): string {
-  if (value === null) return "--";
-  return value.toLocaleString(undefined, { style: "currency", currency, maximumFractionDigits: 0 });
-}
+import { formatUsd } from "@/lib/format";
 
 function CounterpartyCard({ item }: { item: CounterpartyExposure }) {
   return (

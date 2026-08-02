@@ -61,6 +61,43 @@ class PriceHistoryResponse(BaseModel):
     points: list[PricePoint]
 
 
+class MarginCallLifecycleStatus(StrEnum):
+    """Mirrors agents.orchestrator's actual graph routing (docs/AGENTS.md's
+    lifecycle), not an independent state machine -- see api/margin_calls.py's
+    _lifecycle_status for exactly how each value maps to MarginCallState
+    fields. EVALUATING never persists in practice (the graph runs straight
+    through to its first interrupt or NO_BREACH/END before any checkpoint
+    write completes) but is kept as a defensive fallback, not a real steady
+    state a run sits in."""
+
+    EVALUATING = "evaluating"
+    NO_BREACH = "no_breach"
+    AWAITING_APPROVAL = "awaiting_approval"
+    REJECTED = "rejected"
+    AWAITING_SLA_RESPONSE = "awaiting_sla_response"
+    SLA_MET = "sla_met"
+    ESCALATED = "escalated"
+
+
+class MarginCallSummary(BaseModel):
+    thread_id: str
+    correlation_id: str
+    counterparty_id: str
+    event_type: str
+    reason: str
+    occurred_at: datetime
+    status: MarginCallLifecycleStatus
+    call_amount: float | None = None
+    currency: str = "USD"
+    approval_decision: str | None = None
+    sla_outcome: str | None = None
+
+
+class MarginCallFeedResponse(BaseModel):
+    as_of: datetime
+    margin_calls: list[MarginCallSummary]
+
+
 class ApprovalRequest(BaseModel):
     """decision must be one of MarginCallState.approval_decision's literals.
     adjusted_call_amount is only read when decision == "adjusted"."""
