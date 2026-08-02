@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
@@ -24,9 +25,13 @@ function slaRemainingLabel(deadline: string): string {
 
 function ApprovalCard({
   item,
+  token,
+  canAct,
   onActed,
 }: {
   item: MarginCallSummary;
+  token: string;
+  canAct: boolean;
   onActed: () => void;
 }) {
   const [adjusting, setAdjusting] = useState(false);
@@ -43,7 +48,7 @@ function ApprovalCard({
         if (decision === "adjusted" && (!amount || Number.isNaN(adjustedAmount))) {
           throw new Error("Enter a valid adjusted amount first.");
         }
-        await postApproval(item.thread_id, decision, adjustedAmount);
+        await postApproval(token, item.thread_id, decision, adjustedAmount);
         onActed();
       } catch {
         setError("Action failed -- is the API running?");
@@ -51,7 +56,7 @@ function ApprovalCard({
         setBusy(false);
       }
     },
-    [amount, item.thread_id, onActed],
+    [amount, token, item.thread_id, onActed],
   );
 
   return (
@@ -66,41 +71,63 @@ function ApprovalCard({
         </p>
 
         {error && <p className="text-status-danger">{error}</p>}
+        {!canAct && (
+          <p className="text-xs text-muted-foreground">Viewer role -- read-only.</p>
+        )}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" disabled={busy} onClick={() => act("approved")}>
-            Approve
-          </Button>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => act("rejected")}>
-            Reject
-          </Button>
-          {!adjusting && (
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => setAdjusting(true)}>
-              Adjust...
-            </Button>
-          )}
-        </div>
+        {canAct && (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" disabled={busy} onClick={() => act("approved")}>
+                Approve
+              </Button>
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => act("rejected")}>
+                Reject
+              </Button>
+              {!adjusting && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => setAdjusting(true)}
+                >
+                  Adjust...
+                </Button>
+              )}
+            </div>
 
-        {adjusting && (
-          <div className="flex items-center gap-2">
-            <Input
-              type="number"
-              placeholder="Adjusted amount"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              className="max-w-40 font-mono"
-            />
-            <Button size="sm" disabled={busy} onClick={() => act("adjusted")}>
-              Confirm
-            </Button>
-          </div>
+            {adjusting && (
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  placeholder="Adjusted amount"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className="max-w-40 font-mono"
+                />
+                <Button size="sm" disabled={busy} onClick={() => act("adjusted")}>
+                  Confirm
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
   );
 }
 
-function SlaCard({ item, onActed }: { item: MarginCallSummary; onActed: () => void }) {
+function SlaCard({
+  item,
+  token,
+  canAct,
+  onActed,
+}: {
+  item: MarginCallSummary;
+  token: string;
+  canAct: boolean;
+  onActed: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,8 +136,8 @@ function SlaCard({ item, onActed }: { item: MarginCallSummary; onActed: () => vo
       setError(null);
       setBusy(true);
       try {
-        if (action === "respond") await postRespond(item.thread_id);
-        else await postCheckSla(item.thread_id);
+        if (action === "respond") await postRespond(token, item.thread_id);
+        else await postCheckSla(token, item.thread_id);
         onActed();
       } catch {
         setError("Action failed -- is the API running?");
@@ -118,7 +145,7 @@ function SlaCard({ item, onActed }: { item: MarginCallSummary; onActed: () => vo
         setBusy(false);
       }
     },
-    [item.thread_id, onActed],
+    [token, item.thread_id, onActed],
   );
 
   return (
@@ -137,21 +164,27 @@ function SlaCard({ item, onActed }: { item: MarginCallSummary; onActed: () => vo
         )}
 
         {error && <p className="text-status-danger">{error}</p>}
+        {!canAct && (
+          <p className="text-xs text-muted-foreground">Viewer role -- read-only.</p>
+        )}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" disabled={busy} onClick={() => act("respond")}>
-            Simulate counterparty response
-          </Button>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => act("check")}>
-            Check SLA deadline
-          </Button>
-        </div>
+        {canAct && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" disabled={busy} onClick={() => act("respond")}>
+              Simulate counterparty response
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => act("check")}>
+              Check SLA deadline
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
 }
 
 export default function ApprovalsPage() {
+  const { data: session } = useSession();
   const [items, setItems] = useState<MarginCallSummary[] | null>(null);
   const [error, setError] = useState(false);
 
@@ -167,6 +200,8 @@ export default function ApprovalsPage() {
 
   const awaitingApproval = items?.filter((item) => item.status === "awaiting_approval") ?? [];
   const awaitingSla = items?.filter((item) => item.status === "awaiting_sla_response") ?? [];
+  const token = session?.backendAccessToken ?? "";
+  const canAct = session?.user.role === "approver";
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-6 py-12">
@@ -188,7 +223,13 @@ export default function ApprovalsPage() {
               <p className="text-sm text-muted-foreground">Nothing awaiting approval.</p>
             )}
             {awaitingApproval.map((item) => (
-              <ApprovalCard key={item.thread_id} item={item} onActed={refetch} />
+              <ApprovalCard
+                key={item.thread_id}
+                item={item}
+                token={token}
+                canAct={canAct}
+                onActed={refetch}
+              />
             ))}
           </section>
 
@@ -200,7 +241,13 @@ export default function ApprovalsPage() {
               <p className="text-sm text-muted-foreground">Nothing awaiting an SLA response.</p>
             )}
             {awaitingSla.map((item) => (
-              <SlaCard key={item.thread_id} item={item} onActed={refetch} />
+              <SlaCard
+                key={item.thread_id}
+                item={item}
+                token={token}
+                canAct={canAct}
+                onActed={refetch}
+              />
             ))}
           </section>
         </>

@@ -96,10 +96,12 @@ async function getJson<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function postJson<T>(path: string, body?: unknown): Promise<T> {
+async function postJson<T>(path: string, token: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  if (body) headers["Content-Type"] = "application/json";
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
@@ -150,22 +152,24 @@ export interface SlaResponse {
 }
 
 export function postApproval(
+  token: string,
   threadId: string,
   decision: ApprovalDecision,
   adjustedCallAmount?: number,
 ): Promise<ApprovalResponse> {
-  return postJson<ApprovalResponse>(`/margin-calls/${encodeURIComponent(threadId)}/approve`, {
-    decision,
-    adjusted_call_amount: adjustedCallAmount ?? null,
-  });
+  return postJson<ApprovalResponse>(
+    `/margin-calls/${encodeURIComponent(threadId)}/approve`,
+    token,
+    { decision, adjusted_call_amount: adjustedCallAmount ?? null },
+  );
 }
 
-export function postRespond(threadId: string): Promise<SlaResponse> {
-  return postJson<SlaResponse>(`/margin-calls/${encodeURIComponent(threadId)}/respond`);
+export function postRespond(token: string, threadId: string): Promise<SlaResponse> {
+  return postJson<SlaResponse>(`/margin-calls/${encodeURIComponent(threadId)}/respond`, token);
 }
 
-export function postCheckSla(threadId: string): Promise<SlaResponse> {
-  return postJson<SlaResponse>(`/margin-calls/${encodeURIComponent(threadId)}/check-sla`);
+export function postCheckSla(token: string, threadId: string): Promise<SlaResponse> {
+  return postJson<SlaResponse>(`/margin-calls/${encodeURIComponent(threadId)}/check-sla`, token);
 }
 
 export type SimulateScenario = "price_shock" | "vol_spike";
@@ -184,6 +188,9 @@ export interface SimulateEventResponse {
   affected_counterparties: SimulatedCounterpartyResult[];
 }
 
-export function postSimulateEvent(scenario: SimulateScenario): Promise<SimulateEventResponse> {
-  return postJson<SimulateEventResponse>("/simulate", { scenario });
+export function postSimulateEvent(
+  token: string,
+  scenario: SimulateScenario,
+): Promise<SimulateEventResponse> {
+  return postJson<SimulateEventResponse>("/simulate", token, { scenario });
 }

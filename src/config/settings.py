@@ -72,6 +72,18 @@ class Settings(BaseSettings):
     servicenow_username: str | None = None
     servicenow_password: str | None = None
 
+    # MM-57: shared secret for the short-lived JWT the frontend's NextAuth
+    # session mints and this backend verifies on mutating endpoints -- a
+    # separate secret from NextAuth's own internal session-cookie
+    # encryption key (NEXTAUTH_SECRET), which this backend never sees.
+    auth_backend_secret: str | None = None
+    # Seed-time only (persistence/seed_users.py hashes these into `users`
+    # once) -- never read at request time, so rotating them doesn't
+    # invalidate already-seeded accounts. Documented local-dev defaults, not
+    # real secrets; change before any non-demo deployment.
+    demo_approver_password: str = "MarginMaestro!Approver1"
+    demo_viewer_password: str = "MarginMaestro!Viewer1"
+
     @classmethod
     def settings_customise_sources(
         cls,

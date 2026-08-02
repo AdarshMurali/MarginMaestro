@@ -175,3 +175,18 @@ class TicketORM(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     counterparty: Mapped["CounterpartyORM"] = relationship(back_populates="tickets")
+
+
+class UserORM(Base):
+    """Demo login (MM-57): 2 fixed seeded accounts (Approver/Viewer), no
+    self-registration -- a real identity behind "who approved this" in the
+    audit trail, not just functional wiring. Password is bcrypt-hashed,
+    verified by POST /auth/verify (called by the frontend's NextAuth
+    Credentials provider); this backend never sees a plaintext password
+    outside that one request."""
+
+    __tablename__ = "users"
+
+    username: Mapped[str] = mapped_column(String(50), primary_key=True)
+    password_hash: Mapped[str] = mapped_column(String(100))
+    role: Mapped[str] = mapped_column(String(20))
