@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import { Logo } from "@/components/logo";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -82,6 +83,10 @@ export default function Home() {
         Placeholder page (MM-51): proves the design system and a live backend
         connection. The real Home dashboard lands in MM-58.
       </p>
+
+      <Link href="/exposure" className="text-sm text-primary underline underline-offset-4">
+        View Positions &amp; Exposure board (MM-52) &rarr;
+      </Link>
     </main>
   );
 }

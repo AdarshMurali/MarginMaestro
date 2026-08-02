@@ -1,7 +1,8 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pandas as pd
 import pytest
 
 from config.settings import Settings
@@ -11,7 +12,9 @@ from streaming.market_feed import (
     MarketDataUnavailableError,
     PriceQuote,
     YFinanceFeed,
+    _coingecko_history,
     get_market_feed,
+    get_price_history,
 )
 
 
@@ -121,6 +124,63 @@ class TestCompositeMarketFeed:
         CompositeMarketFeed(equity_feed=equity_feed, crypto_feed=crypto_feed).get_prices(["AAPL"])
 
         crypto_feed.get_prices.assert_not_called()
+
+
+class TestGetPriceHistory:
+    def test_equity_ticker_routes_to_yfinance(self) -> None:
+        fake_history = pd.DataFrame(
+            {"Close": [210.5, 212.0]},
+            index=pd.DatetimeIndex([date(2026, 7, 1), date(2026, 7, 2)]),
+        )
+        fake_ticker = MagicMock()
+        fake_ticker.history.return_value = fake_history
+        with patch("streaming.market_feed.yf.Ticker", return_value=fake_ticker) as mock_ticker:
+            result = get_price_history("AAPL", days=5)
+
+        mock_ticker.assert_called_once_with("AAPL")
+        assert [p.price for p in result] == [210.5, 212.0]
+        assert result[0].date == date(2026, 7, 1)
+
+    def test_yfinance_empty_history_raises(self) -> None:
+        fake_ticker = MagicMock()
+        fake_ticker.history.return_value = pd.DataFrame()
+        with (
+            patch("streaming.market_feed.yf.Ticker", return_value=fake_ticker),
+            pytest.raises(MarketDataUnavailableError, match="BADTICKER"),
+        ):
+            get_price_history("BADTICKER", days=5)
+
+    def test_crypto_ticker_routes_to_coingecko(self) -> None:
+        client = httpx.Client(
+            transport=_mock_transport(
+                {
+                    "prices": [
+                        [1785715200000, 65000.0],
+                        [1785801600000, 66000.0],
+                    ]
+                }
+            )
+        )
+        result = get_price_history("BTC-USD", days=5, client=client)
+
+        assert [p.price for p in result] == [65000.0, 66000.0]
+
+    def test_crypto_unmapped_ticker_raises(self) -> None:
+        """Only reachable if CRYPTO_TICKERS and COINGECKO_ID_MAP ever drift --
+        today the two sets are identical, so this guard is exercised directly
+        rather than through get_price_history's asset-class routing."""
+        with pytest.raises(MarketDataUnavailableError, match="DOGE-USD"):
+            _coingecko_history("DOGE-USD", days=5)
+
+    def test_crypto_non_200_status_raises(self) -> None:
+        client = httpx.Client(transport=_mock_transport({}, status_code=500))
+        with pytest.raises(MarketDataUnavailableError, match="500"):
+            get_price_history("BTC-USD", days=5, client=client)
+
+    def test_crypto_empty_prices_raises(self) -> None:
+        client = httpx.Client(transport=_mock_transport({"prices": []}))
+        with pytest.raises(MarketDataUnavailableError, match="BTC-USD"):
+            get_price_history("BTC-USD", days=5, client=client)
 
 
 class TestGetMarketFeed:
