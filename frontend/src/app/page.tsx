@@ -93,6 +93,9 @@ export default function Home() {
       <Link href="/approvals" className="text-sm text-primary underline underline-offset-4">
         View Approvals &amp; SLA (MM-55) &rarr;
       </Link>
+      <Link href="/simulate" className="text-sm text-primary underline underline-offset-4">
+        Simulate Event (MM-56) &rarr;
+      </Link>
     </main>
   );
 }

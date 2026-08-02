@@ -19,11 +19,15 @@ from api.schemas import (
     MarginCallFeedResponse,
     MarginCallTraceResponse,
     PriceHistoryResponse,
+    SimulateEventRequest,
+    SimulateEventResponse,
     SlaResponse,
 )
+from api.simulate import trigger_simulation
 from config.settings import get_settings
 from persistence.db.engine import get_session_factory
 from streaming.market_feed import MarketDataUnavailableError, get_market_feed
+from streaming.schemas import MarketEventType
 
 configure_logging()
 
@@ -90,6 +94,16 @@ async def margin_call_feed() -> MarginCallFeedResponse:
     graph = get_orchestrator_graph()
     with session_factory() as session:
         return list_margin_calls(graph, session)
+
+
+@app.post("/simulate", response_model=SimulateEventResponse)
+async def simulate_event(body: SimulateEventRequest) -> SimulateEventResponse:
+    session_factory = get_db_session_factory()
+    settings = get_settings()
+    with session_factory() as session:
+        return trigger_simulation(
+            MarketEventType(body.scenario), session, session_factory, settings
+        )
 
 
 @app.get("/margin-calls/{thread_id}/trace", response_model=MarginCallTraceResponse)

@@ -120,6 +120,34 @@ class MarginCallTraceResponse(BaseModel):
     steps: list[TraceStep]
 
 
+class SimulateEventRequest(BaseModel):
+    """Only the two price-driven scenarios (docs/AGENTS.md's curated demo
+    universe) -- MarketEventType also has "downgrade", but a rating change
+    doesn't feed into evaluate_breach anywhere in this system today (no
+    rating_triggers enforcement yet), so it wouldn't visibly "trigger the
+    lifecycle" the way this panel promises. Scoped out deliberately, not
+    missing."""
+
+    scenario: Literal["price_shock", "vol_spike"]
+
+
+class SimulatedCounterpartyResult(BaseModel):
+    counterparty_id: str
+    thread_id: str | None = None
+    breached: bool | None = None
+    call_amount: float | None = None
+    # Set when this counterparty's run couldn't be evaluated (e.g. no CSA
+    # document, missing price history) -- the other counterparties' results
+    # still return normally rather than the whole request failing.
+    error: str | None = None
+
+
+class SimulateEventResponse(BaseModel):
+    scenario: str
+    reason: str
+    affected_counterparties: list[SimulatedCounterpartyResult]
+
+
 class ApprovalRequest(BaseModel):
     """decision must be one of MarginCallState.approval_decision's literals.
     adjusted_call_amount is only read when decision == "adjusted"."""

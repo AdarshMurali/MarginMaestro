@@ -167,3 +167,23 @@ export function postRespond(threadId: string): Promise<SlaResponse> {
 export function postCheckSla(threadId: string): Promise<SlaResponse> {
   return postJson<SlaResponse>(`/margin-calls/${encodeURIComponent(threadId)}/check-sla`);
 }
+
+export type SimulateScenario = "price_shock" | "vol_spike";
+
+export interface SimulatedCounterpartyResult {
+  counterparty_id: string;
+  thread_id: string | null;
+  breached: boolean | null;
+  call_amount: number | null;
+  error: string | null;
+}
+
+export interface SimulateEventResponse {
+  scenario: string;
+  reason: string;
+  affected_counterparties: SimulatedCounterpartyResult[];
+}
+
+export function postSimulateEvent(scenario: SimulateScenario): Promise<SimulateEventResponse> {
+  return postJson<SimulateEventResponse>("/simulate", { scenario });
+}
