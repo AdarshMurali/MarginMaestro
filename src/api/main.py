@@ -8,12 +8,14 @@ from sqlalchemy.orm import Session, sessionmaker
 from agents.orchestrator import build_orchestrator_graph, resume_run
 from api.exposure import build_exposure_board, get_price_history
 from api.logging_config import configure_logging
+from api.margin_calls import list_margin_calls
 from api.middleware import CorrelationIdMiddleware
 from api.schemas import (
     ApprovalRequest,
     ApprovalResponse,
     ExposureBoardResponse,
     HealthResponse,
+    MarginCallFeedResponse,
     PriceHistoryResponse,
     SlaResponse,
 )
@@ -78,6 +80,14 @@ async def respond_to_margin_call(thread_id: str) -> SlaResponse:
     note; revisit before treating as final."""
     result = resume_run(get_orchestrator_graph(), thread_id, {"responded": True})
     return SlaResponse(thread_id=thread_id, sla_outcome=result.get("sla_outcome"))
+
+
+@app.get("/margin-calls", response_model=MarginCallFeedResponse)
+async def margin_call_feed() -> MarginCallFeedResponse:
+    session_factory = get_db_session_factory()
+    graph = get_orchestrator_graph()
+    with session_factory() as session:
+        return list_margin_calls(graph, session)
 
 
 @app.get("/exposure", response_model=ExposureBoardResponse)

@@ -87,6 +87,9 @@ export default function Home() {
       <Link href="/exposure" className="text-sm text-primary underline underline-offset-4">
         View Positions &amp; Exposure board (MM-52) &rarr;
       </Link>
+      <Link href="/margin-calls" className="text-sm text-primary underline underline-offset-4">
+        View Margin Calls feed (MM-53) &rarr;
+      </Link>
     </main>
   );
 }
