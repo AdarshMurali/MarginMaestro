@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
 
 import { AgentTrace } from "@/components/agent-trace";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getMarginCallTrace, type MarginCallTraceResponse } from "@/lib/api";
+import { DARK_GREEN } from "@/lib/brand";
 
 export default function MarginCallTracePage() {
   const params = useParams<{ threadId: string }>();
+  const router = useRouter();
   // Next.js does not reliably decode dynamic-segment params containing
   // encoded characters (observed live: a thread_id's "%3A" survived into
   // params.threadId undecoded, silently double-encoding the API request
@@ -33,30 +33,42 @@ export default function MarginCallTracePage() {
   }, [threadId]);
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-12">
-      <div className="flex flex-col gap-1">
-        <Link href="/margin-calls" className="text-sm text-primary underline underline-offset-4">
-          &larr; Back to margin calls
-        </Link>
-        <h1 className="text-xl font-semibold">Agent Trace</h1>
-        <p className="font-mono text-sm text-muted-foreground">{threadId}</p>
-      </div>
+    <main className="flex min-h-full flex-1 flex-col bg-white">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-12">
+        <div className="flex flex-col gap-1">
+          {/* Three different places link into this page (Margin Calls, Agent
+              Trace, a counterparty's margin-call-history section) -- a fixed
+              destination would be wrong from at least two of them, so this
+              goes back to wherever the user actually came from. */}
+          <button
+            onClick={() => router.back()}
+            className="w-fit text-sm font-medium underline-offset-4 hover:underline"
+            style={{ color: DARK_GREEN }}
+          >
+            &larr; Back
+          </button>
+          <h1 className="text-2xl font-semibold tracking-tight text-black">Agent Trace</h1>
+          <p className="font-mono text-xs text-neutral-500">{threadId}</p>
+        </div>
 
-      {error && <p className="text-sm text-status-danger">Could not load this run&apos;s trace.</p>}
-      {!error && !trace && <p className="text-sm text-muted-foreground">Loading...</p>}
+        {error && (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+            Could not load this run&apos;s trace.
+          </p>
+        )}
+        {!error && !trace && <p className="text-sm text-neutral-500">Loading...</p>}
 
-      {trace && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">
+        {trace && (
+          <div className="rounded-xl border border-neutral-200 p-6">
+            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">
               {trace.steps.length} step{trace.steps.length === 1 ? "" : "s"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <AgentTrace steps={trace.steps} />
-          </CardContent>
-        </Card>
-      )}
+            </span>
+            <div className="mt-4">
+              <AgentTrace steps={trace.steps} />
+            </div>
+          </div>
+        )}
+      </div>
     </main>
   );
 }
