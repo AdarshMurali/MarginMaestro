@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 from streaming.market_feed import MarketFeed, PriceQuote
 from streaming.schemas import MarketEvent, MarketEventType
-from streaming.simulator import SimulatedMarketFeed, run_scenario
+from streaming.simulator import PriceScenario, SimulatedMarketFeed, run_scenario
 
 
 class _StubFeed:
@@ -21,7 +21,7 @@ def _quote(ticker: str, price: float) -> PriceQuote:
 class TestSimulatedMarketFeed:
     def test_passthrough_when_no_scenario_given(self) -> None:
         base = _StubFeed({"AAPL": _quote("AAPL", 200.0)})
-        feed: MarketFeed = SimulatedMarketFeed(scenario=None, base_feed=base)
+        feed: MarketFeed = SimulatedMarketFeed(price_scenario=None, base_feed=base)
 
         result = feed.get_prices(["AAPL"])
 
@@ -30,7 +30,8 @@ class TestSimulatedMarketFeed:
 
     def test_applies_scenario_delta_on_top_of_real_baseline(self) -> None:
         base = _StubFeed({"TSLA": _quote("TSLA", 100.0), "NVDA": _quote("NVDA", 50.0)})
-        feed = SimulatedMarketFeed(scenario=MarketEventType.PRICE_SHOCK, base_feed=base)
+        scenario = PriceScenario(MarketEventType.PRICE_SHOCK, {"TSLA": -0.12, "NVDA": -0.10})
+        feed = SimulatedMarketFeed(price_scenario=scenario, base_feed=base)
 
         result = feed.get_prices(["TSLA", "NVDA"])
 
@@ -40,7 +41,8 @@ class TestSimulatedMarketFeed:
 
     def test_ticker_not_in_scenario_is_left_unshocked(self) -> None:
         base = _StubFeed({"AAPL": _quote("AAPL", 200.0)})
-        feed = SimulatedMarketFeed(scenario=MarketEventType.PRICE_SHOCK, base_feed=base)
+        scenario = PriceScenario(MarketEventType.PRICE_SHOCK, {"TSLA": -0.12})
+        feed = SimulatedMarketFeed(price_scenario=scenario, base_feed=base)
 
         result = feed.get_prices(["AAPL"])
 
