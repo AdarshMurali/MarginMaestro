@@ -115,6 +115,23 @@ class PriceHistoryORM(Base):
     source: Mapped[str] = mapped_column(String(20))
 
 
+class LatestPriceORM(Base):
+    """Most-recent price per ticker (MM-59), upserted unconditionally by the
+    Event Agent on every market.prices tick regardless of shock/spike
+    classification -- read-only source for /exposure and the price chart, so
+    neither ever calls yfinance on the request path. Distinct from
+    PriceHistoryORM (one row per ticker per day, EOD batch snapshot)."""
+
+    __tablename__ = "latest_prices"
+
+    ticker: Mapped[str] = mapped_column(String(20), primary_key=True)
+    price: Mapped[float]
+    currency: Mapped[str] = mapped_column(String(10), default="USD")
+    source: Mapped[str] = mapped_column(String(20))
+    as_of: Mapped[datetime]
+    updated_at: Mapped[datetime]
+
+
 class ReferenceRateORM(Base):
     """Daily FRED reference rate/yield/VIX snapshot (MM-15 batch loader)."""
 

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel
@@ -68,3 +68,16 @@ class CollateralItem(BaseModel):
     ticker: str | None = None
     value_usd: float
     haircut_pct: float
+
+
+class LatestPrice(BaseModel):
+    ticker: str
+    price: float
+    currency: str = "USD"
+    source: str
+    as_of: datetime
+
+
+class PriceHistoryEntry(BaseModel):
+    date: date
+    price: float

@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 from uuid import uuid4
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from config.settings import get_settings
@@ -21,7 +22,8 @@ from persistence.db.models import (
 from persistence.fred_feed import REFERENCE_SERIES, FredFeed
 from persistence.generators.run import DEFAULT_SEED, generate_all
 from persistence.generators.securities import securities_universe
-from streaming.market_feed import MarketFeed, get_market_feed
+from streaming.market_feed import MarketDataUnavailableError, MarketFeed, get_market_feed
+from streaming.market_feed import get_price_history as fetch_ticker_price_history
 
 
 def load_synthetic_reference_data(session: Session, seed: int, as_of: date) -> dict[str, int]:
@@ -56,6 +58,44 @@ def load_prices(session: Session, feed: MarketFeed, tickers: list[str], as_of: d
     return len(quotes)
 
 
+def backfill_price_history(
+    session: Session, tickers: list[str], days: int = 30, min_existing_rows: int = 5
+) -> int:
+    """One-time-per-ticker deep-history seed (MM-59), so the price chart
+    isn't near-empty right after switching it to read SQL only. Skips any
+    ticker that already has >= min_existing_rows rows, so this is a cheap
+    no-op on every batch-load run after the first real one -- auto-wired
+    into run_batch_load rather than a separate manual step, since a
+    "remember to run this once" step is exactly the kind of thing that gets
+    skipped, leaving the chart visibly sparse indefinitely. Still only ever
+    called from this batch/CLI context, never per-request."""
+    inserted = 0
+    for ticker in tickers:
+        existing = session.execute(
+            select(func.count())
+            .select_from(PriceHistoryORM)
+            .where(PriceHistoryORM.ticker == ticker)
+        ).scalar_one()
+        if existing >= min_existing_rows:
+            continue
+        try:
+            points = fetch_ticker_price_history(ticker, days=days)
+        except MarketDataUnavailableError:
+            continue
+        for point in points:
+            session.merge(
+                PriceHistoryORM(
+                    ticker=ticker,
+                    price_date=point.date,
+                    price=point.price,
+                    currency="USD",
+                    source="yfinance-backfill",
+                )
+            )
+            inserted += 1
+    return inserted
+
+
 def load_reference_rates(session: Session, feed: FredFeed, as_of: date) -> int:
     count = 0
     for series_id in REFERENCE_SERIES:
@@ -85,8 +125,14 @@ def run_batch_load(seed: int = DEFAULT_SEED, as_of: date | None = None) -> dict[
         synthetic_counts = load_synthetic_reference_data(session, seed, as_of)
         price_count = load_prices(session, market_feed, securities_universe(), as_of)
         rate_count = load_reference_rates(session, fred_feed, as_of)
+        backfill_count = backfill_price_history(session, securities_universe())
 
-        summary = {**synthetic_counts, "prices": price_count, "reference_rates": rate_count}
+        summary = {
+            **synthetic_counts,
+            "prices": price_count,
+            "reference_rates": rate_count,
+            "price_history_backfill": backfill_count,
+        }
         session.add(
             AuditLogORM(
                 correlation_id=str(uuid4()),

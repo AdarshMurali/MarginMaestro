@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     s3_documents_bucket_owner: str | None = None
 
     market_feed_mode: str = "simulated"
+    # MM-59: fixed-interval poll, deliberately no volatility-threshold logic.
+    # The curated universe below (~30 tickers) is batched into one
+    # yf.Tickers(...) call, so 60s balances "never stale for more than ~1
+    # min" against free-tier yfinance rate-limit risk.
+    live_feed_poll_interval_seconds: int = 60
     market_universe: str = (
         "AAPL,MSFT,GOOGL,AMZN,TSLA,NVDA,META,HPE,JPM,WFC,SPCX,"
         "PLTR,AMD,MU,SMCI,NFLX,INTC,"

@@ -9,6 +9,7 @@ from config.settings import Settings
 from persistence.db.models import (
     Base,
     CounterpartyORM,
+    LatestPriceORM,
     PortfolioORM,
     PositionORM,
     PriceHistoryORM,
@@ -22,6 +23,7 @@ from streaming.event_agent import (
     is_already_processed,
     latest_close_before,
     price_event_id,
+    upsert_latest_price,
 )
 from streaming.market_feed import PriceQuote
 from streaming.schemas import MarketEvent, MarketEventType
@@ -134,6 +136,27 @@ class TestAffectedCounterparties:
         assert affected_counterparties(session, "TSLA") == []
 
 
+class TestUpsertLatestPrice:
+    def test_inserts_a_new_row(self, session: Session) -> None:
+        quote = _quote("TSLA", 88.0, datetime(2026, 7, 31, 14, 0, tzinfo=UTC))
+
+        upsert_latest_price(session, quote)
+
+        row = session.get(LatestPriceORM, "TSLA")
+        assert row is not None
+        assert row.price == 88.0
+        assert row.source == "yfinance"
+
+    def test_merge_overwrites_with_the_newer_quote(self, session: Session) -> None:
+        upsert_latest_price(session, _quote("TSLA", 88.0, datetime(2026, 7, 31, 14, 0, tzinfo=UTC)))
+
+        upsert_latest_price(session, _quote("TSLA", 91.5, datetime(2026, 7, 31, 14, 1, tzinfo=UTC)))
+
+        row = session.get(LatestPriceORM, "TSLA")
+        assert row is not None
+        assert row.price == 91.5
+
+
 class TestHandlePriceMessage:
     def test_publishes_impact_set_on_shock_and_marks_processed(
         self, session: Session, settings: Settings
@@ -187,6 +210,7 @@ class TestHandlePriceMessage:
 
         assert result is None
         producer.publish.assert_called_once()
+        assert session.get(LatestPriceORM, "TSLA") is not None
 
     def test_no_prior_close_is_a_safe_no_op(self, session: Session, settings: Settings) -> None:
         quote = _quote("TSLA", 88.0, datetime(2026, 7, 31, 14, 0, tzinfo=UTC))
@@ -197,6 +221,11 @@ class TestHandlePriceMessage:
         assert result is None
         producer.publish.assert_not_called()
         assert is_already_processed(session, price_event_id(quote))
+        # Latest price is still recorded -- freshness for /exposure isn't
+        # gated on whether a prior close exists to classify the move.
+        row = session.get(LatestPriceORM, "TSLA")
+        assert row is not None
+        assert row.price == 88.0
 
     def test_below_threshold_move_is_not_published(
         self, session: Session, settings: Settings
@@ -218,6 +247,12 @@ class TestHandlePriceMessage:
 
         assert result is None
         producer.publish.assert_not_called()
+        # Below-threshold moves are the vast majority of ticks -- the
+        # latest-price table must still update on every one of them, not
+        # just the ones that turn into an ImpactSet.
+        row = session.get(LatestPriceORM, "AAPL")
+        assert row is not None
+        assert row.price == 202.0
 
 
 class TestHandleMarketEventMessage:

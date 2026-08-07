@@ -7,7 +7,13 @@ from sqlalchemy.orm import Session
 
 from config.settings import Settings, get_settings
 from persistence.db.engine import get_session_factory
-from persistence.db.models import PortfolioORM, PositionORM, PriceHistoryORM, ProcessedEventORM
+from persistence.db.models import (
+    LatestPriceORM,
+    PortfolioORM,
+    PositionORM,
+    PriceHistoryORM,
+    ProcessedEventORM,
+)
 from streaming.consumer import EventConsumer, decode
 from streaming.market_feed import PriceQuote
 from streaming.producer import EventProducer
@@ -47,6 +53,26 @@ def mark_processed(session: Session, event_id: str) -> None:
     session.commit()
 
 
+def upsert_latest_price(session: Session, quote: PriceQuote) -> None:
+    """Unconditional on every tick (MM-59) -- called before dedup/threshold
+    checks in handle_price_message. Most ticks never cross the shock/spike
+    threshold, so if this ran after those checks the latest-price table
+    would almost never update; this is the sole read-time source for
+    /exposure's current price and the price chart, so it must reflect every
+    tick, not just the ones that turn into an ImpactSet."""
+    session.merge(
+        LatestPriceORM(
+            ticker=quote.ticker,
+            price=quote.price,
+            currency=quote.currency,
+            source=quote.source,
+            as_of=quote.as_of,
+            updated_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
+
+
 def latest_close_before(session: Session, ticker: str, before: datetime) -> float | None:
     row = session.execute(
         select(PriceHistoryORM.price)
@@ -70,6 +96,8 @@ def affected_counterparties(session: Session, ticker: str) -> list[str]:
 def handle_price_message(
     session: Session, quote: PriceQuote, producer: EventProducer, settings: Settings
 ) -> ImpactSet | None:
+    upsert_latest_price(session, quote)
+
     event_id = price_event_id(quote)
     if is_already_processed(session, event_id):
         return None

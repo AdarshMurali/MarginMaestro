@@ -69,6 +69,8 @@ These feed the vector store and are what the RAG agents reason over. Each docume
 | News / macro events | GDELT (free), RSS, NewsAPI free tier, SEC EDGAR full-text | **synthetic event injector** | Mapped to curated universe only |
 | Rating downgrades | — | synthetic rating event | Drives CSA rating triggers |
 
+In live mode, publishing onto `market.prices` is done by a fixed-interval poller (`streaming/live_feed_poller.py`, `LIVE_FEED_POLL_INTERVAL_SECONDS`, MM-59) — never per-request. `/exposure` and the price chart only ever read the `latest_prices`/`price_history` SQL tables that poller (via the Event Agent's unconditional upsert) and the daily batch loader keep fresh.
+
 The **market simulator** and the **live feed adapter** implement one `MarketFeed` interface; `MARKET_FEED_MODE` (`simulated`/`live`) selects. Same Kafka topic either way.
 
 ## 4. Vector store design (ChromaDB)

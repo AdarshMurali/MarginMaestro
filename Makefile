@@ -27,6 +27,9 @@ event-agent:
 publish-live-prices:
 	python -m streaming.live_feed_cli --tickers "$(TICKERS)"
 
+live-feed-poller:
+	python -m streaming.live_feed_poller
+
 test:
 	pytest
 

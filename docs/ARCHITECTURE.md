@@ -124,6 +124,7 @@ Orchestrator      ──────▶  margin.calls   ──▶  Communication
 - **Batch vs stream:** *daily* reference data (e.g., EOD prices for backfill, ratings snapshots) is loaded by a scheduled job (EventBridge → Lambda). *Intraday* ticks flow through Kafka. Do not use streaming for daily-only data.
 - **Flink is deferred (ADR-0003).** It is added only if a genuine windowed/stateful computation is built — the natural candidate is rolling **realized volatility → IM**, or CEP to detect "N consecutive drops in T minutes." Until then a plain Kafka consumer (or Faust) handles per-tick evaluation. Never add Flink as a buzzword.
 - **Simulated vs live feed** implement one `MarketFeed` interface; `MARKET_FEED_MODE` selects. Tests and demos use the simulator for determinism.
+- **The live feed adapter is driven by a fixed-interval poller** (`streaming/live_feed_poller.py`, MM-59), decoupled from any request path — no API endpoint ever calls a market-data provider directly. `/exposure` and the price chart read a `latest_prices`/`price_history` SQL cache that the Event Agent (from `market.prices`) and the daily batch loader keep populated.
 
 ## 7. RAG pipeline
 

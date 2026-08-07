@@ -1,7 +1,13 @@
 from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
 from persistence.batch_loader import (
+    backfill_price_history,
     load_prices,
     load_reference_rates,
     load_synthetic_reference_data,
@@ -10,14 +16,16 @@ from persistence.batch_loader import (
 )
 from persistence.db.models import (
     AuditLogORM,
+    Base,
     CollateralItemORM,
     CounterpartyORM,
     PortfolioORM,
     PositionORM,
+    PriceHistoryORM,
     RatingORM,
 )
 from persistence.fred_feed import REFERENCE_SERIES, RateObservation
-from streaming.market_feed import PriceQuote
+from streaming.market_feed import MarketDataUnavailableError, PriceHistoryPoint, PriceQuote
 
 
 class TestLoadSyntheticReferenceData:
@@ -70,6 +78,68 @@ class TestLoadReferenceRates:
         assert feed.get_latest.call_count == len(REFERENCE_SERIES)
 
 
+class TestBackfillPriceHistory:
+    @pytest.fixture
+    def session_factory(self):
+        engine = create_engine(
+            "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
+        )
+        Base.metadata.create_all(engine)
+        return sessionmaker(bind=engine)
+
+    def test_skips_ticker_with_enough_existing_rows(self, session_factory) -> None:
+        with session_factory() as session:
+            for i in range(5):
+                session.add(
+                    PriceHistoryORM(
+                        ticker="AAPL",
+                        price_date=date(2026, 7, 1 + i),
+                        price=200.0,
+                        currency="USD",
+                        source="yfinance",
+                    )
+                )
+            session.commit()
+
+        with (
+            session_factory() as session,
+            patch("persistence.batch_loader.fetch_ticker_price_history") as mock_fetch,
+        ):
+            inserted = backfill_price_history(session, ["AAPL"], min_existing_rows=5)
+
+        assert inserted == 0
+        mock_fetch.assert_not_called()
+
+    def test_backfills_ticker_below_the_row_threshold(self, session_factory) -> None:
+        with (
+            session_factory() as session,
+            patch(
+                "persistence.batch_loader.fetch_ticker_price_history",
+                return_value=[
+                    PriceHistoryPoint(date=date(2026, 7, 1), price=200.0),
+                    PriceHistoryPoint(date=date(2026, 7, 2), price=201.0),
+                ],
+            ),
+        ):
+            inserted = backfill_price_history(session, ["AAPL"], min_existing_rows=5)
+
+        assert inserted == 2
+
+    def test_tolerates_one_tickers_market_data_unavailable(self, session_factory) -> None:
+        def fake_fetch(ticker: str, days: int) -> list[PriceHistoryPoint]:
+            if ticker == "BADTICKER":
+                raise MarketDataUnavailableError(ticker)
+            return [PriceHistoryPoint(date=date(2026, 7, 1), price=100.0)]
+
+        with (
+            session_factory() as session,
+            patch("persistence.batch_loader.fetch_ticker_price_history", side_effect=fake_fetch),
+        ):
+            inserted = backfill_price_history(session, ["BADTICKER", "AAPL"], min_existing_rows=5)
+
+        assert inserted == 1
+
+
 class TestRunBatchLoad:
     def test_orchestrates_loads_and_commits_with_audit_log(self) -> None:
         session = MagicMock()
@@ -96,6 +166,14 @@ class TestRunBatchLoad:
             patch("persistence.batch_loader.get_session_factory", return_value=session_factory),
             patch("persistence.batch_loader.get_market_feed", return_value=market_feed),
             patch("persistence.batch_loader.FredFeed", return_value=fred_feed_instance),
+            # session here is a MagicMock, not a real DB session -- backfill's
+            # own SQL-query behavior is covered by TestBackfillPriceHistory
+            # against a real (in-memory) session; this test only needs to
+            # confirm run_batch_load wires it in and folds its count into
+            # the summary.
+            patch(
+                "persistence.batch_loader.backfill_price_history", return_value=0
+            ) as mock_backfill,
         ):
             summary = run_batch_load(seed=42, as_of=date(2026, 7, 26))
 
@@ -103,6 +181,8 @@ class TestRunBatchLoad:
         assert summary["counterparties"] == 8
         assert summary["prices"] == 1
         assert summary["reference_rates"] == len(REFERENCE_SERIES)
+        assert summary["price_history_backfill"] == 0
+        mock_backfill.assert_called_once()
         session.commit.assert_called_once()
 
         audit_rows = [
