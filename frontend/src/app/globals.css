@@ -78,15 +78,18 @@
   --input: rgba(255, 255, 255, 0.12);
   --ring: #e8a33d;
   /* Status-color convention, used consistently everywhere in the dashboard
-     (exposure lights, call status, SLA countdowns): green = healthy/met,
-     amber = approaching/at-risk, red = breached/escalated, blue =
-     in-progress/agent-is-working. Deliberately distinct from --primary
-     (brand gold) so "at risk" and "brand chrome" don't read as the same
-     color. */
-  --status-success: #22c55e;
-  --status-warning: #f5a524;
-  --status-danger: #ef4444;
-  --status-info: #3b82f6;
+     (exposure lights, call status, SLA countdowns): brand light-green =
+     healthy/met, amber = approaching/at-risk, red = breached/escalated,
+     neutral gray = in-progress/agent-is-working. Pulled from the same
+     black/white/green palette as the rest of the app (see lib/brand.ts and
+     the #dc2626/#b45309 danger/warning tones used on the dashboard) instead
+     of the old dark-navy/gold theme's stock Tailwind blue -- "evaluating"
+     etc. are pending states, not alerts, so they get a neutral tone rather
+     than competing with red/amber/green for attention. */
+  --status-success: #d3f770;
+  --status-warning: #b45309;
+  --status-danger: #dc2626;
+  --status-info: #737373;
   --chart-1: #e8a33d;
   --chart-2: #3b82f6;
   --chart-3: #22c55e;
