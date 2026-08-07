@@ -5,15 +5,20 @@ import Link from "next/link";
 
 import { getExposureBoard, getMarginCallFeed } from "@/lib/api";
 import { LogoMarkV2 } from "@/components/logo-v2";
-import { BLACK, DARK_GREEN, LIGHT_GREEN, WHITE, HERO_GRADIENT } from "@/lib/brand";
 
 const STACK = ["LangGraph", "OpenAI", "ChromaDB", "Kafka", "Azure SQL", "FastAPI"];
+
+// Exact palette given by the user (2026-08-03), v2 comparison route:
+const BLACK = "#090909";
+const DARK_GREEN = "#20463B";
+const LIGHT_GREEN = "#D3F770";
+const WHITE = "#FFFFFF";
 
 function AnimatedNumber({ value }: { value: number | null }) {
   return <span>{value === null ? "--" : value.toLocaleString()}</span>;
 }
 
-export default function LandingPage() {
+export default function LandingPageV3() {
   const [counterparties, setCounterparties] = useState<number | null>(null);
   const [runsEvaluated, setRunsEvaluated] = useState<number | null>(null);
   const [breachesCaught, setBreachesCaught] = useState<number | null>(null);
@@ -40,57 +45,42 @@ export default function LandingPage() {
   }, []);
 
   return (
-    <main className="landing-v2 flex min-h-full flex-col" style={{ backgroundColor: WHITE }}>
+    <main className="landing-v3 flex min-h-full flex-col" style={{ backgroundColor: WHITE }}>
       <style>{`
-        .landing-v2 { --primary: ${DARK_GREEN}; }
-        .landing-v2 .fade-up {
+        .landing-v3 { --primary: ${DARK_GREEN}; }
+        .landing-v3 .fade-up {
           animation: landingFadeUp 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
         }
-        .landing-v2 .fade-up.d1 { animation-delay: 80ms; }
-        .landing-v2 .fade-up.d2 { animation-delay: 160ms; }
-        .landing-v2 .fade-up.d3 { animation-delay: 240ms; }
+        .landing-v3 .fade-up.d1 { animation-delay: 80ms; }
+        .landing-v3 .fade-up.d2 { animation-delay: 160ms; }
+        .landing-v3 .fade-up.d3 { animation-delay: 240ms; }
         @keyframes landingFadeUp {
           from { opacity: 0; transform: translateY(14px); }
           to { opacity: 1; transform: translateY(0); }
         }
         @media (prefers-reduced-motion: reduce) {
-          .landing-v2 .fade-up { animation: none; }
+          .landing-v3 .fade-up { animation: none; }
         }
       `}</style>
 
       {/* ---------- dark zone: header + hero ----------
-          Tech strip moved out to the white zone below -- the reference
-          shows the partner-logos row already sitting on a light background
-          with dark text.
-          Gradient axis re-derived 2026-08-04 from a "channel" the user
-          drew as two roughly-parallel freehand lines on a screenshot,
-          rather than two isolated points (that was tried first: aiming
-          the color-flow axis straight from point 1 to point 2 -- wrong,
-          it read as a left-to-right wash and washed the top-right corner
-          white too early). Pixel-sampled both curves with Pillow/numpy,
-          fit each to a line, and took the direction PERPENDICULAR to
-          those lines as the gradient axis (a linear-gradient's iso-color
-          lines are perpendicular to its direction, so the drawn lines
-          *are* the iso-color contours, not the flow axis). That comes out
-          to 187.13deg -- tilted opposite to the original 172deg: here the
-          right side lags (stays dark longer) instead of leading. Verified
-          by projecting both fitted lines back onto the resulting axis:
-          the top line lands at a near-constant 61.9-64.3% and the bottom
-          line at 79.4-81.8% across the full width, confirming the axis
-          choice. Original channel: dark green fully arrived by ~63.2%,
-          white by ~80.3% (17.1-point band), later widened +20% and
-          shifted +5 points to 66.49%..87.01%. Removed 2026-08-05 per the
-          user: no more green-to-white ramp at all -- solid DARK_GREEN
-          holds from 66.49% (where it first fully arrives) through 100%
-          (the bottom of the 602px hero, right before "The real stack
-          underneath"), so the hero is black-to-green only, no white
-          anywhere inside it. The black-to-green lead-in itself (0%..66.49%)
-          is untouched from the channel-derived tuning above. */}
+          Copied from landing-v2 (2026-08-05) at the user's request, to
+          A/B a flat background against v2's tuned gradient -- "not
+          convinced with the gradient." Confirmed by tracing the actual v2
+          gradient stops that its top (header area) is solid BLACK, not
+          green -- 187.13deg gradient puts the whole top row at 0-28.5%,
+          entirely inside the "BLACK 0%..51.15%" stop range -- user
+          confirmed BLACK is correct. Final: solid BLACK for the *entire*
+          hero box (same full height as v2's dark zone), white only
+          starting where the white zone already begins (right before "The
+          real stack underneath") -- not a 50/50 split, that was a
+          misread of "upper half" as inside the hero rather than the hero
+          itself. No gradient, one flat color for the whole 602px. */}
       <div
         className="relative overflow-hidden"
         style={{
           minHeight: "602px",
-          background: HERO_GRADIENT,
+          backgroundColor: BLACK,
         }}
       >
         {/* ---------- header ---------- */}
@@ -113,12 +103,12 @@ export default function LandingPage() {
 
         {/* ---------- hero ---------- */}
         <section className="relative overflow-hidden px-6 pt-10 pb-24">
-          {/* Grid scoped to the hero section only (not header, not the
-              tech strip further down), matching the earlier design
-              exploration routes exactly: 64px squares, 0.04 opacity, simple
-              top-to-bottom fade -- was previously on the whole dark zone
-              at 86px/0.05 with a diagonal fade tied to the old (now
-              removed) white transition, which cut it off early. */}
+          {/* Grid scoped to the hero section only (not header, not tech
+              strip) and sized/faded to match the original /landing v1
+              treatment exactly: 64px squares (was 86px), 0.04 opacity
+              (was 0.05), simple top-to-bottom fade so it thins out toward
+              the bottom of the hero rather than covering the whole dark
+              zone. */}
           <div
             aria-hidden
             className="pointer-events-none absolute inset-0"
@@ -194,9 +184,11 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* ---------- tech strip (dark zone, "soft white text" -- white/60,
-            white/70 -- since it sits on dark green, not the neutral-500
-            gray that worked when this lived in the white zone). ---------- */}
+        {/* ---------- tech strip (moved inside the dark zone, matching the
+            original /landing v1 layout at the user's request -- "soft
+            white text" (white/60, white/70) since it now sits on black,
+            not the neutral-500 gray that worked when this section lived
+            in the white zone below). ---------- */}
         <section className="px-6 py-8">
           <div className="mx-auto flex w-full max-w-6xl flex-col items-center gap-4">
             <span className="text-xs uppercase tracking-[0.14em] text-white/60">
@@ -216,7 +208,6 @@ export default function LandingPage() {
 
       {/* ---------- white zone: stats + how it works + CTA + footer ---------- */}
       <div style={{ backgroundColor: WHITE }}>
-
         {/* ---------- live stats ---------- */}
         <section className="px-6 py-16">
           <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-2 divide-y divide-black/10 sm:flex-row sm:divide-x sm:divide-y-0">
