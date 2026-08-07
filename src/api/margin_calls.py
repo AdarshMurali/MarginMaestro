@@ -14,10 +14,31 @@ from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from api.schemas import MarginCallFeedResponse, MarginCallLifecycleStatus, MarginCallSummary
+from api.schemas import (
+    MarginCallBucket,
+    MarginCallBucketFeedResponse,
+    MarginCallFeedResponse,
+    MarginCallLifecycleStatus,
+    MarginCallSummary,
+)
 from calc.models import BreachResult
 from config.settings import Settings, get_settings
 from persistence.db.models import CheckpointORM
+from persistence.queries import list_counterparties
+
+# Lower rank = more urgent = shown first (MM-63) -- awaiting_approval and
+# escalated sit in a human's queue right now; awaiting_sla_response is
+# time-sensitive but not yet actionable; everything else is resolved and
+# only recency (not urgency) distinguishes them.
+_URGENCY_RANK: dict[MarginCallLifecycleStatus, int] = {
+    MarginCallLifecycleStatus.AWAITING_APPROVAL: 0,
+    MarginCallLifecycleStatus.ESCALATED: 1,
+    MarginCallLifecycleStatus.AWAITING_SLA_RESPONSE: 2,
+    MarginCallLifecycleStatus.EVALUATING: 3,
+    MarginCallLifecycleStatus.REJECTED: 4,
+    MarginCallLifecycleStatus.SLA_MET: 4,
+    MarginCallLifecycleStatus.NO_BREACH: 4,
+}
 
 
 def _lifecycle_status(values: dict) -> MarginCallLifecycleStatus:
@@ -89,10 +110,13 @@ def _summarize(thread_id: str, values: dict, settings: Settings) -> MarginCallSu
     )
 
 
-def list_margin_calls(
-    graph: CompiledStateGraph, session: Session, settings: Settings | None = None
-) -> MarginCallFeedResponse:
-    settings = settings or get_settings()
+def _all_summaries(
+    graph: CompiledStateGraph, session: Session, settings: Settings
+) -> list[MarginCallSummary]:
+    """Every orchestrator run, most recent first -- shared by the flat feed,
+    the per-counterparty bucketed view, and the per-counterparty filter
+    (MM-63), so there's exactly one place that reads checkpoints and derives
+    lifecycle status."""
     thread_ids = session.execute(select(CheckpointORM.thread_id).distinct()).scalars().all()
 
     summaries = []
@@ -104,4 +128,62 @@ def list_margin_calls(
         summaries.append(_summarize(thread_id, values, settings))
 
     summaries.sort(key=lambda s: s.occurred_at, reverse=True)
+    return summaries
+
+
+def list_margin_calls(
+    graph: CompiledStateGraph, session: Session, settings: Settings | None = None
+) -> MarginCallFeedResponse:
+    settings = settings or get_settings()
+    summaries = _all_summaries(graph, session, settings)
     return MarginCallFeedResponse(as_of=datetime.now(UTC), margin_calls=summaries)
+
+
+def list_margin_calls_for_counterparty(
+    graph: CompiledStateGraph,
+    session: Session,
+    counterparty_id: str,
+    settings: Settings | None = None,
+) -> MarginCallFeedResponse:
+    """Full history for one counterparty (MM-63) -- for the counterparty
+    profile page's margin-call-history section."""
+    settings = settings or get_settings()
+    summaries = [
+        s for s in _all_summaries(graph, session, settings) if s.counterparty_id == counterparty_id
+    ]
+    return MarginCallFeedResponse(as_of=datetime.now(UTC), margin_calls=summaries)
+
+
+def list_margin_call_buckets(
+    graph: CompiledStateGraph, session: Session, settings: Settings | None = None
+) -> MarginCallBucketFeedResponse:
+    """One row per counterparty (MM-63): whichever call is most urgent for
+    that counterparty, plus how many calls they have in total. Bucket order
+    is itself urgency-first (then most-recent-first) so the counterparties
+    needing attention right now surface at the top of the whole list, not
+    just within their own row."""
+    settings = settings or get_settings()
+    summaries = _all_summaries(graph, session, settings)  # already most-recent-first
+    names = {cp.id: cp.name for cp in list_counterparties(session)}
+
+    calls_by_counterparty: dict[str, list[MarginCallSummary]] = {}
+    for summary in summaries:
+        calls_by_counterparty.setdefault(summary.counterparty_id, []).append(summary)
+
+    buckets = []
+    for counterparty_id, calls in calls_by_counterparty.items():
+        # calls are already most-recent-first, so min() -- which returns the
+        # first minimal element it sees -- picks the most urgent call,
+        # tie-broken by recency, with no separate sort needed.
+        most_urgent = min(calls, key=lambda c: _URGENCY_RANK[c.status])
+        buckets.append(
+            MarginCallBucket(
+                counterparty_id=counterparty_id,
+                counterparty_name=names.get(counterparty_id, counterparty_id),
+                latest=most_urgent,
+                total_count=len(calls),
+            )
+        )
+
+    buckets.sort(key=lambda b: (_URGENCY_RANK[b.latest.status], -b.latest.occurred_at.timestamp()))
+    return MarginCallBucketFeedResponse(as_of=datetime.now(UTC), buckets=buckets)

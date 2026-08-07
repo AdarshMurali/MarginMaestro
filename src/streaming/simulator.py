@@ -38,13 +38,15 @@ _DOWNGRADE_TO = RatingGrade.BBB
 class SimulatedMarketFeed:
     """Satisfies the MarketFeed protocol. With no scenario, it's a pure pass-through
     over a real feed (used by get_market_feed()'s MARKET_FEED_MODE=simulated branch,
-    e.g. for the batch loader). With a scenario, it applies that scenario's scripted
-    % deltas on top of real baseline prices (used by the Kafka producer CLI)."""
+    e.g. for the batch loader). With a price_scenario, it applies that scenario's
+    ticker deltas on top of real baseline prices -- either one of the canned
+    _PRICE_SCENARIOS (the Kafka producer CLI, `make simulate`) or a one-off
+    PriceScenario built from a user-chosen ticker/%% (the /simulate API, MM-56)."""
 
     def __init__(
-        self, scenario: MarketEventType | None = None, base_feed: MarketFeed | None = None
+        self, price_scenario: PriceScenario | None = None, base_feed: MarketFeed | None = None
     ) -> None:
-        self._scenario = _PRICE_SCENARIOS.get(scenario) if scenario is not None else None
+        self._scenario = price_scenario
         self._base_feed = base_feed or CompositeMarketFeed()
 
     def get_prices(self, tickers: list[str]) -> dict[str, PriceQuote]:
@@ -98,7 +100,7 @@ def run_scenario(
         event = _build_downgrade_event()
         producer.publish(settings.kafka_topic_events, event, key=event.counterparty_id)
     else:
-        feed = SimulatedMarketFeed(scenario=scenario, base_feed=base_feed)
+        feed = SimulatedMarketFeed(price_scenario=_PRICE_SCENARIOS[scenario], base_feed=base_feed)
         tickers = list(_PRICE_SCENARIOS[scenario].ticker_deltas)
         for ticker, quote in feed.get_prices(tickers).items():
             producer.publish(settings.kafka_topic_prices, quote, key=ticker)

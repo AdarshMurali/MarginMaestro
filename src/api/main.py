@@ -7,20 +7,33 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from agents.orchestrator import build_orchestrator_graph, resume_run
 from api.auth import require_approver, verify_credentials
-from api.exposure import build_exposure_board, get_price_history
+from api.exposure import (
+    build_exposure_board,
+    get_counterparty_exposure,
+    get_price_history,
+    list_counterparty_summaries,
+)
 from api.logging_config import configure_logging
 from api.margin_call_trace import get_margin_call_trace
-from api.margin_calls import list_margin_calls
+from api.margin_calls import (
+    list_margin_call_buckets,
+    list_margin_calls,
+    list_margin_calls_for_counterparty,
+)
 from api.middleware import CorrelationIdMiddleware
 from api.schemas import (
     ApprovalRequest,
     ApprovalResponse,
     AuthVerifyRequest,
     AuthVerifyResponse,
+    CounterpartyExposure,
+    CounterpartyListResponse,
     ExposureBoardResponse,
     HealthResponse,
+    MarginCallBucketFeedResponse,
     MarginCallFeedResponse,
     MarginCallTraceResponse,
+    MarketUniverseResponse,
     PriceHistoryResponse,
     SimulateEventRequest,
     SimulateEventResponse,
@@ -29,7 +42,7 @@ from api.schemas import (
 from api.simulate import trigger_simulation
 from config.settings import get_settings
 from persistence.db.engine import get_session_factory
-from streaming.market_feed import MarketDataUnavailableError, get_market_feed
+from streaming.market_feed import MarketDataUnavailableError
 from streaming.schemas import MarketEventType
 
 configure_logging()
@@ -117,15 +130,45 @@ async def margin_call_feed() -> MarginCallFeedResponse:
         return list_margin_calls(graph, session)
 
 
+@app.get("/margin-calls/buckets", response_model=MarginCallBucketFeedResponse)
+async def margin_call_buckets() -> MarginCallBucketFeedResponse:
+    session_factory = get_db_session_factory()
+    graph = get_orchestrator_graph()
+    with session_factory() as session:
+        return list_margin_call_buckets(graph, session)
+
+
+@app.get("/margin-calls/counterparty/{counterparty_id}", response_model=MarginCallFeedResponse)
+async def margin_calls_for_counterparty(counterparty_id: str) -> MarginCallFeedResponse:
+    session_factory = get_db_session_factory()
+    graph = get_orchestrator_graph()
+    with session_factory() as session:
+        return list_margin_calls_for_counterparty(graph, session, counterparty_id)
+
+
+@app.get("/market-universe", response_model=MarketUniverseResponse)
+async def market_universe() -> MarketUniverseResponse:
+    return MarketUniverseResponse(tickers=get_settings().market_universe_list)
+
+
 @app.post("/simulate", response_model=SimulateEventResponse)
 async def simulate_event(
     body: SimulateEventRequest, _approver: str = Depends(require_approver)
 ) -> SimulateEventResponse:
-    session_factory = get_db_session_factory()
     settings = get_settings()
+    if body.ticker not in settings.market_universe_list:
+        raise HTTPException(
+            status_code=400, detail=f"{body.ticker!r} is not in the curated market universe"
+        )
+    session_factory = get_db_session_factory()
     with session_factory() as session:
         return trigger_simulation(
-            MarketEventType(body.scenario), session, session_factory, settings
+            MarketEventType(body.event_type),
+            body.ticker,
+            body.pct_change / 100,
+            session,
+            session_factory,
+            settings,
         )
 
 
@@ -138,18 +181,38 @@ async def margin_call_trace(thread_id: str) -> MarginCallTraceResponse:
     return trace
 
 
+@app.get("/counterparties", response_model=CounterpartyListResponse)
+async def counterparties() -> CounterpartyListResponse:
+    session_factory = get_db_session_factory()
+    with session_factory() as session:
+        return list_counterparty_summaries(session)
+
+
 @app.get("/exposure", response_model=ExposureBoardResponse)
 async def exposure_board() -> ExposureBoardResponse:
     session_factory = get_db_session_factory()
-    market_feed = get_market_feed()
     with session_factory() as session:
-        return build_exposure_board(session, market_feed)
+        return build_exposure_board(session)
+
+
+@app.get("/exposure/{counterparty_id}", response_model=CounterpartyExposure)
+async def counterparty_exposure(counterparty_id: str) -> CounterpartyExposure:
+    session_factory = get_db_session_factory()
+    with session_factory() as session:
+        result = get_counterparty_exposure(session, counterparty_id)
+    if result is None:
+        raise HTTPException(
+            status_code=404, detail=f"No counterparty found for {counterparty_id!r}"
+        )
+    return result
 
 
 @app.get("/prices/{ticker}/history", response_model=PriceHistoryResponse)
 async def price_history(ticker: str, days: int = 30) -> PriceHistoryResponse:
+    session_factory = get_db_session_factory()
     try:
-        return get_price_history(ticker, days=days)
+        with session_factory() as session:
+            return get_price_history(session, ticker, days=days)
     except MarketDataUnavailableError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

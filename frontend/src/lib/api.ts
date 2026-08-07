@@ -32,6 +32,15 @@ export interface ExposureBoardResponse {
   counterparties: CounterpartyExposure[];
 }
 
+export interface CounterpartySummary {
+  counterparty_id: string;
+  counterparty_name: string;
+}
+
+export interface CounterpartyListResponse {
+  counterparties: CounterpartySummary[];
+}
+
 export interface PricePoint {
   date: string;
   price: number;
@@ -71,6 +80,18 @@ export interface MarginCallSummary {
 export interface MarginCallFeedResponse {
   as_of: string;
   margin_calls: MarginCallSummary[];
+}
+
+export interface MarginCallBucket {
+  counterparty_id: string;
+  counterparty_name: string;
+  latest: MarginCallSummary;
+  total_count: number;
+}
+
+export interface MarginCallBucketFeedResponse {
+  as_of: string;
+  buckets: MarginCallBucket[];
 }
 
 export type TraceStepStatus = "completed" | "in_progress";
@@ -122,6 +143,14 @@ export function getExposureBoard(): Promise<ExposureBoardResponse> {
   return getJson<ExposureBoardResponse>("/exposure");
 }
 
+export function getCounterparties(): Promise<CounterpartyListResponse> {
+  return getJson<CounterpartyListResponse>("/counterparties");
+}
+
+export function getCounterpartyExposure(counterpartyId: string): Promise<CounterpartyExposure> {
+  return getJson<CounterpartyExposure>(`/exposure/${encodeURIComponent(counterpartyId)}`);
+}
+
 export function getPriceHistory(ticker: string, days = 30): Promise<PriceHistoryResponse> {
   return getJson<PriceHistoryResponse>(
     `/prices/${encodeURIComponent(ticker)}/history?days=${days}`,
@@ -130,6 +159,18 @@ export function getPriceHistory(ticker: string, days = 30): Promise<PriceHistory
 
 export function getMarginCallFeed(): Promise<MarginCallFeedResponse> {
   return getJson<MarginCallFeedResponse>("/margin-calls");
+}
+
+export function getMarginCallBuckets(): Promise<MarginCallBucketFeedResponse> {
+  return getJson<MarginCallBucketFeedResponse>("/margin-calls/buckets");
+}
+
+export function getMarginCallsForCounterparty(
+  counterpartyId: string,
+): Promise<MarginCallFeedResponse> {
+  return getJson<MarginCallFeedResponse>(
+    `/margin-calls/counterparty/${encodeURIComponent(counterpartyId)}`,
+  );
 }
 
 export function getMarginCallTrace(threadId: string): Promise<MarginCallTraceResponse> {
@@ -172,7 +213,7 @@ export function postCheckSla(token: string, threadId: string): Promise<SlaRespon
   return postJson<SlaResponse>(`/margin-calls/${encodeURIComponent(threadId)}/check-sla`, token);
 }
 
-export type SimulateScenario = "price_shock" | "vol_spike";
+export type SimulateEventKind = "price_shock" | "vol_spike";
 
 export interface SimulatedCounterpartyResult {
   counterparty_id: string;
@@ -183,14 +224,28 @@ export interface SimulatedCounterpartyResult {
 }
 
 export interface SimulateEventResponse {
-  scenario: string;
+  event_type: string;
   reason: string;
   affected_counterparties: SimulatedCounterpartyResult[];
 }
 
 export function postSimulateEvent(
   token: string,
-  scenario: SimulateScenario,
+  eventType: SimulateEventKind,
+  ticker: string,
+  pctChange: number,
 ): Promise<SimulateEventResponse> {
-  return postJson<SimulateEventResponse>("/simulate", token, { scenario });
+  return postJson<SimulateEventResponse>("/simulate", token, {
+    event_type: eventType,
+    ticker,
+    pct_change: pctChange,
+  });
+}
+
+export interface MarketUniverseResponse {
+  tickers: string[];
+}
+
+export function getMarketUniverse(): Promise<MarketUniverseResponse> {
+  return getJson<MarketUniverseResponse>("/market-universe");
 }

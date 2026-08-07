@@ -2,13 +2,13 @@
 directly, for demo/manual use -- deliberately bypasses the Kafka/Event
 Agent hop (MM-31/32) that's the real ingestion path for genuine live market
 ticks, the same way the approve/respond endpoints already resume the
-orchestrator directly rather than round-tripping through Kafka. Reuses the
-exact same scripted scenarios (a real baseline price + a real, scripted %
-delta -- streaming.simulator.SimulatedMarketFeed, the same class `make
-simulate` already publishes to Kafka with) and the same
-affected_counterparties() lookup the real Event Agent uses, so a click here
-evaluates exactly the real counterparties a genuine matching market event
-would."""
+orchestrator directly rather than round-tripping through Kafka. Applies a
+user-chosen ticker/%% delta on top of a real baseline price (the same
+streaming.simulator.SimulatedMarketFeed class `make simulate` publishes to
+Kafka with, just built from a one-off PriceScenario instead of a canned one)
+and reuses the same affected_counterparties() lookup the real Event Agent
+uses, so a click here evaluates exactly the real counterparties a genuine
+matching market event would."""
 
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -23,26 +23,28 @@ from config.settings import Settings
 from streaming.event_agent import affected_counterparties
 from streaming.market_feed import CompositeMarketFeed, MarketDataUnavailableError, MarketFeed
 from streaming.schemas import ImpactSet, MarketEventType
-from streaming.simulator import SimulatedMarketFeed, scenario_tickers
+from streaming.simulator import PriceScenario, SimulatedMarketFeed
 
 
 def trigger_simulation(
-    scenario: MarketEventType,
+    event_type: MarketEventType,
+    ticker: str,
+    pct_change: float,
     session: Session,
     session_factory: sessionmaker[Session],
     settings: Settings,
     base_feed: MarketFeed | None = None,
 ) -> SimulateEventResponse:
-    tickers = scenario_tickers(scenario)
-    counterparty_ids = sorted(
-        {cp_id for ticker in tickers for cp_id in affected_counterparties(session, ticker)}
-    )
-    reason = f"Simulated {scenario.value} on {', '.join(tickers)}"
+    """pct_change is a fraction (e.g. -0.125 for -12.5%%), not a percent --
+    the /simulate endpoint converts the request's percent input before
+    calling this."""
+    counterparty_ids = sorted(affected_counterparties(session, ticker))
+    reason = f"Simulated {event_type.value}: {ticker} {pct_change:+.1%}"
 
     event_id = f"sim-{uuid4()}"
     impact = ImpactSet(
         event_id=event_id,
-        event_type=scenario,
+        event_type=event_type,
         counterparty_ids=counterparty_ids,
         reason=reason,
         occurred_at=datetime.now(UTC),
@@ -50,11 +52,12 @@ def trigger_simulation(
 
     # A real baseline (never a second synthetic layer, even when this
     # project's own MARKET_FEED_MODE=simulated locally) shocked by the
-    # scenario's scripted delta -- matches run_scenario()'s own convention
-    # for the Kafka path. base_feed is injectable (same pattern as
-    # run_scenario itself) so tests can avoid a real yfinance/CoinGecko call.
+    # user-chosen delta -- matches run_scenario()'s own convention for the
+    # Kafka path. base_feed is injectable (same pattern as run_scenario
+    # itself) so tests can avoid a real yfinance/CoinGecko call.
+    price_scenario = PriceScenario(event_type=event_type, ticker_deltas={ticker: pct_change})
     shocked_feed = SimulatedMarketFeed(
-        scenario=scenario, base_feed=base_feed or CompositeMarketFeed()
+        price_scenario=price_scenario, base_feed=base_feed or CompositeMarketFeed()
     )
     graph = build_orchestrator_graph(
         session_factory=session_factory, market_feed=shocked_feed, settings=settings
@@ -84,5 +87,5 @@ def trigger_simulation(
         )
 
     return SimulateEventResponse(
-        scenario=scenario.value, reason=reason, affected_counterparties=results
+        event_type=event_type.value, reason=reason, affected_counterparties=results
     )

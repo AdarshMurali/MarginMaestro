@@ -15,8 +15,13 @@ from agents.orchestrator import (
     start_run,
     thread_id_for,
 )
-from api.margin_calls import _lifecycle_status, list_margin_calls
-from api.schemas import MarginCallLifecycleStatus
+from api.margin_calls import (
+    _lifecycle_status,
+    list_margin_call_buckets,
+    list_margin_calls,
+    list_margin_calls_for_counterparty,
+)
+from api.schemas import MarginCallLifecycleStatus, MarginCallSummary
 from config.settings import Settings
 from persistence.db.models import (
     Base,
@@ -82,6 +87,29 @@ def _seed_scenario(session_factory, counterparty_id: str, prior_price: float = 1
             )
         )
         session.commit()
+
+
+def _seed_counterparty(session_factory, counterparty_id: str, name: str) -> None:
+    with session_factory() as session:
+        session.add(CounterpartyORM(id=counterparty_id, name=name, type="Bank", country="US"))
+        session.commit()
+
+
+def _summary(
+    counterparty_id: str,
+    thread_id: str,
+    status: MarginCallLifecycleStatus,
+    occurred_at: datetime,
+) -> MarginCallSummary:
+    return MarginCallSummary(
+        thread_id=thread_id,
+        correlation_id=f"corr-{thread_id}",
+        counterparty_id=counterparty_id,
+        event_type="price_shock",
+        reason="test",
+        occurred_at=occurred_at,
+        status=status,
+    )
 
 
 def _state(event_id: str, counterparty_id: str) -> MarginCallState:
@@ -327,3 +355,165 @@ class TestListMarginCalls:
         assert by_counterparty["CP-ESCALATED"].status == MarginCallLifecycleStatus.ESCALATED
         assert result.margin_calls[0].event_type == "price_shock"
         assert result.margin_calls[0].reason == "TSLA moved 400% vs prior close"
+
+
+class TestListMarginCallsForCounterparty:
+    def test_filters_to_just_the_requested_counterparty(self, session_factory) -> None:
+        calls = [
+            _summary(
+                "CP-1",
+                "t1",
+                MarginCallLifecycleStatus.AWAITING_APPROVAL,
+                datetime(2026, 8, 1, tzinfo=UTC),
+            ),
+            _summary(
+                "CP-2", "t2", MarginCallLifecycleStatus.NO_BREACH, datetime(2026, 8, 1, tzinfo=UTC)
+            ),
+            _summary(
+                "CP-1", "t3", MarginCallLifecycleStatus.NO_BREACH, datetime(2026, 7, 30, tzinfo=UTC)
+            ),
+        ]
+        with (
+            patch("api.margin_calls._all_summaries", return_value=calls),
+            session_factory() as session,
+        ):
+            result = list_margin_calls_for_counterparty(MagicMock(), session, "CP-1")
+
+        assert [c.thread_id for c in result.margin_calls] == ["t1", "t3"]
+
+    def test_empty_for_a_counterparty_with_no_calls(self, session_factory) -> None:
+        with (
+            patch("api.margin_calls._all_summaries", return_value=[]),
+            session_factory() as session,
+        ):
+            result = list_margin_calls_for_counterparty(MagicMock(), session, "CP-NONE")
+
+        assert result.margin_calls == []
+
+
+class TestListMarginCallBuckets:
+    def test_one_bucket_per_counterparty_with_resolved_names(self, session_factory) -> None:
+        _seed_counterparty(session_factory, "CP-1", "Alpha")
+        _seed_counterparty(session_factory, "CP-2", "Beta")
+        calls = [
+            _summary(
+                "CP-1", "t1", MarginCallLifecycleStatus.NO_BREACH, datetime(2026, 8, 1, tzinfo=UTC)
+            ),
+            _summary(
+                "CP-2", "t2", MarginCallLifecycleStatus.NO_BREACH, datetime(2026, 8, 1, tzinfo=UTC)
+            ),
+        ]
+        with (
+            patch("api.margin_calls._all_summaries", return_value=calls),
+            session_factory() as session,
+        ):
+            result = list_margin_call_buckets(MagicMock(), session)
+
+        assert {b.counterparty_id for b in result.buckets} == {"CP-1", "CP-2"}
+        assert {b.counterparty_name for b in result.buckets} == {"Alpha", "Beta"}
+        assert all(b.total_count == 1 for b in result.buckets)
+
+    def test_picks_the_most_urgent_call_not_just_the_latest(self, session_factory) -> None:
+        _seed_counterparty(session_factory, "CP-1", "Alpha")
+        # Most recent call is resolved (NO_BREACH); an OLDER call is still
+        # awaiting approval -- the older, more urgent one must win, not the
+        # newer resolved one that would otherwise silently bury it.
+        calls = [
+            _summary(
+                "CP-1",
+                "t-new-resolved",
+                MarginCallLifecycleStatus.NO_BREACH,
+                datetime(2026, 8, 2, tzinfo=UTC),
+            ),
+            _summary(
+                "CP-1",
+                "t-old-urgent",
+                MarginCallLifecycleStatus.AWAITING_APPROVAL,
+                datetime(2026, 8, 1, tzinfo=UTC),
+            ),
+        ]
+        with (
+            patch("api.margin_calls._all_summaries", return_value=calls),
+            session_factory() as session,
+        ):
+            result = list_margin_call_buckets(MagicMock(), session)
+
+        bucket = result.buckets[0]
+        assert bucket.latest.thread_id == "t-old-urgent"
+        assert bucket.total_count == 2
+
+    def test_ties_in_urgency_break_by_recency(self, session_factory) -> None:
+        _seed_counterparty(session_factory, "CP-1", "Alpha")
+        earlier = _summary(
+            "CP-1",
+            "t-earlier",
+            MarginCallLifecycleStatus.AWAITING_APPROVAL,
+            datetime(2026, 8, 1, tzinfo=UTC),
+        )
+        later = _summary(
+            "CP-1",
+            "t-later",
+            MarginCallLifecycleStatus.AWAITING_APPROVAL,
+            datetime(2026, 8, 2, tzinfo=UTC),
+        )
+        # _all_summaries always returns most-recent-first in practice -- the
+        # tie-break relies on that ordering, so mirror it here.
+        with (
+            patch("api.margin_calls._all_summaries", return_value=[later, earlier]),
+            session_factory() as session,
+        ):
+            result = list_margin_call_buckets(MagicMock(), session)
+
+        assert result.buckets[0].latest.thread_id == "t-later"
+
+    def test_buckets_are_sorted_urgency_first(self, session_factory) -> None:
+        _seed_counterparty(session_factory, "CP-RESOLVED", "Resolved Co")
+        _seed_counterparty(session_factory, "CP-URGENT", "Urgent Co")
+        calls = [
+            _summary(
+                "CP-RESOLVED",
+                "t1",
+                MarginCallLifecycleStatus.NO_BREACH,
+                datetime(2026, 8, 2, tzinfo=UTC),
+            ),
+            _summary(
+                "CP-URGENT",
+                "t2",
+                MarginCallLifecycleStatus.AWAITING_APPROVAL,
+                datetime(2026, 8, 1, tzinfo=UTC),
+            ),
+        ]
+        with (
+            patch("api.margin_calls._all_summaries", return_value=calls),
+            session_factory() as session,
+        ):
+            result = list_margin_call_buckets(MagicMock(), session)
+
+        assert [b.counterparty_id for b in result.buckets] == ["CP-URGENT", "CP-RESOLVED"]
+
+    def test_falls_back_to_counterparty_id_if_name_unknown(self, session_factory) -> None:
+        # No CounterpartyORM seeded for CP-GHOST.
+        calls = [
+            _summary(
+                "CP-GHOST",
+                "t1",
+                MarginCallLifecycleStatus.NO_BREACH,
+                datetime(2026, 8, 1, tzinfo=UTC),
+            )
+        ]
+        with (
+            patch("api.margin_calls._all_summaries", return_value=calls),
+            session_factory() as session,
+        ):
+            result = list_margin_call_buckets(MagicMock(), session)
+
+        assert result.buckets[0].counterparty_name == "CP-GHOST"
+
+    def test_empty_when_no_calls_exist(self, session_factory) -> None:
+        with (
+            patch("api.margin_calls._all_summaries", return_value=[]),
+            session_factory() as session,
+        ):
+            result = list_margin_call_buckets(MagicMock(), session)
+
+        assert result.buckets == []

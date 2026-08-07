@@ -2,11 +2,25 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
     status: str
+
+
+class CounterpartySummary(BaseModel):
+    """Names-only listing (MM-62) -- deliberately excludes status, which
+    requires the same expensive per-counterparty price/CSA/VIX computation
+    as the full exposure board. The list page shows names only; status only
+    ever appears on the (already fast, MM-61) per-counterparty detail page."""
+
+    counterparty_id: str
+    counterparty_name: str
+
+
+class CounterpartyListResponse(BaseModel):
+    counterparties: list[CounterpartySummary]
 
 
 class ExposureStatus(StrEnum):
@@ -102,6 +116,25 @@ class MarginCallFeedResponse(BaseModel):
     margin_calls: list[MarginCallSummary]
 
 
+class MarginCallBucket(BaseModel):
+    """One row per counterparty (MM-63) -- `latest` is whichever call is
+    most URGENT for this counterparty (awaiting approval > escalated >
+    awaiting SLA response > resolved), not necessarily the most recent one
+    chronologically, so an older unresolved call never gets silently
+    buried under a newer resolved one. `total_count` is every call this
+    counterparty has ever had, for a "+N more" indicator."""
+
+    counterparty_id: str
+    counterparty_name: str
+    latest: MarginCallSummary
+    total_count: int
+
+
+class MarginCallBucketFeedResponse(BaseModel):
+    as_of: datetime
+    buckets: list[MarginCallBucket]
+
+
 class TraceStepStatus(StrEnum):
     COMPLETED = "completed"
     IN_PROGRESS = "in_progress"
@@ -121,14 +154,21 @@ class MarginCallTraceResponse(BaseModel):
 
 
 class SimulateEventRequest(BaseModel):
-    """Only the two price-driven scenarios (docs/AGENTS.md's curated demo
-    universe) -- MarketEventType also has "downgrade", but a rating change
-    doesn't feed into evaluate_breach anywhere in this system today (no
-    rating_triggers enforcement yet), so it wouldn't visibly "trigger the
-    lifecycle" the way this panel promises. Scoped out deliberately, not
-    missing."""
+    """A user-chosen single-ticker shock: which of the two price-driven event
+    types to label it as, which curated-universe ticker to shock, and a
+    signed %% delta on top of that ticker's real current price. MarketEventType
+    also has "downgrade", but a rating change doesn't feed into evaluate_breach
+    anywhere in this system today (no rating_triggers enforcement yet), so it
+    wouldn't visibly "trigger the lifecycle" the way this panel promises.
+    Scoped out deliberately, not missing. Ticker is checked against the
+    curated MARKET_UNIVERSE in the endpoint (golden rule #7 -- not validated
+    here since that list lives on Settings, not this schema)."""
 
-    scenario: Literal["price_shock", "vol_spike"]
+    event_type: Literal["price_shock", "vol_spike"]
+    ticker: str
+    # Percent, not fraction -- e.g. -12.5 means -12.5%. Bounds are a sanity
+    # guard against fat-fingered input, not a real-world volatility limit.
+    pct_change: float = Field(..., ge=-99, le=500)
 
 
 class SimulatedCounterpartyResult(BaseModel):
@@ -143,9 +183,13 @@ class SimulatedCounterpartyResult(BaseModel):
 
 
 class SimulateEventResponse(BaseModel):
-    scenario: str
+    event_type: str
     reason: str
     affected_counterparties: list[SimulatedCounterpartyResult]
+
+
+class MarketUniverseResponse(BaseModel):
+    tickers: list[str]
 
 
 class AuthVerifyRequest(BaseModel):
