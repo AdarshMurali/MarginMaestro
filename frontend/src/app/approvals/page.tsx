@@ -3,9 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
   getMarginCallFeed,
   postApproval,
@@ -14,12 +11,42 @@ import {
   type MarginCallSummary,
 } from "@/lib/api";
 import { formatDateTime, formatUsd } from "@/lib/format";
+import { DARK_GREEN, LIGHT_GREEN } from "@/lib/brand";
 
 function slaRemainingLabel(deadline: string): string {
   const diffMs = new Date(deadline).getTime() - Date.now();
   if (diffMs <= 0) return "overdue";
   const minutes = Math.round(diffMs / 60_000);
   return minutes < 1 ? "due any moment" : `${minutes}m remaining`;
+}
+
+function PrimaryButton({
+  children,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      {...props}
+      className="rounded-full px-4 py-1.5 text-sm font-medium text-black transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+      style={{ backgroundColor: LIGHT_GREEN }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function OutlineButton({
+  children,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      {...props}
+      className="rounded-full border border-neutral-200 px-4 py-1.5 text-sm font-medium text-black transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
 }
 
 function ApprovalCard({
@@ -59,60 +86,50 @@ function ApprovalCard({
   );
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">{item.counterparty_id}</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3 text-sm">
-        <p className="text-muted-foreground">{item.reason}</p>
-        <p className="font-mono">
-          Call amount: <span className="text-primary">{formatUsd(item.call_amount, item.currency)}</span>
-        </p>
+    <div className="flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-5 text-sm">
+      <span className="font-medium text-black">{item.counterparty_id}</span>
+      <p className="text-neutral-500">{item.reason}</p>
+      <p className="font-mono text-black">
+        Call amount:{" "}
+        <span style={{ color: DARK_GREEN }}>{formatUsd(item.call_amount, item.currency)}</span>
+      </p>
 
-        {error && <p className="text-status-danger">{error}</p>}
-        {!canAct && (
-          <p className="text-xs text-muted-foreground">Viewer role -- read-only.</p>
-        )}
+      {error && <p className="text-red-600">{error}</p>}
+      {!canAct && <p className="text-xs text-neutral-400">Viewer role -- read-only.</p>}
 
-        {canAct && (
-          <>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" disabled={busy} onClick={() => act("approved")}>
-                Approve
-              </Button>
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => act("rejected")}>
-                Reject
-              </Button>
-              {!adjusting && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => setAdjusting(true)}
-                >
-                  Adjust...
-                </Button>
-              )}
-            </div>
-
-            {adjusting && (
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  placeholder="Adjusted amount"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="max-w-40 font-mono"
-                />
-                <Button size="sm" disabled={busy} onClick={() => act("adjusted")}>
-                  Confirm
-                </Button>
-              </div>
+      {canAct && (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <PrimaryButton disabled={busy} onClick={() => act("approved")}>
+              Approve
+            </PrimaryButton>
+            <OutlineButton disabled={busy} onClick={() => act("rejected")}>
+              Reject
+            </OutlineButton>
+            {!adjusting && (
+              <OutlineButton disabled={busy} onClick={() => setAdjusting(true)}>
+                Adjust...
+              </OutlineButton>
             )}
-          </>
-        )}
-      </CardContent>
-    </Card>
+          </div>
+
+          {adjusting && (
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                placeholder="Adjusted amount"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-40 rounded-lg border border-neutral-200 px-3 py-1.5 font-mono text-sm text-black outline-none focus:border-[#D3F770] focus:ring-2 focus:ring-[#D3F770]/40"
+              />
+              <PrimaryButton disabled={busy} onClick={() => act("adjusted")}>
+                Confirm
+              </PrimaryButton>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -148,37 +165,32 @@ function SlaCard({
   );
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">{item.counterparty_id}</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3 text-sm">
-        <p className="font-mono">
-          Call amount: <span className="text-primary">{formatUsd(item.call_amount, item.currency)}</span>
+    <div className="flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-5 text-sm">
+      <span className="font-medium text-black">{item.counterparty_id}</span>
+      <p className="font-mono text-black">
+        Call amount:{" "}
+        <span style={{ color: DARK_GREEN }}>{formatUsd(item.call_amount, item.currency)}</span>
+      </p>
+      {item.sla_deadline && (
+        <p className="text-neutral-500">
+          Deadline: {formatDateTime(item.sla_deadline)} ({slaRemainingLabel(item.sla_deadline)})
         </p>
-        {item.sla_deadline && (
-          <p className="text-muted-foreground">
-            Deadline: {formatDateTime(item.sla_deadline)} ({slaRemainingLabel(item.sla_deadline)})
-          </p>
-        )}
+      )}
 
-        {error && <p className="text-status-danger">{error}</p>}
-        {!canAct && (
-          <p className="text-xs text-muted-foreground">Viewer role -- read-only.</p>
-        )}
+      {error && <p className="text-red-600">{error}</p>}
+      {!canAct && <p className="text-xs text-neutral-400">Viewer role -- read-only.</p>}
 
-        {canAct && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" disabled={busy} onClick={() => act("respond")}>
-              Simulate counterparty response
-            </Button>
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => act("check")}>
-              Check SLA deadline
-            </Button>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+      {canAct && (
+        <div className="flex flex-wrap items-center gap-2">
+          <PrimaryButton disabled={busy} onClick={() => act("respond")}>
+            Simulate counterparty response
+          </PrimaryButton>
+          <OutlineButton disabled={busy} onClick={() => act("check")}>
+            Check SLA deadline
+          </OutlineButton>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -203,53 +215,57 @@ export default function ApprovalsPage() {
   const canAct = session?.user.role === "approver";
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-6 py-12">
-      <h1 className="text-xl font-semibold">Approvals &amp; SLA</h1>
+    <main className="flex min-h-full flex-1 flex-col bg-white">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-6 py-12">
+        <h1 className="text-2xl font-semibold tracking-tight text-black">Approvals &amp; SLA</h1>
 
-      {error && (
-        <p className="text-sm text-status-danger">Could not load margin calls -- is the API running?</p>
-      )}
-      {!error && !items && <p className="text-sm text-muted-foreground">Loading...</p>}
+        {error && (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+            Could not load margin calls -- is the API running?
+          </p>
+        )}
+        {!error && !items && <p className="text-sm text-neutral-500">Loading...</p>}
 
-      {items && (
-        <>
-          <section className="flex flex-col gap-3">
-            <h2 className="text-sm font-medium text-muted-foreground">
-              Awaiting approval ({awaitingApproval.length})
-            </h2>
-            {awaitingApproval.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nothing awaiting approval.</p>
-            )}
-            {awaitingApproval.map((item) => (
-              <ApprovalCard
-                key={item.thread_id}
-                item={item}
-                token={token}
-                canAct={canAct}
-                onActed={refetch}
-              />
-            ))}
-          </section>
+        {items && (
+          <>
+            <section className="flex flex-col gap-3">
+              <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">
+                Awaiting approval ({awaitingApproval.length})
+              </h2>
+              {awaitingApproval.length === 0 && (
+                <p className="text-sm text-neutral-500">Nothing awaiting approval.</p>
+              )}
+              {awaitingApproval.map((item) => (
+                <ApprovalCard
+                  key={item.thread_id}
+                  item={item}
+                  token={token}
+                  canAct={canAct}
+                  onActed={refetch}
+                />
+              ))}
+            </section>
 
-          <section className="flex flex-col gap-3">
-            <h2 className="text-sm font-medium text-muted-foreground">
-              Awaiting SLA response ({awaitingSla.length})
-            </h2>
-            {awaitingSla.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nothing awaiting an SLA response.</p>
-            )}
-            {awaitingSla.map((item) => (
-              <SlaCard
-                key={item.thread_id}
-                item={item}
-                token={token}
-                canAct={canAct}
-                onActed={refetch}
-              />
-            ))}
-          </section>
-        </>
-      )}
+            <section className="flex flex-col gap-3">
+              <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">
+                Awaiting SLA response ({awaitingSla.length})
+              </h2>
+              {awaitingSla.length === 0 && (
+                <p className="text-sm text-neutral-500">Nothing awaiting an SLA response.</p>
+              )}
+              {awaitingSla.map((item) => (
+                <SlaCard
+                  key={item.thread_id}
+                  item={item}
+                  token={token}
+                  canAct={canAct}
+                  onActed={refetch}
+                />
+              ))}
+            </section>
+          </>
+        )}
+      </div>
     </main>
   );
 }
