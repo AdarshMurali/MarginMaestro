@@ -194,6 +194,15 @@ class TestSummarizeStep:
         values = {"approval_decision": "adjusted", "adjusted_call_amount": 42_000.0}
         assert _summarize_step("await_approval", values) == "Decision: adjusted to 42,000"
 
+    def test_await_manager_approval_happy_path_and_fallback(self) -> None:
+        assert _summarize_step("await_manager_approval", {"manager_decision": "approved"}) == (
+            "Second sign-off: approved"
+        )
+        assert _summarize_step("await_manager_approval", {"manager_decision": "rejected"}) == (
+            "Disputed -- overturned"
+        )
+        assert _summarize_step("await_manager_approval", {}) == "Awaiting second sign-off"
+
     def test_send_notification_happy_path_and_fallback(self) -> None:
         result = NotificationResult(notice_text="x", slack_channel="C123", slack_ts="1")
         assert _summarize_step("send_notification", {"notification_result": result}) == (

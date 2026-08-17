@@ -35,9 +35,10 @@ def verify_credentials(username: str, password: str, session: Session) -> str | 
     return user.role
 
 
-def require_approver(authorization: str | None = Header(default=None)) -> str:
-    """Returns the authenticated username on success; raises 401/403
-    otherwise. FastAPI dependency -- add as `Depends(require_approver)`."""
+def _require_role(role: str, authorization: str | None) -> str:
+    """Shared by require_approver/require_manager: decodes the bearer JWT
+    and enforces the given role. Returns the authenticated username on
+    success; raises 401/403 otherwise."""
     settings = get_settings()
     if not settings.auth_backend_secret:
         raise HTTPException(status_code=500, detail="AUTH_BACKEND_SECRET is not configured")
@@ -51,10 +52,24 @@ def require_approver(authorization: str | None = Header(default=None)) -> str:
     except jwt.InvalidTokenError as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
 
-    if claims.get("role") != "approver":
-        raise HTTPException(status_code=403, detail="Approver role required")
+    if claims.get("role") != role:
+        raise HTTPException(status_code=403, detail=f"{role.capitalize()} role required")
 
     username = claims.get("sub")
     if not username:
         raise HTTPException(status_code=401, detail="Token missing subject")
     return username
+
+
+def require_approver(authorization: str | None = Header(default=None)) -> str:
+    """Returns the authenticated username on success; raises 401/403
+    otherwise. FastAPI dependency -- add as `Depends(require_approver)`."""
+    return _require_role("approver", authorization)
+
+
+def require_manager(authorization: str | None = Header(default=None)) -> str:
+    """Second-signature role for elite-tier counterparties (Phase 9 scope
+    addition) -- a distinct role from `approver`, gated the same real way
+    (401/403 at the API layer, not a hidden frontend button). FastAPI
+    dependency -- add as `Depends(require_manager)`."""
+    return _require_role("manager", authorization)

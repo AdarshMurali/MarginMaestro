@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from api.auth import JWT_ALGORITHM, require_approver, verify_credentials
+from api.auth import JWT_ALGORITHM, require_approver, require_manager, verify_credentials
 from api.main import app
 from config.settings import Settings
 from persistence.db.models import Base, UserORM
@@ -130,6 +130,44 @@ class TestRequireApprover:
         assert exc_info.value.status_code == 500
 
 
+class TestRequireManager:
+    def test_valid_manager_token_returns_the_username(self) -> None:
+        with patch(
+            "api.auth.get_settings",
+            return_value=Settings(_env_file=None, auth_backend_secret=TEST_SECRET),
+        ):
+            username = require_manager(f"Bearer {_token('manager', sub='bob')}")
+
+        assert username == "bob"
+
+    def test_approver_token_is_forbidden(self) -> None:
+        """The two roles are distinct -- an approver token doesn't also
+        satisfy the manager gate, even though the same human could in
+        principle hold both roles in real life."""
+        with (
+            patch(
+                "api.auth.get_settings",
+                return_value=Settings(_env_file=None, auth_backend_secret=TEST_SECRET),
+            ),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            require_manager(f"Bearer {_token('approver')}")
+
+        assert exc_info.value.status_code == 403
+
+    def test_missing_header_is_unauthorized(self) -> None:
+        with (
+            patch(
+                "api.auth.get_settings",
+                return_value=Settings(_env_file=None, auth_backend_secret=TEST_SECRET),
+            ),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            require_manager(None)
+
+        assert exc_info.value.status_code == 401
+
+
 class TestGatingAgainstTheRealDependency:
     """No dependency_overrides here -- exercises the real require_approver
     wired into the app, end to end through a real HTTP request."""
@@ -173,6 +211,38 @@ class TestGatingAgainstTheRealDependency:
                 "/margin-calls/evt-1:CP-1/approve",
                 json={"decision": "approved"},
                 headers={"Authorization": f"Bearer {_token('approver')}"},
+            )
+
+        assert response.status_code == 200
+
+    def test_manager_approve_with_an_approver_token_is_forbidden(self) -> None:
+        with patch(
+            "api.auth.get_settings",
+            return_value=Settings(_env_file=None, auth_backend_secret=TEST_SECRET),
+        ):
+            response = self.client.post(
+                "/margin-calls/evt-1:CP-1/manager-approve",
+                json={"decision": "approved"},
+                headers={"Authorization": f"Bearer {_token('approver')}"},
+            )
+
+        assert response.status_code == 403
+
+    def test_manager_approve_with_a_valid_manager_token_reaches_the_endpoint(self) -> None:
+        mock_graph = MagicMock()
+        mock_graph.get_state.return_value.values = {"first_approver_username": "alice"}
+        with (
+            patch(
+                "api.auth.get_settings",
+                return_value=Settings(_env_file=None, auth_backend_secret=TEST_SECRET),
+            ),
+            patch("api.main.get_orchestrator_graph", return_value=mock_graph),
+            patch("api.main.resume_run", return_value={"approval_decision": "approved"}),
+        ):
+            response = self.client.post(
+                "/margin-calls/evt-1:CP-1/manager-approve",
+                json={"decision": "approved"},
+                headers={"Authorization": f"Bearer {_token('manager', sub='bob')}"},
             )
 
         assert response.status_code == 200

@@ -15,6 +15,7 @@ class CounterpartyORM(Base):
     name: Mapped[str] = mapped_column(String(200))
     type: Mapped[str] = mapped_column(String(50))
     country: Mapped[str] = mapped_column(String(100))
+    tier: Mapped[str] = mapped_column(String(20), default="standard", server_default="standard")
 
     portfolios: Mapped[list["PortfolioORM"]] = relationship(
         back_populates="counterparty", cascade="all, delete-orphan"

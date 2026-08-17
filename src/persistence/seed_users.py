@@ -1,7 +1,10 @@
-"""Seeds the 2 fixed demo login accounts (MM-57): run once with
+"""Seeds the fixed demo login accounts: run once with
 `python -m persistence.seed_users`. Idempotent -- re-running just re-hashes
-and re-merges the same two rows, matching this project's other seed
-scripts' style (persistence.batch_loader)."""
+and re-merges the same rows, matching this project's other seed scripts'
+style (persistence.batch_loader). `manager` (Phase 9 scope addition) holds
+the second signature for elite-tier counterparties' two-person sign-off --
+a distinct role from `approver`, not a same-person block on one role, so
+one demo user can't satisfy both signatures on the same call."""
 
 import bcrypt
 
@@ -32,9 +35,16 @@ def seed_demo_users(settings: Settings | None = None) -> None:
                 role="viewer",
             )
         )
+        session.merge(
+            UserORM(
+                username="manager",
+                password_hash=_hash(settings.demo_manager_password),
+                role="manager",
+            )
+        )
         session.commit()
 
 
 if __name__ == "__main__":
     seed_demo_users()
-    print("Seeded demo users: approver, viewer")
+    print("Seeded demo users: approver, viewer, manager")

@@ -10,11 +10,22 @@ class CounterpartyType(StrEnum):
     ASSET_MANAGER = "Asset Manager"
 
 
+class CounterpartyTier(StrEnum):
+    """Standard tier keeps the single-approver gate (MM-37); elite tier
+    requires a second, different approver's sign-off (Phase 9 scope
+    addition) -- deterministic config, not an LLM judgment call, per
+    CLAUDE.md golden rule 1."""
+
+    STANDARD = "standard"
+    ELITE = "elite"
+
+
 class Counterparty(BaseModel):
     id: str
     name: str
     type: CounterpartyType
     country: str
+    tier: CounterpartyTier = CounterpartyTier.STANDARD
 
 
 class Portfolio(BaseModel):

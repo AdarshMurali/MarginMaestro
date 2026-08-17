@@ -2,11 +2,12 @@ from functools import lru_cache
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy.orm import Session, sessionmaker
 
 from agents.orchestrator import build_orchestrator_graph, resume_run
-from api.auth import require_approver, verify_credentials
+from api.auth import require_approver, require_manager, verify_credentials
 from api.exposure import (
     build_exposure_board,
     get_counterparty_exposure,
@@ -30,6 +31,8 @@ from api.schemas import (
     CounterpartyListResponse,
     ExposureBoardResponse,
     HealthResponse,
+    ManagerApprovalRequest,
+    ManagerApprovalResponse,
     MarginCallBucketFeedResponse,
     MarginCallFeedResponse,
     MarginCallTraceResponse,
@@ -95,18 +98,52 @@ async def auth_verify(body: AuthVerifyRequest) -> AuthVerifyResponse:
 
 @app.post("/margin-calls/{thread_id}/approve", response_model=ApprovalResponse)
 async def approve_margin_call(
-    thread_id: str, body: ApprovalRequest, _approver: str = Depends(require_approver)
+    thread_id: str, body: ApprovalRequest, approver: str = Depends(require_approver)
 ) -> ApprovalResponse:
     """PROVISIONAL (see MM-37 note in docs/ROADMAP.md): audit trail
     (who/when, not just role-gating) is still Phase 9's MM-91. Revisit
-    before treating as final."""
+    before treating as final. approver_username comes from the verified JWT
+    (require_approver), never the request body -- so a client can't spoof
+    who signed."""
     graph = get_orchestrator_graph()
-    resume_payload = {"decision": body.decision, "adjusted_call_amount": body.adjusted_call_amount}
+    resume_payload = {
+        "decision": body.decision,
+        "adjusted_call_amount": body.adjusted_call_amount,
+        "approver_username": approver,
+    }
     result = resume_run(graph, thread_id, resume_payload)
     return ApprovalResponse(
         thread_id=thread_id,
         approval_decision=result.get("approval_decision"),
         adjusted_call_amount=result.get("adjusted_call_amount"),
+    )
+
+
+@app.post("/margin-calls/{thread_id}/manager-approve", response_model=ManagerApprovalResponse)
+async def manager_approve_margin_call(
+    thread_id: str, body: ManagerApprovalRequest, manager: str = Depends(require_manager)
+) -> ManagerApprovalResponse:
+    """Second signature for elite-tier counterparties (Phase 9 scope
+    addition) -- only reachable once await_manager_approval is the run's
+    paused node (the orchestrator graph itself already gates this to elite
+    tier + an approved/adjusted first decision; resuming a run that isn't
+    actually paused there is a LangGraph-level no-op/error, not a security
+    hole). Enforces the same-person block here, before resuming: the same
+    username can't provide both signatures on one call."""
+    graph = get_orchestrator_graph()
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    current_state = graph.get_state(config).values
+    if current_state.get("first_approver_username") == manager:
+        raise HTTPException(
+            status_code=403,
+            detail="The same person cannot provide both signatures for this margin call.",
+        )
+
+    result = resume_run(graph, thread_id, {"decision": body.decision, "manager_username": manager})
+    return ManagerApprovalResponse(
+        thread_id=thread_id,
+        approval_decision=result.get("approval_decision"),
+        manager_decision=result.get("manager_decision"),
     )
 
 

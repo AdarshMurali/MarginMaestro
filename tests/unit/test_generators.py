@@ -6,7 +6,7 @@ import pytest
 
 from config.settings import get_settings
 from persistence.generators.collateral import generate_collateral
-from persistence.generators.counterparties import generate_counterparties
+from persistence.generators.counterparties import ELITE_COUNTERPARTY_IDS, generate_counterparties
 from persistence.generators.portfolios import (
     MAX_POSITIONS_PER_PORTFOLIO,
     MIN_POSITIONS_PER_PORTFOLIO,
@@ -14,7 +14,7 @@ from persistence.generators.portfolios import (
 )
 from persistence.generators.ratings import generate_ratings
 from persistence.generators.run import _safe_join, generate_all, write_all
-from persistence.models import RatingGrade
+from persistence.models import CounterpartyTier, RatingGrade
 
 SEED = 42
 AS_OF = date(2026, 1, 1)
@@ -26,6 +26,15 @@ def test_counterparties_deterministic_and_counted() -> None:
     assert first == second
     assert len(first) == 8
     assert [cp.id for cp in first] == [f"CP-{i}" for i in range(1, 9)]
+
+
+def test_elite_counterparties_are_the_curated_fixed_set() -> None:
+    counterparties = generate_counterparties(SEED)
+    elite_ids = {cp.id for cp in counterparties if cp.tier is CounterpartyTier.ELITE}
+    standard_ids = {cp.id for cp in counterparties if cp.tier is CounterpartyTier.STANDARD}
+
+    assert elite_ids == ELITE_COUNTERPARTY_IDS
+    assert standard_ids == {cp.id for cp in counterparties} - ELITE_COUNTERPARTY_IDS
 
 
 def test_portfolios_and_positions_counts_and_tickers() -> None:

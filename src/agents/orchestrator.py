@@ -36,12 +36,13 @@ from persistence.db.checkpoint_saver import AzureSQLSaver
 from persistence.db.engine import get_session_factory
 from persistence.db.models import (
     CollateralItemORM,
+    CounterpartyORM,
     PortfolioORM,
     PositionORM,
     RatingORM,
     ReferenceRateORM,
 )
-from persistence.models import AssetClass, Position, RatingGrade
+from persistence.models import AssetClass, CounterpartyTier, Position, RatingGrade
 from streaming.event_agent import latest_close_before
 from streaming.market_feed import MarketFeed, get_market_feed
 from streaming.schemas import ImpactSet
@@ -64,8 +65,16 @@ class MarginCallState(BaseModel):
     initial_margin: InitialMargin | None = None
     csa_terms: CSATerms | None = None
     breach_result: BreachResult | None = None
-    approval_decision: Literal["approved", "rejected", "adjusted"] | None = None
+    counterparty_tier: CounterpartyTier | None = None
+    approval_decision: Literal["approved", "rejected", "adjusted", "disputed"] | None = None
     adjusted_call_amount: float | None = None
+    first_approver_username: str | None = None
+    # Second signature (elite-tier counterparties only, Phase 9 scope
+    # addition): manager_decision is intentionally narrower than
+    # approval_decision -- the manager only ratifies or overturns the first
+    # decision, never introduces a new adjusted amount.
+    manager_username: str | None = None
+    manager_decision: Literal["approved", "rejected"] | None = None
     notification_result: NotificationResult | None = None
     notification_sent_at: datetime | None = None
     sla_outcome: Literal["met", "breached"] | None = None
@@ -166,6 +175,18 @@ def _current_rating(session: Session, counterparty_id: str) -> RatingGrade | Non
     return RatingGrade(grade) if grade is not None else None
 
 
+def _counterparty_tier(session: Session, counterparty_id: str) -> CounterpartyTier:
+    """Defaults to STANDARD if the counterparty row is somehow missing
+    (shouldn't happen -- compute_exposure already loaded its positions
+    successfully by this point) rather than raising, since a missing tier
+    should never block the single-approver path that already worked before
+    two-person sign-off existed."""
+    tier = session.execute(
+        select(CounterpartyORM.tier).where(CounterpartyORM.id == counterparty_id)
+    ).scalar_one_or_none()
+    return CounterpartyTier(tier) if tier is not None else CounterpartyTier.STANDARD
+
+
 def evaluate_breach_node(state: MarginCallState, session: Session) -> dict:
     if state.variation_margin is None or state.initial_margin is None or state.csa_terms is None:
         raise PricingError(
@@ -180,15 +201,22 @@ def evaluate_breach_node(state: MarginCallState, session: Session) -> dict:
     collateral_held = _collateral_held(session, state.counterparty_id)
     current_rating = _current_rating(session, state.counterparty_id)
     result = evaluate_breach(exposure, collateral_held, state.csa_terms, current_rating)
-    return {"breach_result": result}
+    return {
+        "breach_result": result,
+        "counterparty_tier": _counterparty_tier(session, state.counterparty_id),
+    }
 
 
 def await_approval(state: MarginCallState) -> dict:
     """Pauses the graph (LangGraph interrupt()) carrying the proposed call
     amount, resuming on Command(resume={"decision": ..., "adjusted_call_amount":
-    ...}). "decision" must be one of MarginCallState.approval_decision's
-    literals; "adjusted_call_amount" only matters when decision == "adjusted".
-    Provisional endpoint -- see MM-37 note in docs/ROADMAP.md."""
+    ..., "approver_username": ...}). "decision" must be one of
+    MarginCallState.approval_decision's literals; "adjusted_call_amount"
+    only matters when decision == "adjusted". "approver_username" is who
+    signed -- recorded so an elite-tier counterparty's second signature
+    (await_manager_approval) can be checked against it, and so the same
+    person can't provide both signatures. Provisional endpoint -- see MM-37
+    note in docs/ROADMAP.md."""
     if state.breach_result is None:
         raise PricingError("await_approval requires breach_result to already be set")
 
@@ -205,7 +233,9 @@ def await_approval(state: MarginCallState) -> dict:
     # node function from the top on resume, so anything before interrupt()
     # would double-log (once on the pausing call, once per resume).
     logger.bind(correlation_id=state.correlation_id, counterparty_id=state.counterparty_id).info(
-        "await_approval_resumed", decision=decision
+        "await_approval_resumed",
+        decision=decision,
+        approver_username=resume.get("approver_username"),
     )
     return {
         "approval_decision": decision,
@@ -216,6 +246,45 @@ def await_approval(state: MarginCallState) -> dict:
         "adjusted_call_amount": (
             resume.get("adjusted_call_amount") if decision == "adjusted" else None
         ),
+        "first_approver_username": resume.get("approver_username"),
+    }
+
+
+def await_manager_approval(state: MarginCallState) -> dict:
+    """Second-signature gate for elite-tier counterparties (Phase 9 scope
+    addition) -- only reached when _route_after_approval routes here
+    (elite tier + first decision approved/adjusted). Pauses on interrupt(),
+    resuming on Command(resume={"decision": "approved"|"rejected",
+    "manager_username": ...}). A manager rejection overturns the first
+    approver's decision -- recorded as approval_decision="disputed" (a
+    distinct terminal state from a plain "rejected", since here someone
+    already said yes) rather than silently downgraded to "rejected", so the
+    disagreement itself stays visible in the run's history."""
+    if state.breach_result is None:
+        raise PricingError("await_manager_approval requires breach_result to already be set")
+
+    payload = {
+        "correlation_id": state.correlation_id,
+        "counterparty_id": state.counterparty_id,
+        "call_amount": (
+            state.adjusted_call_amount
+            if state.approval_decision == "adjusted" and state.adjusted_call_amount is not None
+            else state.breach_result.call_amount
+        ),
+        "currency": state.csa_terms.currency if state.csa_terms else "USD",
+        "first_approver_username": state.first_approver_username,
+    }
+    resume = interrupt(payload)
+
+    decision = resume["decision"]
+    manager_username = resume.get("manager_username")
+    logger.bind(correlation_id=state.correlation_id, counterparty_id=state.counterparty_id).info(
+        "await_manager_approval_resumed", decision=decision, manager_username=manager_username
+    )
+    return {
+        "manager_decision": decision,
+        "manager_username": manager_username,
+        "approval_decision": "disputed" if decision == "rejected" else state.approval_decision,
     }
 
 
@@ -324,6 +393,14 @@ def _route_after_sla(state: MarginCallState) -> str:
 
 def _route_after_approval(state: MarginCallState) -> str:
     if state.approval_decision in ("approved", "adjusted"):
+        if state.counterparty_tier is CounterpartyTier.ELITE:
+            return "await_manager_approval"
+        return "send_notification"
+    return END
+
+
+def _route_after_manager_approval(state: MarginCallState) -> str:
+    if state.manager_decision == "approved":
         return "send_notification"
     return END
 
@@ -468,6 +545,7 @@ def build_orchestrator_graph(
     graph.add_node("fetch_csa_terms", _fetch_csa_terms_node)
     graph.add_node("evaluate_breach", _evaluate_breach_node)
     graph.add_node("await_approval", await_approval)
+    graph.add_node("await_manager_approval", await_manager_approval)
     graph.add_node("send_notification", _send_notification_node)
     graph.add_node("await_sla_response", _await_sla_response_node)
     graph.add_node("escalate", _escalate_node)
@@ -481,6 +559,15 @@ def build_orchestrator_graph(
     graph.add_conditional_edges(
         "await_approval",
         _route_after_approval,
+        {
+            "await_manager_approval": "await_manager_approval",
+            "send_notification": "send_notification",
+            END: END,
+        },
+    )
+    graph.add_conditional_edges(
+        "await_manager_approval",
+        _route_after_manager_approval,
         {"send_notification": "send_notification", END: END},
     )
     graph.add_edge("send_notification", "await_sla_response")

@@ -11,13 +11,16 @@ from agents.escalation import IncidentResult
 from agents.orchestrator import (
     MarginCallState,
     _collateral_held,
+    _counterparty_tier,
     _current_rating,
     _latest_vix,
     _load_positions,
     _route_after_approval,
     _route_after_breach,
+    _route_after_manager_approval,
     _route_after_sla,
     await_approval,
+    await_manager_approval,
     await_sla_response,
     build_orchestrator_graph,
     compute_exposure,
@@ -42,7 +45,7 @@ from persistence.db.models import (
     RatingORM,
     ReferenceRateORM,
 )
-from persistence.models import RatingGrade, RatingTrigger
+from persistence.models import CounterpartyTier, RatingGrade, RatingTrigger
 from rag.models import CSATermsResult
 from streaming.market_feed import PriceQuote
 from streaming.schemas import ImpactSet, MarketEventType
@@ -332,6 +335,40 @@ class TestEvaluateBreachNode:
 
         assert result["breach_result"].breached is False
 
+    def test_returns_the_counterparty_tier(self, session_factory) -> None:
+        state = self._state_with_vm_im(vm=0.0, im=0.0, threshold=1_000_000.0)
+        with session_factory() as session:
+            session.add(
+                CounterpartyORM(id="CP-1", name="CP-1", type="Bank", country="US", tier="elite")
+            )
+            session.commit()
+
+            result = evaluate_breach_node(state, session)
+
+        assert result["counterparty_tier"] is CounterpartyTier.ELITE
+
+    def test_defaults_to_standard_when_counterparty_row_is_missing(self, session_factory) -> None:
+        state = self._state_with_vm_im(vm=0.0, im=0.0, threshold=1_000_000.0)
+        with session_factory() as session:
+            result = evaluate_breach_node(state, session)
+
+        assert result["counterparty_tier"] is CounterpartyTier.STANDARD
+
+
+class TestCounterpartyTier:
+    def test_returns_the_stored_tier(self, session_factory) -> None:
+        with session_factory() as session:
+            session.add(
+                CounterpartyORM(id="CP-1", name="CP-1", type="Bank", country="US", tier="elite")
+            )
+            session.commit()
+
+            assert _counterparty_tier(session, "CP-1") is CounterpartyTier.ELITE
+
+    def test_defaults_to_standard_when_missing(self, session_factory) -> None:
+        with session_factory() as session:
+            assert _counterparty_tier(session, "CP-404") is CounterpartyTier.STANDARD
+
 
 class TestCurrentRating:
     def test_returns_none_when_no_rating_rows(self, session_factory) -> None:
@@ -386,6 +423,46 @@ class TestRouteAfterApproval:
         state = _state()
         state.approval_decision = "rejected"
         assert _route_after_approval(state) != "send_notification"
+
+    def test_elite_tier_routes_to_manager_approval_when_approved(self) -> None:
+        state = _state()
+        state.approval_decision = "approved"
+        state.counterparty_tier = CounterpartyTier.ELITE
+        assert _route_after_approval(state) == "await_manager_approval"
+
+    def test_elite_tier_routes_to_manager_approval_when_adjusted(self) -> None:
+        state = _state()
+        state.approval_decision = "adjusted"
+        state.counterparty_tier = CounterpartyTier.ELITE
+        assert _route_after_approval(state) == "await_manager_approval"
+
+    def test_elite_tier_still_routes_to_end_when_rejected(self) -> None:
+        """Rejection is already terminal -- no second signature needed on a
+        decision nobody approved in the first place."""
+        state = _state()
+        state.approval_decision = "rejected"
+        state.counterparty_tier = CounterpartyTier.ELITE
+        result = _route_after_approval(state)
+        assert result != "send_notification"
+        assert result != "await_manager_approval"
+
+
+class TestRouteAfterManagerApproval:
+    def test_routes_to_send_notification_when_manager_approves(self) -> None:
+        state = _state()
+        state.manager_decision = "approved"
+        assert _route_after_manager_approval(state) == "send_notification"
+
+    def test_routes_to_end_when_manager_rejects(self) -> None:
+        state = _state()
+        state.manager_decision = "rejected"
+        assert _route_after_manager_approval(state) != "send_notification"
+
+
+class TestAwaitManagerApproval:
+    def test_raises_if_breach_result_missing(self) -> None:
+        with pytest.raises(PricingError):
+            await_manager_approval(_state())
 
 
 class TestSendNotification:
@@ -715,6 +792,75 @@ class TestBuildOrchestratorGraph:
         assert "__interrupt__" not in resumed
         assert resumed["approval_decision"] == "rejected"
         assert resumed["adjusted_call_amount"] is None
+
+    def test_elite_counterparty_requires_a_second_manager_signoff(self, session_factory) -> None:
+        _seed_breach_scenario(session_factory)
+        with session_factory() as session:
+            session.query(CounterpartyORM).filter_by(id="CP-1").update({"tier": "elite"})
+            session.commit()
+        state = _state()
+
+        with (
+            patch(
+                "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+            ),
+            _patch_draft_notice(),
+            _patch_send_slack_notice(),
+        ):
+            graph = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=_breach_market_feed(),
+                settings=Settings(_env_file=None),
+            )
+            thread_id = thread_id_for(state.impact, state.counterparty_id)
+            start_run(graph, state)
+            after_approver = resume_run(
+                graph, thread_id, {"decision": "approved", "approver_username": "alice"}
+            )
+            assert "__interrupt__" in after_approver  # paused at await_manager_approval, not sent
+            assert after_approver["first_approver_username"] == "alice"
+            assert "notification_result" not in after_approver
+
+            after_manager = resume_run(
+                graph, thread_id, {"decision": "approved", "manager_username": "bob"}
+            )
+            assert "__interrupt__" in after_manager  # now paused at await_sla_response
+
+            resumed = resume_run(graph, thread_id, {"responded": True})
+
+        assert "__interrupt__" not in resumed
+        assert resumed["approval_decision"] == "approved"
+        assert resumed["manager_decision"] == "approved"
+        assert resumed["manager_username"] == "bob"
+        assert resumed["notification_result"].slack_channel == "C0BMCAL6L74"
+
+    def test_elite_counterparty_manager_rejection_produces_a_disputed_outcome(
+        self, session_factory
+    ) -> None:
+        _seed_breach_scenario(session_factory)
+        with session_factory() as session:
+            session.query(CounterpartyORM).filter_by(id="CP-1").update({"tier": "elite"})
+            session.commit()
+        state = _state()
+
+        with patch(
+            "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+        ):
+            graph = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=_breach_market_feed(),
+                settings=Settings(_env_file=None),
+            )
+            thread_id = thread_id_for(state.impact, state.counterparty_id)
+            start_run(graph, state)
+            resume_run(graph, thread_id, {"decision": "approved", "approver_username": "alice"})
+            resumed = resume_run(
+                graph, thread_id, {"decision": "rejected", "manager_username": "bob"}
+            )
+
+        assert "__interrupt__" not in resumed
+        assert resumed["approval_decision"] == "disputed"
+        assert resumed["manager_decision"] == "rejected"
 
 
 def _seed_breach_scenario(session_factory) -> None:

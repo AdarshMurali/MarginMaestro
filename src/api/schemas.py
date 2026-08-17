@@ -217,6 +217,21 @@ class ApprovalResponse(BaseModel):
     adjusted_call_amount: float | None = None
 
 
+class ManagerApprovalRequest(BaseModel):
+    """Second signature for elite-tier counterparties (Phase 9 scope
+    addition) -- must be one of MarginCallState.manager_decision's
+    literals, intentionally narrower than the first approver's (no
+    "adjusted": the manager ratifies or overturns, never re-adjusts)."""
+
+    decision: Literal["approved", "rejected"]
+
+
+class ManagerApprovalResponse(BaseModel):
+    thread_id: str
+    approval_decision: str | None = None
+    manager_decision: str | None = None
+
+
 class SlaResponse(BaseModel):
     """sla_outcome is None while the run is still within the SLA window and
     no response signal has arrived yet -- not an error, just not resolved."""

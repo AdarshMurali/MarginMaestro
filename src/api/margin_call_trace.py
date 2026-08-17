@@ -32,6 +32,7 @@ NODE_LABELS = {
     "fetch_csa_terms": "Fetch CSA terms",
     "evaluate_breach": "Evaluate breach",
     "await_approval": "Await human approval",
+    "await_manager_approval": "Await second sign-off",
     "send_notification": "Send notification",
     "await_sla_response": "Await SLA response",
     "escalate": "Escalate",
@@ -79,6 +80,14 @@ def _summarize_step(node: str, values: dict) -> str:
         if decision == "adjusted" and adjusted is not None:
             return f"Decision: adjusted to {adjusted:,.0f}"
         return f"Decision: {decision}" if decision else "Awaiting approval"
+
+    if node == "await_manager_approval":
+        decision = values.get("manager_decision")
+        if decision is None:
+            return "Awaiting second sign-off"
+        return (
+            f"Second sign-off: {decision}" if decision == "approved" else "Disputed -- overturned"
+        )
 
     if node == "send_notification":
         result = values.get("notification_result")

@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     # real secrets; change before any non-demo deployment.
     demo_approver_password: str = "MarginMaestro!Approver1"
     demo_viewer_password: str = "MarginMaestro!Viewer1"
+    demo_manager_password: str = "MarginMaestro!Manager1"
 
     @classmethod
     def settings_customise_sources(

@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from api.auth import require_approver
+from api.auth import require_approver, require_manager
 from api.main import app
 
 client = TestClient(app)
@@ -40,7 +40,11 @@ class TestApproveMarginCall:
         mock_resume.assert_called_once_with(
             mock_get_graph.return_value,
             "evt-1:CP-1",
-            {"decision": "approved", "adjusted_call_amount": None},
+            {
+                "decision": "approved",
+                "adjusted_call_amount": None,
+                "approver_username": "test-approver",
+            },
         )
 
     def test_passes_adjusted_call_amount_through(self) -> None:
@@ -61,6 +65,66 @@ class TestApproveMarginCall:
 
     def test_rejects_invalid_decision(self) -> None:
         response = client.post("/margin-calls/evt-1:CP-1/approve", json={"decision": "maybe"})
+
+        assert response.status_code == 422
+
+
+class TestManagerApproveMarginCall:
+    def test_resumes_the_graph_and_returns_the_decision(self) -> None:
+        app.dependency_overrides[require_manager] = lambda: "test-manager"
+        try:
+            mock_graph = MagicMock()
+            mock_graph.get_state.return_value.values = {"first_approver_username": "test-approver"}
+            with (
+                patch("api.main.get_orchestrator_graph", return_value=mock_graph),
+                patch(
+                    "api.main.resume_run",
+                    return_value={"approval_decision": "approved", "manager_decision": "approved"},
+                ) as mock_resume,
+            ):
+                response = client.post(
+                    "/margin-calls/evt-1:CP-1/manager-approve", json={"decision": "approved"}
+                )
+        finally:
+            app.dependency_overrides.pop(require_manager, None)
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "thread_id": "evt-1:CP-1",
+            "approval_decision": "approved",
+            "manager_decision": "approved",
+        }
+        mock_resume.assert_called_once_with(
+            mock_graph, "evt-1:CP-1", {"decision": "approved", "manager_username": "test-manager"}
+        )
+
+    def test_same_person_as_first_approver_is_rejected(self) -> None:
+        app.dependency_overrides[require_manager] = lambda: "test-approver"
+        try:
+            mock_graph = MagicMock()
+            mock_graph.get_state.return_value.values = {"first_approver_username": "test-approver"}
+            with (
+                patch("api.main.get_orchestrator_graph", return_value=mock_graph),
+                patch("api.main.resume_run") as mock_resume,
+            ):
+                response = client.post(
+                    "/margin-calls/evt-1:CP-1/manager-approve", json={"decision": "approved"}
+                )
+        finally:
+            app.dependency_overrides.pop(require_manager, None)
+
+        assert response.status_code == 403
+        assert "same person" in response.json()["detail"].lower()
+        mock_resume.assert_not_called()
+
+    def test_rejects_invalid_decision(self) -> None:
+        app.dependency_overrides[require_manager] = lambda: "test-manager"
+        try:
+            response = client.post(
+                "/margin-calls/evt-1:CP-1/manager-approve", json={"decision": "adjusted"}
+            )
+        finally:
+            app.dependency_overrides.pop(require_manager, None)
 
         assert response.status_code == 422
 
