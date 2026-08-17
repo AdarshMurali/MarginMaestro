@@ -204,7 +204,10 @@ class TestTriggerSimulation:
     def test_positive_pct_change_is_supported(self, session_factory) -> None:
         _seed_counterparty(session_factory, "CP-UP", "TSLA", prior_price=100.0)
 
-        with session_factory() as session:
+        with (
+            patch("agents.orchestrator.answer_csa_terms", return_value=_csa_result("CP-UP")),
+            session_factory() as session,
+        ):
             result = trigger_simulation(
                 MarketEventType.PRICE_SHOCK,
                 "TSLA",
