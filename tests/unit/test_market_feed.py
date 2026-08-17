@@ -13,6 +13,7 @@ from streaming.market_feed import (
     PriceQuote,
     YFinanceFeed,
     _coingecko_history,
+    _get_with_retry,
     get_market_feed,
     get_price_history,
 )
@@ -65,6 +66,88 @@ def _mock_transport(json_body: dict, status_code: int = 200) -> httpx.MockTransp
     return httpx.MockTransport(handler)
 
 
+def _sequenced_transport(
+    responses: list[tuple[int, dict]],
+) -> tuple[httpx.MockTransport, MagicMock]:
+    """Returns responses in order, repeating the last one -- lets tests
+    script "429 then 429 then 200" without a stateful fixture per test."""
+    calls = MagicMock()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls(request)
+        index = min(calls.call_count - 1, len(responses) - 1)
+        status_code, body = responses[index]
+        headers = {}
+        return httpx.Response(status_code, json=body, headers=headers)
+
+    return httpx.MockTransport(handler), calls
+
+
+class TestGetWithRetry:
+    def test_succeeds_immediately_without_retrying(self) -> None:
+        client = httpx.Client(transport=_mock_transport({"ok": True}))
+        sleep = MagicMock()
+
+        response = _get_with_retry(client, "http://x/y", params={}, sleep=sleep)
+
+        assert response.status_code == 200
+        sleep.assert_not_called()
+
+    def test_retries_on_429_then_succeeds(self) -> None:
+        transport, calls = _sequenced_transport([(429, {}), (429, {}), (200, {"ok": True})])
+        client = httpx.Client(transport=transport)
+        sleep = MagicMock()
+
+        response = _get_with_retry(client, "http://x/y", params={}, sleep=sleep)
+
+        assert response.status_code == 200
+        assert calls.call_count == 3
+        assert sleep.call_count == 2
+        # Exponential: backoff_seconds * 2**0, then * 2**1
+        assert sleep.call_args_list[0].args[0] == pytest.approx(1.0)
+        assert sleep.call_args_list[1].args[0] == pytest.approx(2.0)
+
+    def test_gives_up_after_max_retries_and_returns_the_429(self) -> None:
+        transport, calls = _sequenced_transport([(429, {})])
+        client = httpx.Client(transport=transport)
+        sleep = MagicMock()
+
+        response = _get_with_retry(client, "http://x/y", params={}, max_retries=2, sleep=sleep)
+
+        assert response.status_code == 429
+        assert calls.call_count == 3  # initial + 2 retries
+        assert sleep.call_count == 2
+
+    def test_non_429_status_is_not_retried(self) -> None:
+        transport, calls = _sequenced_transport([(500, {})])
+        client = httpx.Client(transport=transport)
+        sleep = MagicMock()
+
+        response = _get_with_retry(client, "http://x/y", params={}, sleep=sleep)
+
+        assert response.status_code == 500
+        assert calls.call_count == 1
+        sleep.assert_not_called()
+
+    def test_retry_after_header_overrides_exponential_backoff(self) -> None:
+        call_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return httpx.Response(429, headers={"Retry-After": "5"}, json={})
+            return httpx.Response(200, json={"ok": True})
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        sleep = MagicMock()
+
+        response = _get_with_retry(client, "http://x/y", params={}, sleep=sleep)
+
+        assert response.status_code == 200
+        sleep.assert_called_once_with(5.0)
+
+
 class TestCoinGeckoFeed:
     def test_returns_prices_for_all_tickers(self) -> None:
         client = httpx.Client(
@@ -95,6 +178,17 @@ class TestCoinGeckoFeed:
         result = CoinGeckoFeed(client=client).get_prices([])
         assert result == {}
         client.get.assert_not_called()
+
+    def test_retries_a_transient_429_and_still_returns_prices(self) -> None:
+        transport, calls = _sequenced_transport([(429, {}), (200, {"bitcoin": {"usd": 65000.0}})])
+        client = httpx.Client(transport=transport)
+
+        with patch("streaming.market_feed.time.sleep") as mock_sleep:
+            result = CoinGeckoFeed(client=client).get_prices(["BTC-USD"])
+
+        assert result["BTC-USD"].price == 65000.0
+        assert calls.call_count == 2
+        mock_sleep.assert_called_once()
 
 
 class TestCompositeMarketFeed:
@@ -181,6 +275,19 @@ class TestGetPriceHistory:
         client = httpx.Client(transport=_mock_transport({"prices": []}))
         with pytest.raises(MarketDataUnavailableError, match="BTC-USD"):
             get_price_history("BTC-USD", days=5, client=client)
+
+    def test_crypto_retries_a_transient_429(self) -> None:
+        transport, calls = _sequenced_transport(
+            [(429, {}), (200, {"prices": [[1785715200000, 65000.0]]})]
+        )
+        client = httpx.Client(transport=transport)
+
+        with patch("streaming.market_feed.time.sleep") as mock_sleep:
+            result = get_price_history("BTC-USD", days=5, client=client)
+
+        assert [p.price for p in result] == [65000.0]
+        assert calls.call_count == 2
+        mock_sleep.assert_called_once()
 
 
 class TestGetMarketFeed:

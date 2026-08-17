@@ -1,3 +1,5 @@
+import time
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import Protocol
 
@@ -11,6 +13,39 @@ from persistence.models import AssetClass
 
 COINGECKO_API_BASE = "https://api.coingecko.com/api/v3"
 COINGECKO_SIMPLE_PRICE_URL = f"{COINGECKO_API_BASE}/simple/price"
+
+# CoinGecko's free/anonymous tier enforces a stricter, undocumented rate
+# limit than its published "Demo" tier -- a transient 429 shouldn't fail a
+# whole price/history request outright, so every CoinGecko call retries
+# through this helper before giving up.
+COINGECKO_MAX_RETRIES = 3
+COINGECKO_BACKOFF_SECONDS = 1.0
+
+
+def _get_with_retry(
+    client: httpx.Client,
+    url: str,
+    params: dict[str, str],
+    max_retries: int = COINGECKO_MAX_RETRIES,
+    backoff_seconds: float = COINGECKO_BACKOFF_SECONDS,
+    sleep: Callable[[float], None] | None = None,
+) -> httpx.Response:
+    """GETs url, retrying on HTTP 429 with exponential backoff -- honors a
+    Retry-After response header when CoinGecko sends one, otherwise
+    backoff_seconds * 2**attempt. `sleep` defaults to time.sleep, looked up
+    at call time (not bound as a default) so tests can patch
+    streaming.market_feed.time.sleep even through CoinGeckoFeed/
+    _coingecko_history, which don't expose their own sleep param."""
+    sleep = sleep or time.sleep
+    response = client.get(url, params=params)
+    attempt = 0
+    while response.status_code == 429 and attempt < max_retries:
+        retry_after = response.headers.get("Retry-After")
+        delay = float(retry_after) if retry_after is not None else backoff_seconds * (2**attempt)
+        sleep(delay)
+        response = client.get(url, params=params)
+        attempt += 1
+    return response
 
 
 class PriceQuote(BaseModel):
@@ -75,7 +110,8 @@ class CoinGeckoFeed:
             )
 
         ids_by_ticker = {t: COINGECKO_ID_MAP[t] for t in tickers}
-        response = self._client.get(
+        response = _get_with_retry(
+            self._client,
             COINGECKO_SIMPLE_PRICE_URL,
             params={"ids": ",".join(ids_by_ticker.values()), "vs_currencies": "usd"},
         )
@@ -147,9 +183,10 @@ def _coingecko_history(
         raise MarketDataUnavailableError(f"No CoinGecko id mapping for: {ticker}")
 
     client = client or httpx.Client(timeout=10.0)
-    response = client.get(
+    response = _get_with_retry(
+        client,
         f"{COINGECKO_API_BASE}/coins/{coingecko_id}/market_chart",
-        params={"vs_currency": "usd", "days": days},
+        params={"vs_currency": "usd", "days": str(days)},
     )
     if response.status_code != 200:
         raise MarketDataUnavailableError(
