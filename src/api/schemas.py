@@ -116,6 +116,25 @@ class MarginCallFeedResponse(BaseModel):
     margin_calls: list[MarginCallSummary]
 
 
+class CounterpartyHistoryResponse(BaseModel):
+    """Business-facing rollup (Phase 9 scope addition), distinct from
+    MarginCallFeedResponse's raw per-run list (MM-63) -- how many margin
+    calls this counterparty has had, what fraction actually breached, and
+    the average size of the ones that did, over `period_days` (None means
+    all-time). An aggregation over already-persisted run data, not a new
+    logging mechanism -- see docs/PROGRESS.md's handoff entry."""
+
+    counterparty_id: str
+    counterparty_name: str
+    as_of: datetime
+    period_days: int | None
+    total_calls: int
+    breached_calls: int
+    breach_rate: float
+    average_call_amount: float | None
+    currency: str = "USD"
+
+
 class MarginCallBucket(BaseModel):
     """One row per counterparty (MM-63) -- `latest` is whichever call is
     most URGENT for this counterparty (awaiting approval > escalated >

@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.schemas import (
+    CounterpartyHistoryResponse,
     MarginCallBucket,
     MarginCallBucketFeedResponse,
     MarginCallFeedResponse,
@@ -24,7 +25,7 @@ from api.schemas import (
 from calc.models import BreachResult
 from config.settings import Settings, get_settings
 from persistence.db.models import CheckpointORM
-from persistence.queries import list_counterparties
+from persistence.queries import get_counterparty, list_counterparties
 
 # Lower rank = more urgent = shown first (MM-63) -- awaiting_approval and
 # escalated sit in a human's queue right now; awaiting_sla_response is
@@ -187,3 +188,58 @@ def list_margin_call_buckets(
 
     buckets.sort(key=lambda b: (_URGENCY_RANK[b.latest.status], -b.latest.occurred_at.timestamp()))
     return MarginCallBucketFeedResponse(as_of=datetime.now(UTC), buckets=buckets)
+
+
+def counterparty_history(
+    graph: CompiledStateGraph,
+    session: Session,
+    counterparty_id: str,
+    days: int | None = None,
+    settings: Settings | None = None,
+) -> CounterpartyHistoryResponse | None:
+    """Business-facing rollup (Phase 9 scope addition): how many margin
+    calls this counterparty has had, what fraction breached, and the
+    average size of the ones that did, over the trailing `days` (None =
+    all-time). An aggregation over list_margin_calls_for_counterparty's
+    same underlying data, not a new logging mechanism -- see
+    docs/PROGRESS.md's handoff entry. Returns None if the counterparty
+    doesn't exist (the caller's cue to 404), distinct from a real
+    counterparty that simply has zero calls on record."""
+    settings = settings or get_settings()
+    counterparty = get_counterparty(session, counterparty_id)
+    if counterparty is None:
+        return None
+
+    summaries = [
+        s for s in _all_summaries(graph, session, settings) if s.counterparty_id == counterparty_id
+    ]
+    if days is not None:
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        summaries = [s for s in summaries if s.occurred_at >= cutoff]
+
+    # EVALUATING never persists in practice (see MarginCallLifecycleStatus's
+    # own docstring) but is excluded defensively -- it isn't a resolved
+    # outcome yet, so it shouldn't count toward either total_calls or a
+    # breach rate.
+    resolved = [s for s in summaries if s.status != MarginCallLifecycleStatus.EVALUATING]
+    breached = [s for s in resolved if s.status != MarginCallLifecycleStatus.NO_BREACH]
+
+    total_calls = len(resolved)
+    breached_calls = len(breached)
+    average_call_amount = (
+        sum(s.call_amount for s in breached if s.call_amount is not None) / breached_calls
+        if breached_calls
+        else None
+    )
+
+    return CounterpartyHistoryResponse(
+        counterparty_id=counterparty_id,
+        counterparty_name=counterparty.name,
+        as_of=datetime.now(UTC),
+        period_days=days,
+        total_calls=total_calls,
+        breached_calls=breached_calls,
+        breach_rate=(breached_calls / total_calls) if total_calls else 0.0,
+        average_call_amount=average_call_amount,
+        currency=resolved[0].currency if resolved else "USD",
+    )

@@ -17,6 +17,7 @@ from agents.orchestrator import (
 )
 from api.margin_calls import (
     _lifecycle_status,
+    counterparty_history,
     list_margin_call_buckets,
     list_margin_calls,
     list_margin_calls_for_counterparty,
@@ -100,6 +101,8 @@ def _summary(
     thread_id: str,
     status: MarginCallLifecycleStatus,
     occurred_at: datetime,
+    call_amount: float | None = None,
+    currency: str = "USD",
 ) -> MarginCallSummary:
     return MarginCallSummary(
         thread_id=thread_id,
@@ -109,6 +112,8 @@ def _summary(
         reason="test",
         occurred_at=occurred_at,
         status=status,
+        call_amount=call_amount,
+        currency=currency,
     )
 
 
@@ -389,6 +394,105 @@ class TestListMarginCallsForCounterparty:
             result = list_margin_calls_for_counterparty(MagicMock(), session, "CP-NONE")
 
         assert result.margin_calls == []
+
+
+class TestCounterpartyHistory:
+    def test_returns_none_for_an_unknown_counterparty(self, session_factory) -> None:
+        with session_factory() as session:
+            assert counterparty_history(MagicMock(), session, "CP-NONE") is None
+
+    def test_aggregates_breach_rate_and_average_call_amount(self, session_factory) -> None:
+        _seed_counterparty(session_factory, "CP-1", "Rodriguez Partners")
+        calls = [
+            _summary(
+                "CP-1",
+                "t1",
+                MarginCallLifecycleStatus.SLA_MET,
+                datetime(2026, 8, 1, tzinfo=UTC),
+                call_amount=100_000.0,
+            ),
+            _summary(
+                "CP-1",
+                "t2",
+                MarginCallLifecycleStatus.REJECTED,
+                datetime(2026, 7, 15, tzinfo=UTC),
+                call_amount=50_000.0,
+            ),
+            _summary(
+                "CP-1", "t3", MarginCallLifecycleStatus.NO_BREACH, datetime(2026, 7, 1, tzinfo=UTC)
+            ),
+            # A different counterparty's calls must never leak into CP-1's rollup.
+            _summary(
+                "CP-2",
+                "t4",
+                MarginCallLifecycleStatus.SLA_MET,
+                datetime(2026, 8, 1, tzinfo=UTC),
+                call_amount=999_999.0,
+            ),
+        ]
+        with (
+            patch("api.margin_calls._all_summaries", return_value=calls),
+            session_factory() as session,
+        ):
+            result = counterparty_history(MagicMock(), session, "CP-1")
+
+        assert result is not None
+        assert result.counterparty_name == "Rodriguez Partners"
+        assert result.period_days is None
+        assert result.total_calls == 3
+        assert result.breached_calls == 2
+        assert result.breach_rate == pytest.approx(2 / 3)
+        assert result.average_call_amount == pytest.approx(75_000.0)
+        assert result.currency == "USD"
+
+    def test_zero_calls_has_a_sane_zero_rate_not_a_division_error(self, session_factory) -> None:
+        _seed_counterparty(session_factory, "CP-1", "Rodriguez Partners")
+        with (
+            patch("api.margin_calls._all_summaries", return_value=[]),
+            session_factory() as session,
+        ):
+            result = counterparty_history(MagicMock(), session, "CP-1")
+
+        assert result is not None
+        assert result.total_calls == 0
+        assert result.breach_rate == 0.0
+        assert result.average_call_amount is None
+
+    def test_days_window_excludes_calls_outside_the_period(self, session_factory) -> None:
+        _seed_counterparty(session_factory, "CP-1", "Rodriguez Partners")
+        now = datetime.now(UTC)
+        calls = [
+            _summary("CP-1", "recent", MarginCallLifecycleStatus.SLA_MET, now - timedelta(days=5)),
+            _summary("CP-1", "old", MarginCallLifecycleStatus.SLA_MET, now - timedelta(days=100)),
+        ]
+        with (
+            patch("api.margin_calls._all_summaries", return_value=calls),
+            session_factory() as session,
+        ):
+            result = counterparty_history(MagicMock(), session, "CP-1", days=30)
+
+        assert result is not None
+        assert result.period_days == 30
+        assert result.total_calls == 1
+
+    def test_evaluating_status_excluded_from_totals(self, session_factory) -> None:
+        _seed_counterparty(session_factory, "CP-1", "Rodriguez Partners")
+        calls = [
+            _summary(
+                "CP-1",
+                "t1",
+                MarginCallLifecycleStatus.EVALUATING,
+                datetime(2026, 8, 1, tzinfo=UTC),
+            ),
+        ]
+        with (
+            patch("api.margin_calls._all_summaries", return_value=calls),
+            session_factory() as session,
+        ):
+            result = counterparty_history(MagicMock(), session, "CP-1")
+
+        assert result is not None
+        assert result.total_calls == 0
 
 
 class TestListMarginCallBuckets:

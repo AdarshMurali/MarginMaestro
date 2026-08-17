@@ -17,6 +17,7 @@ from api.exposure import (
 from api.logging_config import configure_logging
 from api.margin_call_trace import get_margin_call_trace
 from api.margin_calls import (
+    counterparty_history,
     list_margin_call_buckets,
     list_margin_calls,
     list_margin_calls_for_counterparty,
@@ -28,6 +29,7 @@ from api.schemas import (
     AuthVerifyRequest,
     AuthVerifyResponse,
     CounterpartyExposure,
+    CounterpartyHistoryResponse,
     CounterpartyListResponse,
     ExposureBoardResponse,
     HealthResponse,
@@ -181,6 +183,24 @@ async def margin_calls_for_counterparty(counterparty_id: str) -> MarginCallFeedR
     graph = get_orchestrator_graph()
     with session_factory() as session:
         return list_margin_calls_for_counterparty(graph, session, counterparty_id)
+
+
+@app.get("/counterparties/{counterparty_id}/history", response_model=CounterpartyHistoryResponse)
+async def counterparty_history_endpoint(
+    counterparty_id: str, days: int | None = None
+) -> CounterpartyHistoryResponse:
+    """Business-facing rollup (Phase 9 scope addition) -- how many margin
+    calls, breach rate, average size, over the trailing `days` (omit for
+    all-time). Distinct from /margin-calls/counterparty/{id}'s raw list."""
+    session_factory = get_db_session_factory()
+    graph = get_orchestrator_graph()
+    with session_factory() as session:
+        result = counterparty_history(graph, session, counterparty_id, days=days)
+    if result is None:
+        raise HTTPException(
+            status_code=404, detail=f"No counterparty found for {counterparty_id!r}"
+        )
+    return result
 
 
 @app.get("/market-universe", response_model=MarketUniverseResponse)
