@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from persistence.models import AssetClass
+from persistence.models import AssetClass, RatingTrigger
 
 
 class PricingError(Exception):
@@ -40,6 +40,7 @@ class CSATerms(BaseModel):
     threshold: float = Field(ge=0)
     mta: float = Field(ge=0)
     currency: str = "USD"
+    rating_triggers: list[RatingTrigger] = Field(default_factory=list)
 
 
 class BreachResult(BaseModel):

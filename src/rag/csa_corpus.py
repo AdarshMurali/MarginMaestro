@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from persistence.generators.counterparties import generate_counterparties
+from persistence.models import RatingGrade, RatingTrigger
 from rag.models import CSATermsDocument
 
 DEFAULT_SEED = 42
@@ -16,7 +17,10 @@ COLLATERAL_HAIRCUTS = {
     "Money market fund shares": 0.01,
 }
 
-RATING_TRIGGER_GRADES = ["BBB-", "BB+", "BB"]
+# Grades drawn from the same RatingGrade enum actually stored per counterparty
+# (RatingORM) -- no separate notched (BBB-/BB+) scale, so "below X" can be
+# compared directly at breach-evaluation time.
+RATING_TRIGGER_GRADES = [RatingGrade.BBB, RatingGrade.BB, RatingGrade.B]
 
 
 def generate_csa_terms(
@@ -46,12 +50,7 @@ def generate_csa_terms(
                 currency="USD",
                 eligible_collateral=eligible,
                 haircuts={c: COLLATERAL_HAIRCUTS[c] for c in eligible},
-                rating_triggers=[
-                    (
-                        f"A downgrade of {cp.name} below {trigger_grade} triggers a review "
-                        "and potential increase of required collateral."
-                    )
-                ],
+                rating_triggers=[RatingTrigger(below_grade=trigger_grade, reduced_threshold=0.0)],
                 effective_date=as_of,
             )
         )
@@ -65,7 +64,11 @@ def render_csa_document(doc: CSATermsDocument) -> str:
     collateral_lines = "\n".join(
         f"- {c} (haircut: {doc.haircuts[c]:.0%})" for c in doc.eligible_collateral
     )
-    trigger_lines = "\n".join(f"- {t}" for t in doc.rating_triggers)
+    trigger_lines = "\n".join(
+        f"- If {doc.counterparty_name}'s credit rating falls below {t.below_grade}, the "
+        f"Threshold is reduced to {doc.currency} {t.reduced_threshold:,.0f}."
+        for t in doc.rating_triggers
+    )
 
     return f"""# Credit Support Annex — {doc.counterparty_name} ({doc.counterparty_id})
 

@@ -2,6 +2,8 @@ from datetime import date
 
 from pydantic import BaseModel
 
+from persistence.models import RatingTrigger
+
 
 class CSATermsDocument(BaseModel):
     counterparty_id: str
@@ -11,7 +13,7 @@ class CSATermsDocument(BaseModel):
     currency: str
     eligible_collateral: list[str]
     haircuts: dict[str, float]
-    rating_triggers: list[str]
+    rating_triggers: list[RatingTrigger]
     effective_date: date
 
 
@@ -27,5 +29,5 @@ class CSATermsResult(BaseModel):
     currency: str
     eligible_collateral: list[str]
     haircuts: dict[str, float]
-    rating_triggers: list[str]
+    rating_triggers: list[RatingTrigger]
     citations: list[Citation]

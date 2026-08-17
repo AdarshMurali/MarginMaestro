@@ -1,6 +1,6 @@
 # Credit Support Annex — Hall Financial (CP-5)
 
-Effective date: 2026-07-26
+Effective date: 2026-08-16
 
 ## Threshold
 
@@ -19,4 +19,4 @@ The following collateral types are eligible for Hall Financial, with the haircut
 
 ## Rating Triggers
 
-- A downgrade of Hall Financial below BBB- triggers a review and potential increase of required collateral.
+- If Hall Financial's credit rating falls below BBB, the Threshold is reduced to USD 0.

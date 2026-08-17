@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
+from persistence.models import RatingGrade
 from streaming.market_feed import MarketFeed, PriceQuote
 from streaming.schemas import MarketEvent, MarketEventType
 from streaming.simulator import PriceScenario, SimulatedMarketFeed, run_scenario
@@ -90,5 +91,6 @@ class TestRunScenario:
         assert isinstance(published_event, MarketEvent)
         assert published_event.event_type == MarketEventType.DOWNGRADE
         assert published_event.counterparty_id == "CP-4"
+        assert published_event.new_rating_grade == RatingGrade.BBB
         assert kwargs["key"] == "CP-4"
         producer.flush.assert_called_once()

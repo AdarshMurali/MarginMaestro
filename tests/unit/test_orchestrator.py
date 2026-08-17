@@ -11,6 +11,7 @@ from agents.escalation import IncidentResult
 from agents.orchestrator import (
     MarginCallState,
     _collateral_held,
+    _current_rating,
     _latest_vix,
     _load_positions,
     _route_after_approval,
@@ -38,8 +39,10 @@ from persistence.db.models import (
     PortfolioORM,
     PositionORM,
     PriceHistoryORM,
+    RatingORM,
     ReferenceRateORM,
 )
+from persistence.models import RatingGrade, RatingTrigger
 from rag.models import CSATermsResult
 from streaming.market_feed import PriceQuote
 from streaming.schemas import ImpactSet, MarketEventType
@@ -242,6 +245,16 @@ class TestFetchCsaTerms:
         mock_answer.assert_called_once()
         assert result["csa_terms"] == CSATerms(threshold=250_000.0, mta=10_000.0, currency="USD")
 
+    def test_rating_triggers_pass_through_from_the_rag_result(self) -> None:
+        trigger = RatingTrigger(below_grade=RatingGrade.BBB, reduced_threshold=0.0)
+        csa_result = _csa_result(threshold=250_000.0)
+        csa_result.rating_triggers = [trigger]
+
+        with patch("agents.orchestrator.answer_csa_terms", return_value=csa_result):
+            result = fetch_csa_terms(_state(), Settings(_env_file=None))
+
+        assert result["csa_terms"].rating_triggers == [trigger]
+
 
 class TestEvaluateBreachNode:
     def _state_with_vm_im(self, vm: float, im: float, threshold: float) -> MarginCallState:
@@ -275,6 +288,75 @@ class TestEvaluateBreachNode:
     def test_raises_if_required_state_missing(self, session_factory) -> None:
         with session_factory() as session, pytest.raises(PricingError):
             evaluate_breach_node(_state(), session)
+
+    def test_fired_rating_trigger_reduces_the_effective_threshold(self, session_factory) -> None:
+        # Flat threshold (1,000,000) alone would not breach; the fired
+        # trigger drops it to 0, so the full exposure becomes callable.
+        state = self._state_with_vm_im(vm=100_000.0, im=10_000.0, threshold=1_000_000.0)
+        state.csa_terms.rating_triggers = [
+            RatingTrigger(below_grade=RatingGrade.BBB, reduced_threshold=0.0)
+        ]
+        with session_factory() as session:
+            session.add(
+                CounterpartyORM(id="CP-1", name="CP-1", type="Bank", country="US"),
+            )
+            session.add(
+                RatingORM(
+                    id="RTG-1", counterparty_id="CP-1", grade="BB", rating_date=date(2026, 7, 30)
+                )
+            )
+            session.commit()
+
+            result = evaluate_breach_node(state, session)
+
+        assert result["breach_result"].breached is True
+        assert result["breach_result"].call_amount == pytest.approx(110_000.0)
+
+    def test_current_rating_above_trigger_grade_leaves_flat_threshold(
+        self, session_factory
+    ) -> None:
+        state = self._state_with_vm_im(vm=0.0, im=5_000.0, threshold=1_000_000.0)
+        state.csa_terms.rating_triggers = [
+            RatingTrigger(below_grade=RatingGrade.BBB, reduced_threshold=0.0)
+        ]
+        with session_factory() as session:
+            session.add(CounterpartyORM(id="CP-1", name="CP-1", type="Bank", country="US"))
+            session.add(
+                RatingORM(
+                    id="RTG-1", counterparty_id="CP-1", grade="AA", rating_date=date(2026, 7, 30)
+                )
+            )
+            session.commit()
+
+            result = evaluate_breach_node(state, session)
+
+        assert result["breach_result"].breached is False
+
+
+class TestCurrentRating:
+    def test_returns_none_when_no_rating_rows(self, session_factory) -> None:
+        with session_factory() as session:
+            assert _current_rating(session, "CP-1") is None
+
+    def test_returns_the_most_recent_rating(self, session_factory) -> None:
+        with session_factory() as session:
+            session.add(CounterpartyORM(id="CP-1", name="CP-1", type="Bank", country="US"))
+            session.add(
+                RatingORM(
+                    id="RTG-1", counterparty_id="CP-1", grade="A", rating_date=date(2026, 7, 1)
+                )
+            )
+            session.add(
+                RatingORM(
+                    id="RTG-DG-CP-1",
+                    counterparty_id="CP-1",
+                    grade="BBB",
+                    rating_date=date(2026, 7, 30),
+                )
+            )
+            session.commit()
+
+            assert _current_rating(session, "CP-1") == RatingGrade.BBB
 
 
 class TestRouteAfterBreach:

@@ -34,8 +34,14 @@ from calc.vm import compute_variation_margin
 from config.settings import Settings, get_settings
 from persistence.db.checkpoint_saver import AzureSQLSaver
 from persistence.db.engine import get_session_factory
-from persistence.db.models import CollateralItemORM, PortfolioORM, PositionORM, ReferenceRateORM
-from persistence.models import AssetClass, Position
+from persistence.db.models import (
+    CollateralItemORM,
+    PortfolioORM,
+    PositionORM,
+    RatingORM,
+    ReferenceRateORM,
+)
+from persistence.models import AssetClass, Position, RatingGrade
 from streaming.event_agent import latest_close_before
 from streaming.market_feed import MarketFeed, get_market_feed
 from streaming.schemas import ImpactSet
@@ -141,8 +147,23 @@ def compute_exposure(state: MarginCallState, session: Session, market_feed: Mark
 def fetch_csa_terms(state: MarginCallState, settings: Settings) -> dict:
     result = answer_csa_terms(state.counterparty_id, settings=settings)
     return {
-        "csa_terms": CSATerms(threshold=result.threshold, mta=result.mta, currency=result.currency)
+        "csa_terms": CSATerms(
+            threshold=result.threshold,
+            mta=result.mta,
+            currency=result.currency,
+            rating_triggers=result.rating_triggers,
+        )
     }
+
+
+def _current_rating(session: Session, counterparty_id: str) -> RatingGrade | None:
+    grade = session.execute(
+        select(RatingORM.grade)
+        .where(RatingORM.counterparty_id == counterparty_id)
+        .order_by(RatingORM.rating_date.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return RatingGrade(grade) if grade is not None else None
 
 
 def evaluate_breach_node(state: MarginCallState, session: Session) -> dict:
@@ -157,7 +178,8 @@ def evaluate_breach_node(state: MarginCallState, session: Session) -> dict:
     # rule 1, not a certified risk model.
     exposure = state.variation_margin.variation_margin + state.initial_margin.initial_margin
     collateral_held = _collateral_held(session, state.counterparty_id)
-    result = evaluate_breach(exposure, collateral_held, state.csa_terms)
+    current_rating = _current_rating(session, state.counterparty_id)
+    result = evaluate_breach(exposure, collateral_held, state.csa_terms, current_rating)
     return {"breach_result": result}
 
 

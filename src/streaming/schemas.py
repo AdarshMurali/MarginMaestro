@@ -3,6 +3,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel
 
+from persistence.models import RatingGrade
+
 
 class MarketEventType(StrEnum):
     PRICE_SHOCK = "price_shock"
@@ -20,6 +22,10 @@ class MarketEvent(BaseModel):
     tickers: list[str] = []
     description: str
     occurred_at: datetime
+    # Structured new rating for DOWNGRADE events -- `description` alone is
+    # prose the Event Agent can't act on; this is what actually lets the
+    # downgrade change the counterparty's persisted rating (see event_agent.py).
+    new_rating_grade: RatingGrade | None = None
 
 
 class ImpactSet(BaseModel):

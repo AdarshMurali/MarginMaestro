@@ -13,7 +13,9 @@ from persistence.db.models import (
     PortfolioORM,
     PositionORM,
     PriceHistoryORM,
+    RatingORM,
 )
+from persistence.models import RatingGrade
 from streaming.event_agent import (
     affected_counterparties,
     classify_price_move,
@@ -24,6 +26,7 @@ from streaming.event_agent import (
     latest_close_before,
     price_event_id,
     upsert_latest_price,
+    upsert_rating_downgrade,
 )
 from streaming.market_feed import PriceQuote
 from streaming.schemas import MarketEvent, MarketEventType
@@ -255,6 +258,65 @@ class TestHandlePriceMessage:
         assert row.price == 202.0
 
 
+class TestUpsertRatingDowngrade:
+    def test_inserts_a_new_rating_row(self, session: Session) -> None:
+        event = MarketEvent(
+            event_id="evt-1",
+            event_type=MarketEventType.DOWNGRADE,
+            counterparty_id="CP-4",
+            description="CP-4 downgraded A -> BBB",
+            occurred_at=datetime(2026, 8, 10, tzinfo=UTC),
+            new_rating_grade=RatingGrade.BBB,
+        )
+
+        upsert_rating_downgrade(session, event)
+
+        row = session.get(RatingORM, "RTG-DG-CP-4")
+        assert row is not None
+        assert row.counterparty_id == "CP-4"
+        assert row.grade == "BBB"
+        assert row.rating_date == date(2026, 8, 10)
+
+    def test_replaying_the_same_event_id_re_merges_without_duplicating(
+        self, session: Session
+    ) -> None:
+        event = MarketEvent(
+            event_id="evt-1",
+            event_type=MarketEventType.DOWNGRADE,
+            counterparty_id="CP-4",
+            description="CP-4 downgraded A -> BBB",
+            occurred_at=datetime(2026, 8, 10, tzinfo=UTC),
+            new_rating_grade=RatingGrade.BBB,
+        )
+
+        upsert_rating_downgrade(session, event)
+        upsert_rating_downgrade(session, event)
+
+        assert session.query(RatingORM).count() == 1
+
+    def test_no_counterparty_or_no_new_grade_is_a_safe_no_op(self, session: Session) -> None:
+        no_cp = MarketEvent(
+            event_id="evt-2",
+            event_type=MarketEventType.DOWNGRADE,
+            counterparty_id=None,
+            description="unassigned",
+            occurred_at=datetime.now(UTC),
+            new_rating_grade=RatingGrade.BBB,
+        )
+        no_grade = MarketEvent(
+            event_id="evt-3",
+            event_type=MarketEventType.DOWNGRADE,
+            counterparty_id="CP-4",
+            description="no structured grade",
+            occurred_at=datetime.now(UTC),
+        )
+
+        upsert_rating_downgrade(session, no_cp)
+        upsert_rating_downgrade(session, no_grade)
+
+        assert session.query(RatingORM).count() == 0
+
+
 class TestHandleMarketEventMessage:
     def test_publishes_impact_set_for_downgrade(self, session: Session, settings: Settings) -> None:
         event = MarketEvent(
@@ -263,6 +325,7 @@ class TestHandleMarketEventMessage:
             counterparty_id="CP-4",
             description="CP-4 downgraded A -> BBB",
             occurred_at=datetime.now(UTC),
+            new_rating_grade=RatingGrade.BBB,
         )
         producer = MagicMock()
 
@@ -273,6 +336,25 @@ class TestHandleMarketEventMessage:
         producer.publish.assert_called_once_with(settings.kafka_topic_impact, impact, key="evt-1")
         producer.flush.assert_called_once()
 
+    def test_downgrade_event_persists_the_new_rating(
+        self, session: Session, settings: Settings
+    ) -> None:
+        event = MarketEvent(
+            event_id="evt-1",
+            event_type=MarketEventType.DOWNGRADE,
+            counterparty_id="CP-4",
+            description="CP-4 downgraded A -> BBB",
+            occurred_at=datetime.now(UTC),
+            new_rating_grade=RatingGrade.BBB,
+        )
+        producer = MagicMock()
+
+        handle_market_event_message(session, event, producer, settings)
+
+        row = session.get(RatingORM, "RTG-DG-CP-4")
+        assert row is not None
+        assert row.grade == "BBB"
+
     def test_replaying_the_same_event_is_a_no_op(
         self, session: Session, settings: Settings
     ) -> None:
@@ -282,6 +364,7 @@ class TestHandleMarketEventMessage:
             counterparty_id="CP-4",
             description="CP-4 downgraded A -> BBB",
             occurred_at=datetime.now(UTC),
+            new_rating_grade=RatingGrade.BBB,
         )
         producer = MagicMock()
 

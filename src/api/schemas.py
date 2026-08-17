@@ -157,12 +157,13 @@ class SimulateEventRequest(BaseModel):
     """A user-chosen single-ticker shock: which of the two price-driven event
     types to label it as, which curated-universe ticker to shock, and a
     signed %% delta on top of that ticker's real current price. MarketEventType
-    also has "downgrade", but a rating change doesn't feed into evaluate_breach
-    anywhere in this system today (no rating_triggers enforcement yet), so it
-    wouldn't visibly "trigger the lifecycle" the way this panel promises.
-    Scoped out deliberately, not missing. Ticker is checked against the
-    curated MARKET_UNIVERSE in the endpoint (golden rule #7 -- not validated
-    here since that list lives on Settings, not this schema)."""
+    also has "downgrade", but that's not a %%-delta-on-a-ticker event -- it's
+    authored via `make simulate SCENARIO=downgrade` (streaming/simulator.py)
+    instead, which now does feed into evaluate_breach via rating_triggers.
+    Scoped out of this ticker/%% panel deliberately, not missing. Ticker is
+    checked against the curated MARKET_UNIVERSE in the endpoint (golden rule
+    #7 -- not validated here since that list lives on Settings, not this
+    schema)."""
 
     event_type: Literal["price_shock", "vol_spike"]
     ticker: str

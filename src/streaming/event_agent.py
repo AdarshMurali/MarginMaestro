@@ -13,6 +13,7 @@ from persistence.db.models import (
     PositionORM,
     PriceHistoryORM,
     ProcessedEventORM,
+    RatingORM,
 )
 from streaming.consumer import EventConsumer, decode
 from streaming.market_feed import PriceQuote
@@ -68,6 +69,26 @@ def upsert_latest_price(session: Session, quote: PriceQuote) -> None:
             source=quote.source,
             as_of=quote.as_of,
             updated_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
+
+
+def upsert_rating_downgrade(session: Session, event: MarketEvent) -> None:
+    """Persists a DOWNGRADE event's new rating so evaluate_breach_node can
+    read a real "current rating" -- without this, rating_triggers would
+    never actually fire from a live simulated downgrade. One row per
+    counterparty (id keyed by counterparty, not event_id) so a replayed
+    downgrade re-merges the same row instead of accumulating history --
+    matches upsert_latest_price's unconditional-overwrite pattern above."""
+    if event.counterparty_id is None or event.new_rating_grade is None:
+        return
+    session.merge(
+        RatingORM(
+            id=f"RTG-DG-{event.counterparty_id}",
+            counterparty_id=event.counterparty_id,
+            grade=event.new_rating_grade.value,
+            rating_date=event.occurred_at.date(),
         )
     )
     session.commit()
@@ -129,6 +150,9 @@ def handle_price_message(
 def handle_market_event_message(
     session: Session, event: MarketEvent, producer: EventProducer, settings: Settings
 ) -> ImpactSet | None:
+    if event.event_type is MarketEventType.DOWNGRADE:
+        upsert_rating_downgrade(session, event)
+
     if is_already_processed(session, event.event_id):
         return None
 

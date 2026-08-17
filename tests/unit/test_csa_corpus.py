@@ -1,7 +1,9 @@
 from unittest.mock import patch
 
+from persistence.models import RATING_ORDER
 from rag.csa_corpus import (
     COLLATERAL_HAIRCUTS,
+    RATING_TRIGGER_GRADES,
     generate_csa_terms,
     main,
     render_csa_document,
@@ -51,6 +53,16 @@ class TestGenerateCsaTerms:
             for collateral_type in doc.eligible_collateral:
                 assert doc.haircuts[collateral_type] == COLLATERAL_HAIRCUTS[collateral_type]
 
+    def test_rating_triggers_use_real_rating_grades_with_a_concrete_threshold(self) -> None:
+        docs = generate_csa_terms(seed=42)
+
+        for doc in docs:
+            assert len(doc.rating_triggers) == 1
+            trigger = doc.rating_triggers[0]
+            assert trigger.below_grade in RATING_TRIGGER_GRADES
+            assert trigger.below_grade in RATING_ORDER
+            assert trigger.reduced_threshold == 0.0
+
 
 class TestRenderCsaDocument:
     def test_rendered_document_contains_all_key_terms(self) -> None:
@@ -68,6 +80,9 @@ class TestRenderCsaDocument:
         assert "## Minimum Transfer Amount" in rendered
         assert "## Eligible Collateral" in rendered
         assert "## Rating Triggers" in rendered
+        trigger = doc.rating_triggers[0]
+        assert trigger.below_grade in rendered
+        assert f"{trigger.reduced_threshold:,.0f}" in rendered
 
 
 class TestWriteCorpus:

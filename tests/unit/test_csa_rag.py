@@ -8,6 +8,7 @@ from agents.csa_rag import (
     _HaircutEntry,
     answer_csa_terms,
 )
+from persistence.models import RatingGrade, RatingTrigger
 from rag.models import Citation
 from rag.retriever import RetrievedChunk
 
@@ -41,7 +42,7 @@ SAMPLE_EXTRACTION = _CSATermsExtraction(
         _HaircutEntry(collateral_type="Investment-grade corporate bonds", haircut=0.08),
         _HaircutEntry(collateral_type="US Treasury securities", haircut=0.02),
     ],
-    rating_triggers=["A downgrade of Yang Partners below BB triggers a review."],
+    rating_triggers=[RatingTrigger(below_grade=RatingGrade.BB, reduced_threshold=0.0)],
 )
 
 
@@ -85,6 +86,7 @@ class TestAnswerCsaTerms:
             "Investment-grade corporate bonds": 0.08,
             "US Treasury securities": 0.02,
         }
+        assert result.rating_triggers == SAMPLE_EXTRACTION.rating_triggers
         assert result.citations == [
             Citation(source_file="csa/CP-3.md", section="Threshold"),
             Citation(source_file="csa/CP-3.md", section="Minimum Transfer Amount"),

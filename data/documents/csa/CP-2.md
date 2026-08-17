@@ -1,6 +1,6 @@
 # Credit Support Annex — Walker Financial (CP-2)
 
-Effective date: 2026-07-26
+Effective date: 2026-08-16
 
 ## Threshold
 
@@ -19,4 +19,4 @@ The following collateral types are eligible for Walker Financial, with the hairc
 
 ## Rating Triggers
 
-- A downgrade of Walker Financial below BBB- triggers a review and potential increase of required collateral.
+- If Walker Financial's credit rating falls below BBB, the Threshold is reduced to USD 0.

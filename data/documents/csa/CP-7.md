@@ -1,6 +1,6 @@
 # Credit Support Annex — Barnes Capital Management (CP-7)
 
-Effective date: 2026-07-26
+Effective date: 2026-08-16
 
 ## Threshold
 
@@ -19,4 +19,4 @@ The following collateral types are eligible for Barnes Capital Management, with 
 
 ## Rating Triggers
 
-- A downgrade of Barnes Capital Management below BB triggers a review and potential increase of required collateral.
+- If Barnes Capital Management's credit rating falls below B, the Threshold is reduced to USD 0.

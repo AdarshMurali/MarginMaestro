@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CounterpartyType(StrEnum):
@@ -54,6 +54,31 @@ class Rating(BaseModel):
     counterparty_id: str
     grade: RatingGrade
     rating_date: date
+
+
+# Best-to-worst credit quality order -- lets code compare two RatingGrade
+# values ("is X below Y?") without relying on the enum's declaration order
+# (StrEnum has no built-in ordering).
+RATING_ORDER: list[RatingGrade] = [
+    RatingGrade.AAA,
+    RatingGrade.AA,
+    RatingGrade.A,
+    RatingGrade.BBB,
+    RatingGrade.BB,
+    RatingGrade.B,
+    RatingGrade.CCC,
+    RatingGrade.D,
+]
+
+
+class RatingTrigger(BaseModel):
+    """A CSA clause: if the counterparty's rating falls below `below_grade`,
+    the Threshold is reduced to `reduced_threshold` (deterministic clause
+    application -- CLAUDE.md golden rule 1; the LLM only ever extracts what
+    the document says, never decides the number)."""
+
+    below_grade: RatingGrade
+    reduced_threshold: float = Field(ge=0)
 
 
 class CollateralType(StrEnum):

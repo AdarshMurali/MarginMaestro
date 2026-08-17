@@ -2,6 +2,7 @@ from openai import OpenAI
 from pydantic import BaseModel
 
 from config.settings import Settings, get_settings
+from persistence.models import RatingTrigger
 from rag.models import Citation, CSATermsResult
 from rag.retriever import RetrievedChunk, retrieve
 
@@ -14,7 +15,12 @@ SYSTEM_PROMPT = (
     'cannot be determined from the excerpts, use 0 for numeric fields, "USD" for '
     "currency, and an empty list for list fields. Express each haircut as a "
     'decimal fraction, not a percentage number -- a haircut written as "8%" in '
-    "the text must be returned as 0.08, not 8."
+    "the text must be returned as 0.08, not 8. For rating_triggers, extract one "
+    "entry per rating-trigger clause found: below_grade is the credit rating "
+    "(one of AAA, AA, A, BBB, BB, B, CCC, D) below which the clause applies, "
+    "and reduced_threshold is the numeric Threshold value the clause states "
+    "applies once triggered. Only extract a trigger if the clause states a "
+    "concrete resulting Threshold number -- do not invent one."
 )
 
 
@@ -38,7 +44,7 @@ class _CSATermsExtraction(BaseModel):
     currency: str
     eligible_collateral: list[str]
     haircuts: list[_HaircutEntry]
-    rating_triggers: list[str]
+    rating_triggers: list[RatingTrigger]
 
 
 def _build_context(chunks: list[RetrievedChunk]) -> str:

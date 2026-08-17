@@ -82,6 +82,7 @@ def _build_downgrade_event() -> MarketEvent:
             f"{_DOWNGRADE_COUNTERPARTY_ID} downgraded {_DOWNGRADE_FROM} -> {_DOWNGRADE_TO}"
         ),
         occurred_at=datetime.now(UTC),
+        new_rating_grade=_DOWNGRADE_TO,
     )
 
 
