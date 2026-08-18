@@ -26,7 +26,7 @@ It is a **portfolio / proof-of-concept** built to production-engineering standar
 - **RAG store:** ChromaDB. **Relational:** Azure SQL (free tier).
 - **Streaming:** Kafka (Redpanda locally). Flink is **deferred** — only if a genuine windowed job is built (see `docs/adr/0003`).
 - **API:** FastAPI. **Frontend:** Next.js on Vercel.
-- **Tools exposed as MCP servers:** market data, Jira, Slack, ServiceNow, RAG retriever.
+- **Tools exposed as MCP servers:** market data, Slack, ServiceNow, RAG retriever. (Jira is this project's own dev-story tracker, not an agent-facing tool — see `docs/adr/0007`; it has no MCP server.)
 - **Notifications:** Slack. **Escalation incidents:** ServiceNow (see `docs/adr/0007` — scoped to the SLA-escalation path only). **Dev-story tracker:** Jira (`MM-#` tickets; unaffected by the ServiceNow decision). **Secrets:** AWS Parameter Store.
 - **CI/CD:** GitHub Actions + Docker Hub. **Quality:** SonarCloud + pytest-cov. **IaC:** Terraform.
 

@@ -23,3 +23,9 @@ class TestRetrieveDocumentChunksTool:
 
         mock_retrieve.assert_called_once_with("what is CP-3's threshold?", "CP-3", "csa", 3)
         assert result == [chunk.model_dump()]
+
+    def test_no_matches_returns_an_empty_list_not_an_error(self) -> None:
+        with patch("mcp_servers.rag_retriever.retrieve", return_value=[]):
+            result = retrieve_document_chunks("nothing relevant")
+
+        assert result == []
