@@ -1,9 +1,9 @@
 from datetime import UTC, date, datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from config.settings import Settings
 from persistence.db.models import (
@@ -17,6 +17,9 @@ from persistence.db.models import (
 )
 from persistence.models import RatingGrade
 from streaming.event_agent import (
+    _dead_letter_event,
+    _handle_with_retry,
+    _publish_dead_letter,
     affected_counterparties,
     classify_price_move,
     handle_market_event_message,
@@ -29,7 +32,8 @@ from streaming.event_agent import (
     upsert_rating_downgrade,
 )
 from streaming.market_feed import PriceQuote
-from streaming.schemas import MarketEvent, MarketEventType
+from streaming.producer import ProducerDeliveryError
+from streaming.schemas import ImpactSet, MarketEvent, MarketEventType
 
 
 @pytest.fixture
@@ -419,3 +423,170 @@ class TestHandleMessage:
 
         assert result is not None
         assert result.counterparty_ids == ["CP-4"]
+
+
+def _fake_message(
+    topic: str = "market.events",
+    partition: int = 0,
+    offset: int = 42,
+    key: bytes | None = b"evt-1",
+    value: bytes = b'{"some": "payload"}',
+) -> MagicMock:
+    msg = MagicMock()
+    msg.topic.return_value = topic
+    msg.partition.return_value = partition
+    msg.offset.return_value = offset
+    msg.key.return_value = key
+    msg.value.return_value = value
+    return msg
+
+
+@pytest.fixture
+def session_factory() -> sessionmaker[Session]:
+    """Unlike the module's `session` fixture (one shared Session), this
+    yields a real factory -- _handle_with_retry opens a fresh Session per
+    attempt, matching production's get_session_factory(settings) usage."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine)
+
+
+class TestDeadLetterEvent:
+    def test_builds_from_a_real_message_and_error(self) -> None:
+        msg = _fake_message(topic="market.prices", partition=2, offset=7, key=b"AAPL")
+        error = ValueError("boom")
+
+        dead_letter = _dead_letter_event(msg, error, attempts=3)
+
+        assert dead_letter.topic == "market.prices"
+        assert dead_letter.partition == 2
+        assert dead_letter.offset == 7
+        assert dead_letter.key == "AAPL"
+        assert dead_letter.value == '{"some": "payload"}'
+        assert dead_letter.error_type == "ValueError"
+        assert dead_letter.error_message == "boom"
+        assert dead_letter.attempts == 3
+
+    def test_handles_a_null_key(self) -> None:
+        msg = _fake_message(key=None)
+
+        dead_letter = _dead_letter_event(msg, ValueError("boom"), attempts=1)
+
+        assert dead_letter.key is None
+
+
+class TestPublishDeadLetter:
+    def test_publishes_to_the_dead_letter_topic_and_flushes(self, settings: Settings) -> None:
+        msg = _fake_message(topic="market.events", partition=0, offset=5)
+        producer = MagicMock()
+
+        _publish_dead_letter(
+            msg, ValueError("boom"), attempts=3, producer=producer, settings=settings
+        )
+
+        producer.publish.assert_called_once()
+        (topic, dead_letter), kwargs = producer.publish.call_args
+        assert topic == settings.kafka_topic_dead_letter
+        assert dead_letter.error_message == "boom"
+        assert kwargs["key"] == "market.events:0:5"
+        producer.flush.assert_called_once()
+
+    def test_a_broker_failure_propagates_rather_than_being_swallowed(
+        self, settings: Settings
+    ) -> None:
+        msg = _fake_message()
+        producer = MagicMock()
+        producer.flush.side_effect = ProducerDeliveryError("1 message(s) failed to deliver: []")
+
+        with pytest.raises(ProducerDeliveryError):
+            _publish_dead_letter(
+                msg, ValueError("boom"), attempts=3, producer=producer, settings=settings
+            )
+
+
+class TestHandleWithRetry:
+    def test_succeeds_on_first_attempt_without_retrying(
+        self, session_factory: sessionmaker[Session], settings: Settings
+    ) -> None:
+        msg = _fake_message()
+        producer = MagicMock()
+        impact = ImpactSet(
+            event_id="evt-1",
+            event_type=MarketEventType.DOWNGRADE,
+            counterparty_ids=["CP-1"],
+            reason="test",
+            occurred_at=datetime.now(UTC),
+        )
+        sleep = MagicMock()
+
+        with patch("streaming.event_agent.handle_message", return_value=impact) as mocked:
+            result = _handle_with_retry(msg, producer, settings, session_factory, sleep=sleep)
+
+        assert result is impact
+        assert mocked.call_count == 1
+        sleep.assert_not_called()
+        producer.publish.assert_not_called()  # never dead-lettered
+
+    def test_retries_a_transient_failure_then_succeeds(
+        self, session_factory: sessionmaker[Session], settings: Settings
+    ) -> None:
+        msg = _fake_message()
+        producer = MagicMock()
+        sleep = MagicMock()
+
+        with patch(
+            "streaming.event_agent.handle_message",
+            side_effect=[RuntimeError("db hiccup"), None],
+        ) as mocked:
+            result = _handle_with_retry(msg, producer, settings, session_factory, sleep=sleep)
+
+        assert result is None  # the (successful) second call's own return value
+        assert mocked.call_count == 2
+        sleep.assert_called_once_with(1.0)  # backoff_seconds * 2**0
+        producer.publish.assert_not_called()
+
+    def test_exhausts_retries_and_dead_letters_the_message(
+        self, session_factory: sessionmaker[Session], settings: Settings
+    ) -> None:
+        msg = _fake_message(topic="market.events", partition=1, offset=9)
+        producer = MagicMock()
+        sleep = MagicMock()
+
+        with patch(
+            "streaming.event_agent.handle_message", side_effect=RuntimeError("always fails")
+        ) as mocked:
+            result = _handle_with_retry(
+                msg, producer, settings, session_factory, max_attempts=3, sleep=sleep
+            )
+
+        assert result is None
+        assert mocked.call_count == 3
+        # exponential backoff between attempts 1->2 and 2->3, none after the last
+        assert sleep.call_args_list == [((1.0,),), ((2.0,),)]
+        producer.publish.assert_called_once()
+        (topic, dead_letter), _ = producer.publish.call_args
+        assert topic == settings.kafka_topic_dead_letter
+        assert dead_letter.attempts == 3
+        assert dead_letter.error_message == "always fails"
+        producer.flush.assert_called_once()
+
+    def test_uses_a_fresh_session_per_attempt(
+        self, session_factory: sessionmaker[Session], settings: Settings
+    ) -> None:
+        """A session that raised mid-transaction must not be reused for the
+        next attempt -- assert handle_message actually receives a live,
+        usable Session object on every call, not the same broken one twice."""
+        msg = _fake_message()
+        producer = MagicMock()
+        seen_sessions: list[Session] = []
+
+        def fake_handle_message(session: Session, *_args: object, **_kwargs: object) -> None:
+            seen_sessions.append(session)
+            if len(seen_sessions) < 2:
+                raise RuntimeError("first attempt fails")
+
+        with patch("streaming.event_agent.handle_message", side_effect=fake_handle_message):
+            _handle_with_retry(msg, producer, settings, session_factory, sleep=MagicMock())
+
+        assert len(seen_sessions) == 2
+        assert seen_sessions[0] is not seen_sessions[1]

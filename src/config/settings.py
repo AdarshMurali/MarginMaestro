@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     kafka_topic_events: str = "market.events"
     kafka_topic_impact: str = "market.impact"
     kafka_topic_calls: str = "margin.calls"
+    # MM-93: where the Event Agent's consumer loop routes a message after
+    # exhausting its retry budget, instead of crash-looping forever on one
+    # poison message (see streaming/event_agent.py's _handle_with_retry).
+    kafka_topic_dead_letter: str = "market.dead-letter"
 
     fred_api_key: str | None = None
 

@@ -40,3 +40,22 @@ class ImpactSet(BaseModel):
     counterparty_ids: list[str]
     reason: str
     occurred_at: datetime
+
+
+class DeadLetterEvent(BaseModel):
+    """A message the Event Agent (MM-93) gave up on after exhausting its
+    retry budget -- carries enough of the original Kafka message (topic,
+    partition, offset, key, raw value) to inspect or manually replay it,
+    plus what actually went wrong. Published to market.dead-letter; the
+    original message's offset is still committed on its source topic once
+    this lands, so one bad message can't wedge the partition."""
+
+    topic: str
+    partition: int
+    offset: int
+    key: str | None
+    value: str
+    error_type: str
+    error_message: str
+    attempts: int
+    failed_at: datetime

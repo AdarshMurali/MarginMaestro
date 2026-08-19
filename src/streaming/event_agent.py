@@ -1,9 +1,11 @@
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 import structlog
 from confluent_kafka import Message
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from config.settings import Settings, get_settings
 from persistence.db.engine import get_session_factory
@@ -18,7 +20,7 @@ from persistence.db.models import (
 from streaming.consumer import EventConsumer, decode
 from streaming.market_feed import PriceQuote
 from streaming.producer import EventProducer
-from streaming.schemas import ImpactSet, MarketEvent, MarketEventType
+from streaming.schemas import DeadLetterEvent, ImpactSet, MarketEvent, MarketEventType
 
 logger = structlog.get_logger()
 
@@ -26,6 +28,18 @@ logger = structlog.get_logger()
 # a real windowed job is what would eventually justify adding Flink).
 PRICE_SHOCK_THRESHOLD = 0.07
 VOL_SPIKE_THRESHOLD = 0.15
+
+# MM-93: bounded retry budget for one message before it's routed to the
+# dead-letter topic. Uniform across every exception type (decode failures,
+# DB blips, producer delivery errors) rather than trying to classify which
+# are "worth" retrying -- a deterministic failure just costs a few seconds
+# of backoff before landing in the DLQ where it's visible, versus the
+# previous behavior (an uncaught exception crashed the whole consumer
+# process without committing the offset, so the exact same message would be
+# redelivered and crash it again on every restart -- a permanent crash-loop
+# that wedges the partition for every message behind it).
+EVENT_AGENT_MAX_ATTEMPTS = 3
+EVENT_AGENT_RETRY_BACKOFF_SECONDS = 1.0
 
 
 def classify_price_move(quote: PriceQuote, prior_close: float) -> MarketEventType | None:
@@ -180,6 +194,89 @@ def handle_message(
     return handle_market_event_message(session, decode(msg, MarketEvent), producer, settings)
 
 
+def _dead_letter_event(msg: Message, error: Exception, attempts: int) -> DeadLetterEvent:
+    # confluent_kafka's stubs type these as Optional (a raw error Message can
+    # lack them), but EventConsumer.poll() already filters error messages
+    # out before anything reaches here -- a real, successfully polled
+    # message always has all three set.
+    topic, partition, offset = msg.topic(), msg.partition(), msg.offset()
+    assert topic is not None and partition is not None and offset is not None
+    key = msg.key()
+    value = msg.value()
+    return DeadLetterEvent(
+        topic=topic,
+        partition=partition,
+        offset=offset,
+        key=key.decode("utf-8", errors="replace") if key is not None else None,
+        value=value.decode("utf-8", errors="replace") if value is not None else "",
+        error_type=type(error).__name__,
+        error_message=str(error),
+        attempts=attempts,
+        failed_at=datetime.now(UTC),
+    )
+
+
+def _publish_dead_letter(
+    msg: Message, error: Exception, attempts: int, producer: EventProducer, settings: Settings
+) -> None:
+    """Deliberately doesn't catch its own failure -- if Redpanda itself is
+    unreachable, publish()/flush() raising and propagating out of
+    _handle_with_retry (and in turn run()'s loop) is the right outcome: the
+    original message's offset never gets committed, so it's naturally
+    redelivered and retried after a restart, exactly like any other
+    unhandled failure today. The dead-letter path only replaces
+    "crash forever on this one message" with "crash if the broker itself is
+    down" -- a materially bigger, more visible problem than one bad message."""
+    dead_letter = _dead_letter_event(msg, error, attempts)
+    dlq_key = f"{dead_letter.topic}:{dead_letter.partition}:{dead_letter.offset}"
+    producer.publish(settings.kafka_topic_dead_letter, dead_letter, key=dlq_key)
+    producer.flush()
+    logger.error(
+        "event_agent_dead_lettered",
+        topic=dead_letter.topic,
+        partition=dead_letter.partition,
+        offset=dead_letter.offset,
+        attempts=attempts,
+        error=str(error),
+    )
+
+
+def _handle_with_retry(
+    msg: Message,
+    producer: EventProducer,
+    settings: Settings,
+    session_factory: sessionmaker[Session],
+    max_attempts: int = EVENT_AGENT_MAX_ATTEMPTS,
+    backoff_seconds: float = EVENT_AGENT_RETRY_BACKOFF_SECONDS,
+    sleep: Callable[[float], None] | None = None,
+) -> ImpactSet | None:
+    """A fresh session per attempt -- a session that raised mid-transaction
+    can't just be reused for the next attempt. Every exception is retried
+    the same way (see EVENT_AGENT_MAX_ATTEMPTS's docstring); once the budget
+    is exhausted the message is dead-lettered rather than re-raised, so the
+    caller can always commit the offset and move on to the next message."""
+    sleep = sleep or time.sleep
+    last_error: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with session_factory() as session:
+                return handle_message(session, msg, producer, settings)
+        except Exception as exc:  # noqa: BLE001 -- catch-all is deliberate, see docstring above
+            last_error = exc
+            logger.warning(
+                "event_agent_handle_failed",
+                attempt=attempt,
+                max_attempts=max_attempts,
+                error=str(exc),
+            )
+            if attempt < max_attempts:
+                sleep(backoff_seconds * (2 ** (attempt - 1)))
+
+    assert last_error is not None  # loop always sets it before falling through
+    _publish_dead_letter(msg, last_error, max_attempts, producer, settings)
+    return None
+
+
 def run(settings: Settings | None = None) -> None:
     settings = settings or get_settings()
     session_factory = get_session_factory(settings)
@@ -194,8 +291,7 @@ def run(settings: Settings | None = None) -> None:
             msg = consumer.poll(1.0)
             if msg is None:
                 continue
-            with session_factory() as session:
-                handle_message(session, msg, producer, settings)
+            _handle_with_retry(msg, producer, settings, session_factory)
             consumer.commit(msg)
 
 

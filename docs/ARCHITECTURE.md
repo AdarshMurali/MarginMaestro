@@ -187,7 +187,7 @@ All services are **containerized** (Docker), images pushed to **Docker Hub**, de
 
 **Audit trail.** Every lifecycle step (event → decision → notification → escalation) is written to an immutable audit table in Azure SQL. This is a first-class output, not an afterthought — it is what makes the workflow defensible.
 
-**Resilience.** Retries + timeouts on external calls; a dead-letter path for failed events; idempotent event handling so replays are safe.
+**Resilience.** **Done (MM-75):** the Event Agent's Kafka consumer retries a failed message with exponential backoff (3 attempts) before routing it to a `market.dead-letter` topic and committing the offset, so one bad message can't wedge the consumer or crash-loop the process; idempotent event handling so replays are safe.
 
 **Cost control.** Local LLM + local embeddings by default; OpenAI reserved for an optional "premium" run. Parameter Store (free) over Secrets Manager. Redpanda/Chroma run locally in containers. Vercel + free-tier data sources.
 
