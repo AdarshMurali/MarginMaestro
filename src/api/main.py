@@ -1,9 +1,12 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from functools import lru_cache
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy.orm import Session, sessionmaker
 
 from agents.orchestrator import build_orchestrator_graph, resume_run
@@ -48,13 +51,29 @@ from api.schemas import (
 )
 from api.simulate import trigger_simulation
 from config.settings import get_settings
+from observability.tracing import configure_tracing
 from persistence.db.engine import get_session_factory
 from streaming.market_feed import MarketDataUnavailableError
 from streaming.schemas import MarketEventType
 
 configure_logging()
 
-app = FastAPI(title="MarginMaestro API")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """OTel/Jaeger wiring belongs here, not at bare module import time: a
+    TestClient(app) used without `with` (this project's convention in
+    every endpoint test) never triggers FastAPI's lifespan at all, so
+    configure_tracing() -- and its real background OTLP export attempts --
+    never runs during tests, only when an actual ASGI server (uvicorn)
+    serves the app. Found live: configuring it unconditionally at import
+    added ~30s to the whole local test suite from an unreachable-Jaeger
+    background exporter."""
+    configure_tracing(get_settings())
+    yield
+
+
+app = FastAPI(title="MarginMaestro API", lifespan=_lifespan)
 app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -85,6 +104,14 @@ async def health() -> HealthResponse:
 @app.get("/ready", response_model=HealthResponse)
 async def ready() -> HealthResponse:
     return HealthResponse(status="ready")
+
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    """Prometheus scrape endpoint (MM-92) -- unauthenticated, matching
+    standard Prometheus convention (scraped from within the docker network,
+    not exposed to end users)."""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.post("/auth/verify", response_model=AuthVerifyResponse)

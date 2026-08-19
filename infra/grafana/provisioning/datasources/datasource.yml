@@ -1,0 +1,12 @@
+# Auto-provisions Prometheus as a Grafana datasource (MM-92) -- no manual
+# "Add data source" click-through needed. "prometheus" resolves via
+# docker-compose's own network DNS (the service name), not localhost.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    uid: prometheus

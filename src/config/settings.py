@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     chroma_host: str = "localhost"
     chroma_port: int = 8100
 
+    # Phase 9 (MM-92): Jaeger's OTLP HTTP receiver default port. "/v1/traces"
+    # is appended by tracing.configure_tracing(), not stored here, so this
+    # value doubles as the base for any future OTLP signal (metrics/logs).
+    otel_exporter_otlp_endpoint: str = "http://localhost:4318"
+    otel_service_name: str = "marginmaestro-api"
+
     db_host: str | None = None
     db_port: int = 1433
     db_name: str = "marginmaestro"

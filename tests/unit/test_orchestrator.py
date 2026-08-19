@@ -35,6 +35,11 @@ from agents.orchestrator import (
 )
 from calc.models import BreachResult, CSATerms, InitialMargin, PricingError, VariationMargin
 from config.settings import Settings
+from observability.metrics import (
+    AGENT_STEP_TOTAL,
+    MARGIN_CALL_APPROVAL_DECISIONS_TOTAL,
+    MARGIN_CALL_BREACHES_TOTAL,
+)
 from persistence.audit import list_audit_events
 from persistence.db.models import (
     Base,
@@ -1014,6 +1019,80 @@ class TestAuditLogging:
         manager_event = next(e for e in events if e.event_type == "await_manager_approval")
         assert manager_event.payload["manager_decision"] == "approved"
         assert manager_event.payload["manager_username"] == "bob"
+
+
+def _step_success_count(step: str) -> float:
+    return AGENT_STEP_TOTAL.labels(step=step, outcome="success")._value.get()
+
+
+def _breach_count(breached: bool) -> float:
+    return MARGIN_CALL_BREACHES_TOTAL.labels(breached=str(breached).lower())._value.get()
+
+
+def _approval_decision_count(decision: str) -> float:
+    return MARGIN_CALL_APPROVAL_DECISIONS_TOTAL.labels(decision=decision)._value.get()
+
+
+class TestObservability:
+    """MM-92: every real lifecycle step increments a Prometheus counter and
+    creates a trace span, independent of the audit log (MM-91) and
+    structlog output, which are tested separately."""
+
+    def test_full_approved_run_increments_step_counters_and_business_metrics(
+        self, session_factory
+    ) -> None:
+        _seed_breach_scenario(session_factory)
+        state = _state()
+        before = {
+            step: _step_success_count(step)
+            for step in (
+                "compute_exposure",
+                "fetch_csa_terms",
+                "evaluate_breach",
+                "await_approval",
+                "send_notification",
+                "await_sla_response",
+            )
+        }
+        breached_before = _breach_count(True)
+        approved_before = _approval_decision_count("approved")
+
+        with (
+            patch(
+                "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+            ),
+            _patch_draft_notice(),
+            _patch_send_slack_notice(),
+        ):
+            graph = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=_breach_market_feed(),
+                settings=Settings(_env_file=None),
+            )
+            thread_id = thread_id_for(state.impact, state.counterparty_id)
+            start_run(graph, state)
+            resume_run(graph, thread_id, {"decision": "approved", "approver_username": "alice"})
+            resume_run(graph, thread_id, {"responded": True})
+
+        for step, count_before in before.items():
+            assert _step_success_count(step) == count_before + 1, step
+        assert _breach_count(True) == breached_before + 1
+        assert _approval_decision_count("approved") == approved_before + 1
+
+    def test_evaluate_breach_error_increments_the_error_outcome(self, session_factory) -> None:
+        state = _state()  # no positions seeded -- compute_exposure raises
+        before = AGENT_STEP_TOTAL.labels(step="compute_exposure", outcome="error")._value.get()
+
+        graph = build_orchestrator_graph(
+            session_factory=session_factory,
+            market_feed=MagicMock(),
+            settings=Settings(_env_file=None),
+        )
+        with pytest.raises(PricingError):
+            start_run(graph, state)
+
+        after = AGENT_STEP_TOTAL.labels(step="compute_exposure", outcome="error")._value.get()
+        assert after == before + 1
 
 
 class TestRestartSurvival:

@@ -9,6 +9,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, interrupt
+from opentelemetry import trace
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -33,6 +34,11 @@ from calc.models import (
 from calc.mtm import compute_mtm
 from calc.vm import compute_variation_margin
 from config.settings import Settings, get_settings
+from observability.metrics import (
+    MARGIN_CALL_APPROVAL_DECISIONS_TOTAL,
+    MARGIN_CALL_BREACHES_TOTAL,
+    observe_step,
+)
 from persistence.audit import record_audit_event
 from persistence.db.checkpoint_saver import AzureSQLSaver
 from persistence.db.engine import get_session_factory
@@ -50,6 +56,7 @@ from streaming.market_feed import MarketFeed, get_market_feed
 from streaming.schemas import ImpactSet
 
 logger = structlog.get_logger()
+tracer = trace.get_tracer(__name__)
 
 
 class MarginCallState(BaseModel):
@@ -514,7 +521,7 @@ def build_orchestrator_graph(
         log = logger.bind(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
         )
-        with session_factory() as session:
+        with observe_step(tracer, "compute_exposure"), session_factory() as session:
             result = compute_exposure(state, session, market_feed)
             _audit(
                 session,
@@ -536,14 +543,15 @@ def build_orchestrator_graph(
         log = logger.bind(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
         )
-        result = fetch_csa_terms(state, settings)
-        with session_factory() as session:
-            _audit(
-                session,
-                state,
-                "fetch_csa_terms",
-                {"csa_terms": result["csa_terms"].model_dump(mode="json")},
-            )
+        with observe_step(tracer, "fetch_csa_terms"):
+            result = fetch_csa_terms(state, settings)
+            with session_factory() as session:
+                _audit(
+                    session,
+                    state,
+                    "fetch_csa_terms",
+                    {"csa_terms": result["csa_terms"].model_dump(mode="json")},
+                )
         log.info("fetch_csa_terms_completed", threshold=result["csa_terms"].threshold)
         return result
 
@@ -551,7 +559,7 @@ def build_orchestrator_graph(
         log = logger.bind(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
         )
-        with session_factory() as session:
+        with observe_step(tracer, "evaluate_breach"), session_factory() as session:
             result = evaluate_breach_node(state, session)
             _audit(
                 session,
@@ -562,6 +570,9 @@ def build_orchestrator_graph(
                     "counterparty_tier": result["counterparty_tier"].value,
                 },
             )
+        MARGIN_CALL_BREACHES_TOTAL.labels(
+            breached=str(result["breach_result"].breached).lower()
+        ).inc()
         log.info(
             "evaluate_breach_completed",
             breached=result["breach_result"].breached,
@@ -571,7 +582,7 @@ def build_orchestrator_graph(
 
     def _await_approval_node(state: MarginCallState) -> dict:
         result = await_approval(state)
-        with session_factory() as session:
+        with observe_step(tracer, "await_approval"), session_factory() as session:
             _audit(
                 session,
                 state,
@@ -582,11 +593,14 @@ def build_orchestrator_graph(
                     "approver_username": result.get("first_approver_username"),
                 },
             )
+        decision = result.get("approval_decision")
+        if decision is not None:
+            MARGIN_CALL_APPROVAL_DECISIONS_TOTAL.labels(decision=decision).inc()
         return result
 
     def _await_manager_approval_node(state: MarginCallState) -> dict:
         result = await_manager_approval(state)
-        with session_factory() as session:
+        with observe_step(tracer, "await_manager_approval"), session_factory() as session:
             _audit(
                 session,
                 state,
@@ -603,14 +617,15 @@ def build_orchestrator_graph(
         log = logger.bind(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
         )
-        result = send_notification(state, settings)
-        with session_factory() as session:
-            _audit(
-                session,
-                state,
-                "send_notification",
-                {"notification_result": result["notification_result"].model_dump(mode="json")},
-            )
+        with observe_step(tracer, "send_notification"):
+            result = send_notification(state, settings)
+            with session_factory() as session:
+                _audit(
+                    session,
+                    state,
+                    "send_notification",
+                    {"notification_result": result["notification_result"].model_dump(mode="json")},
+                )
         log.info(
             "send_notification_completed",
             slack_channel=result["notification_result"].slack_channel,
@@ -619,7 +634,7 @@ def build_orchestrator_graph(
 
     def _await_sla_response_node(state: MarginCallState) -> dict:
         result = await_sla_response(state, settings)
-        with session_factory() as session:
+        with observe_step(tracer, "await_sla_response"), session_factory() as session:
             _audit(session, state, "await_sla_response", {"sla_outcome": result.get("sla_outcome")})
         return result
 
@@ -627,14 +642,15 @@ def build_orchestrator_graph(
         log = logger.bind(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
         )
-        result = escalate(state, settings)
-        with session_factory() as session:
-            _audit(
-                session,
-                state,
-                "escalate",
-                {"escalation_result": result["escalation_result"].model_dump(mode="json")},
-            )
+        with observe_step(tracer, "escalate"):
+            result = escalate(state, settings)
+            with session_factory() as session:
+                _audit(
+                    session,
+                    state,
+                    "escalate",
+                    {"escalation_result": result["escalation_result"].model_dump(mode="json")},
+                )
         log.info(
             "escalate_completed",
             incident_number=result["escalation_result"].incident_number,

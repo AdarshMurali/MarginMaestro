@@ -1,0 +1,15 @@
+# Scrapes MarginMaestro's own /metrics endpoint (MM-92). The API runs on
+# the host machine (uvicorn), not inside this compose network, so the
+# scrape target is host.docker.internal -- resolved by Docker Desktop on
+# both Windows and macOS to the host's own network. On native Linux Docker
+# (no Docker Desktop), this would need "extra_hosts: host.docker.internal:
+# host-gateway" on the prometheus service instead; not added here since
+# this project's own dev workflow (docs/PROGRESS.md) runs entirely on
+# Windows + Docker Desktop.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: marginmaestro-api
+    static_configs:
+      - targets: ["host.docker.internal:8000"]

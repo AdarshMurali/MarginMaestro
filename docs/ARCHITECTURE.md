@@ -183,7 +183,7 @@ All services are **containerized** (Docker), images pushed to **Docker Hub**, de
 
 **Security & secrets.** No secrets in code; all via AWS Parameter Store (SecureString) in deployed envs, `.env` locally. Least-privilege IAM for AWS resources. Slack/ServiceNow tokens scoped minimally.
 
-**Observability.** Structured JSON logging with a per-run correlation id; every agent action logged. Health/readiness endpoints on the API. Optional OpenTelemetry traces + a Prometheus/Grafana panel to visualize agent activity.
+**Observability.** Structured JSON logging with a per-run correlation id; every agent action logged. Health/readiness endpoints on the API. **Done (MM-74):** OpenTelemetry traces (one span per orchestrator lifecycle step) exported to a `jaeger` container, a `GET /metrics` Prometheus endpoint, and a provisioned Grafana dashboard visualizing agent activity (step rate/errors/duration, breach rate, approval decisions).
 
 **Audit trail.** Every lifecycle step (event → decision → notification → escalation) is written to an immutable audit table in Azure SQL. This is a first-class output, not an afterthought — it is what makes the workflow defensible.
 

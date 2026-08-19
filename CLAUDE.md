@@ -25,6 +25,7 @@ It is a **portfolio / proof-of-concept** built to production-engineering standar
 - **Embeddings:** OpenAI `text-embedding-3-small` (see ADR-0006 — supersedes the earlier local BGE choice; query/document embeddings must share one model, and Ollama isn't viable on the dev machine anyway).
 - **RAG store:** ChromaDB. **Relational:** Azure SQL (free tier).
 - **Streaming:** Kafka (Redpanda locally). Flink is **deferred** — only if a genuine windowed job is built (see `docs/adr/0003`).
+- **Observability:** OpenTelemetry traces (one span per orchestrator lifecycle step) exported to **Jaeger**; **Prometheus** scrapes the API's `GET /metrics`; **Grafana** (host port `3001` — `3000` is the frontend dev server) auto-provisions the agent-activity dashboard from `infra/grafana/`.
 - **API:** FastAPI. **Frontend:** Next.js on Vercel.
 - **Tools exposed as MCP servers:** market data, Slack, ServiceNow, RAG retriever. (Jira is this project's own dev-story tracker, not an agent-facing tool — see `docs/adr/0007`; it has no MCP server.)
 - **Notifications:** Slack. **Escalation incidents:** ServiceNow (see `docs/adr/0007` — scoped to the SLA-escalation path only). **Dev-story tracker:** Jira (`MM-#` tickets; unaffected by the ServiceNow decision). **Secrets:** AWS Parameter Store.
@@ -52,7 +53,7 @@ make simulate SCENARIO=price_shock   # inject a synthetic market event
 
 - **Language/runtime:** Python 3.11+ (backend), TypeScript/Next.js (frontend).
 - **Validation:** Pydantic models at every external boundary (feeds, API, tool IO).
-- **Structure (target):** `src/agents/`, `src/calc/`, `src/streaming/`, `src/rag/`, `src/api/`, `src/mcp_servers/` (named to avoid colliding with the third-party `mcp` SDK package this project also depends on), `src/persistence/`, `src/config/` (shared Pydantic settings — env locally, AWS Parameter Store when deployed; added in MM-9), `tests/`, `infra/` (Terraform), `frontend/`.
+- **Structure (target):** `src/agents/`, `src/calc/`, `src/streaming/`, `src/rag/`, `src/api/`, `src/mcp_servers/` (named to avoid colliding with the third-party `mcp` SDK package this project also depends on), `src/persistence/`, `src/config/` (shared Pydantic settings — env locally, AWS Parameter Store when deployed; added in MM-9), `src/observability/` (OTel tracing config + Prometheus metrics; added in MM-92/real key MM-74), `tests/`, `infra/` (Terraform + Prometheus/Grafana provisioning), `frontend/`.
 - **Errors:** fail loud in calc/agent code; never silently swallow. Events are processed **idempotently** (replaying the same event must not double-raise a call).
 - **Logging:** structured JSON logs; every agent action is logged with a correlation id for the margin-call run.
 - **Commits:** conventional commits + Jira key, e.g. `feat(calc): add VM computation [MM-12]`.

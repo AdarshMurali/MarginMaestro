@@ -36,6 +36,12 @@ db = ["sqlalchemy", "pyodbc", "alembic"]
 aws = ["boto3"]
 notify = ["slack-sdk"]
 auth = ["bcrypt", "pyjwt"]
+observability = [
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-http",
+    "prometheus-client",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
