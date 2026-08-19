@@ -92,16 +92,18 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 
 > **Note (2026-07-25, resolved 2026-08-01 by `docs/adr/0007`):** escalation logging targets ServiceNow (the user's free dev instance), not Jira — a better fit for a business/margin-call escalation than an engineering issue tracker. This is scoped narrowly to *this* escalation feature; Jira remains this project's own dev-story tracker (MM-# tickets) and is unaffected.
 
-## Phase 7 — Reconciliation & Collateral (Epic: MM-45)
+## Phase 7 — Reconciliation & Collateral (Epic: MM-45) -- **Done 2026-08-01**
 
 > **Note (2026-08-01):** Reconciliation Agent and Collateral Optimizer are **standalone capabilities** this phase, confirmed with the user -- not wired into the live orchestrator graph. The live graph's `await_sla_response` only has `"met"`/`"breached"` outcomes today; a real dispute would be a third outcome, and wiring that in is deferred until it's worth the added complexity.
+>
+> **Doc gap fixed 2026-08-19:** this phase was actually completed and closed in Jira on 2026-08-01 (all four stories below, epic MM-45), but this file was never updated with the Done annotations at the time -- the same kind of gap `docs/PROGRESS.md` already flags for MM-29..36. Backfilled here from Jira's real status/close comments rather than left stale; no new work was done to "finish" this phase, it already was finished.
 
-- **MM-46** Trade-diff engine (deterministic) for dispute detection.
-- **MM-47** **Reconciliation Agent**: isolate breaks + draft rationale grounded in dispute-history RAG.
-- **MM-48** **Collateral Optimizer**: cheapest-to-deliver selection respecting eligibility/haircuts.
-- **MM-49** Tests for dispute isolation and optimizer correctness.
+- ~~**MM-46** Trade-diff engine (deterministic) for dispute detection.~~ **Done 2026-08-01, MM-46.** Deterministic diff between our position list and a synthetic "counterparty view" (perturbed trades -- stale price, wrong quantity, missing/extra trade), producing trade-level break items, not just a total-amount mismatch. `src/calc/trade_diff.py`.
+- ~~**MM-47** **Reconciliation Agent**: isolate breaks + draft rationale grounded in dispute-history RAG.~~ **Done 2026-08-01, MM-47.** Uses MM-46's trade-diff to isolate breaks, then LLM+RAG (over exception-rules + historical dispute-notes corpus docs) drafts a suggested resolution grounded in retrieved precedent -- numeric diff stays deterministic, LLM only explains/suggests. `src/agents/reconciliation.py`.
+- ~~**MM-48** **Collateral Optimizer**: cheapest-to-deliver selection respecting eligibility/haircuts.~~ **Done 2026-08-01, MM-48.** Given a required amount, eligible collateral + haircuts (from CSA-RAG's structured output), and available inventory, selects the cheapest-to-deliver combination via a greedy/LP routine -- deterministic. `src/calc/collateral_optimizer.py`.
+- ~~**MM-49** Tests for dispute isolation and optimizer correctness.~~ **Done 2026-08-01, MM-49.** Hand-verified golden-value tests for trade-diff and the collateral optimizer, plus mocked-LLM tests for the Reconciliation Agent's rationale drafting. Per MM-49's own closing note: "Golden-value suite hand-verifies trade-diff -> reconcile -> collateral optimizer chained end to end, correct to the cent." 281 tests passing at merge (PR #41), 98% coverage.
 
-**Exit criteria:** disputes are detected + explained; collateral is selected optimally.
+**Exit criteria:** disputes are detected + explained; collateral is selected optimally. **Met** -- confirmed in MM-49's Jira closing comment.
 
 ## Phase 8 — Frontend dashboard (Epic: MM-50)
 
