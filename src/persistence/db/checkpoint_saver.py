@@ -45,10 +45,20 @@ from persistence.db.models import CheckpointORM, CheckpointWriteORM
 
 
 class AzureSQLSaver(BaseCheckpointSaver[int]):
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self, session_factory: sessionmaker[Session], lock: "threading.Lock | None" = None
+    ) -> None:
+        """`lock` is injectable so a caller that also writes to the same
+        underlying connection from outside this class (e.g. the
+        orchestrator's audit-log writes, MM-91) can share this exact lock
+        rather than merely avoiding races against this class's own
+        put()/put_writes() calls -- see this module's docstring for why any
+        concurrent write against a single shared connection is a real risk,
+        not just a theoretical one. Defaults to a private lock when not
+        given, matching this class's original (pre-MM-91) behavior."""
         super().__init__()
         self._session_factory = session_factory
-        self._lock = threading.Lock()
+        self._lock = lock or threading.Lock()
 
     def _pending_writes(
         self, session: Session, thread_id: str, checkpoint_ns: str, checkpoint_id: str

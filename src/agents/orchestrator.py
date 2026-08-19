@@ -1,3 +1,4 @@
+import threading
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import uuid4
@@ -32,6 +33,7 @@ from calc.models import (
 from calc.mtm import compute_mtm
 from calc.vm import compute_variation_margin
 from config.settings import Settings, get_settings
+from persistence.audit import record_audit_event
 from persistence.db.checkpoint_saver import AzureSQLSaver
 from persistence.db.engine import get_session_factory
 from persistence.db.models import (
@@ -475,11 +477,38 @@ def build_orchestrator_graph(
     checkpointer defaults to AzureSQLSaver (MM-38) -- persisted to this
     project's own SQL database, so a paused run survives a process restart.
     Still overridable (e.g. InMemorySaver in tests that don't care about
-    restart survival)."""
+    restart survival).
+
+    `_db_write_lock` is shared between the default AzureSQLSaver and every
+    node's audit-log write (MM-91) below -- LangGraph's Pregel runtime
+    genuinely executes node functions concurrently via an internal
+    ThreadPoolExecutor even for this simple sequential graph (see
+    checkpoint_saver.py's own docstring, which documents a real,
+    intermittently-reproduced checkpoint-row loss from exactly this before
+    that class's own writes were locked). A second, independent writer
+    against the same underlying connection needs to share that same lock,
+    not just avoid racing against itself, when both go through
+    session_factory -- a single SQLite/StaticPool connection (this
+    project's test setup) cannot have two transactions open at once
+    regardless of which SQLAlchemy Session object each write came through;
+    a real pooled connection (production Azure SQL) wouldn't collide the
+    same way, but sharing the lock costs nothing and removes the risk
+    entirely rather than relying on that distinction holding in practice."""
     settings = settings or get_settings()
     session_factory = session_factory or get_session_factory(settings)
     market_feed = market_feed or get_market_feed(settings)
-    checkpointer = checkpointer or AzureSQLSaver(session_factory)
+    _db_write_lock = threading.Lock()
+    checkpointer = checkpointer or AzureSQLSaver(session_factory, lock=_db_write_lock)
+
+    def _audit(session: Session, state: MarginCallState, event_type: str, payload: dict) -> None:
+        with _db_write_lock:
+            record_audit_event(
+                session,
+                state.correlation_id,
+                event_type,
+                payload,
+                counterparty_id=state.counterparty_id,
+            )
 
     def _compute_exposure_node(state: MarginCallState) -> dict:
         log = logger.bind(
@@ -487,6 +516,15 @@ def build_orchestrator_graph(
         )
         with session_factory() as session:
             result = compute_exposure(state, session, market_feed)
+            _audit(
+                session,
+                state,
+                "compute_exposure",
+                {
+                    "variation_margin": result["variation_margin"].model_dump(mode="json"),
+                    "initial_margin": result["initial_margin"].model_dump(mode="json"),
+                },
+            )
         log.info(
             "compute_exposure_completed",
             variation_margin=result["variation_margin"].variation_margin,
@@ -499,6 +537,13 @@ def build_orchestrator_graph(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
         )
         result = fetch_csa_terms(state, settings)
+        with session_factory() as session:
+            _audit(
+                session,
+                state,
+                "fetch_csa_terms",
+                {"csa_terms": result["csa_terms"].model_dump(mode="json")},
+            )
         log.info("fetch_csa_terms_completed", threshold=result["csa_terms"].threshold)
         return result
 
@@ -508,6 +553,15 @@ def build_orchestrator_graph(
         )
         with session_factory() as session:
             result = evaluate_breach_node(state, session)
+            _audit(
+                session,
+                state,
+                "evaluate_breach",
+                {
+                    "breach_result": result["breach_result"].model_dump(mode="json"),
+                    "counterparty_tier": result["counterparty_tier"].value,
+                },
+            )
         log.info(
             "evaluate_breach_completed",
             breached=result["breach_result"].breached,
@@ -515,11 +569,48 @@ def build_orchestrator_graph(
         )
         return result
 
+    def _await_approval_node(state: MarginCallState) -> dict:
+        result = await_approval(state)
+        with session_factory() as session:
+            _audit(
+                session,
+                state,
+                "await_approval",
+                {
+                    "decision": result.get("approval_decision"),
+                    "adjusted_call_amount": result.get("adjusted_call_amount"),
+                    "approver_username": result.get("first_approver_username"),
+                },
+            )
+        return result
+
+    def _await_manager_approval_node(state: MarginCallState) -> dict:
+        result = await_manager_approval(state)
+        with session_factory() as session:
+            _audit(
+                session,
+                state,
+                "await_manager_approval",
+                {
+                    "manager_decision": result.get("manager_decision"),
+                    "manager_username": result.get("manager_username"),
+                    "approval_decision": result.get("approval_decision"),
+                },
+            )
+        return result
+
     def _send_notification_node(state: MarginCallState) -> dict:
         log = logger.bind(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
         )
         result = send_notification(state, settings)
+        with session_factory() as session:
+            _audit(
+                session,
+                state,
+                "send_notification",
+                {"notification_result": result["notification_result"].model_dump(mode="json")},
+            )
         log.info(
             "send_notification_completed",
             slack_channel=result["notification_result"].slack_channel,
@@ -527,13 +618,23 @@ def build_orchestrator_graph(
         return result
 
     def _await_sla_response_node(state: MarginCallState) -> dict:
-        return await_sla_response(state, settings)
+        result = await_sla_response(state, settings)
+        with session_factory() as session:
+            _audit(session, state, "await_sla_response", {"sla_outcome": result.get("sla_outcome")})
+        return result
 
     def _escalate_node(state: MarginCallState) -> dict:
         log = logger.bind(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
         )
         result = escalate(state, settings)
+        with session_factory() as session:
+            _audit(
+                session,
+                state,
+                "escalate",
+                {"escalation_result": result["escalation_result"].model_dump(mode="json")},
+            )
         log.info(
             "escalate_completed",
             incident_number=result["escalation_result"].incident_number,
@@ -544,8 +645,8 @@ def build_orchestrator_graph(
     graph.add_node("compute_exposure", _compute_exposure_node)
     graph.add_node("fetch_csa_terms", _fetch_csa_terms_node)
     graph.add_node("evaluate_breach", _evaluate_breach_node)
-    graph.add_node("await_approval", await_approval)
-    graph.add_node("await_manager_approval", await_manager_approval)
+    graph.add_node("await_approval", _await_approval_node)
+    graph.add_node("await_manager_approval", _await_manager_approval_node)
     graph.add_node("send_notification", _send_notification_node)
     graph.add_node("await_sla_response", _await_sla_response_node)
     graph.add_node("escalate", _escalate_node)

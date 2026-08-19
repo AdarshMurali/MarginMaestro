@@ -1,3 +1,4 @@
+import threading
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -93,6 +94,39 @@ class TestAzureSQLSaverDirect:
     def test_get_tuple_returns_none_when_missing(self, session_factory) -> None:
         saver = AzureSQLSaver(session_factory)
         assert saver.get_tuple({"configurable": {"thread_id": "nope"}}) is None
+
+    def test_defaults_to_a_private_lock_when_none_given(self) -> None:
+        saver_a = AzureSQLSaver(lambda: None)
+        saver_b = AzureSQLSaver(lambda: None)
+        assert saver_a._lock is not saver_b._lock
+
+    def test_uses_an_externally_provided_lock_when_given(self, session_factory) -> None:
+        """MM-91: the orchestrator shares one lock between this class's own
+        writes and its separate audit-log writes against the same
+        connection -- this only works if an injected lock is actually the
+        one acquired, not silently replaced by a private one."""
+        shared_lock = threading.Lock()
+        saver = AzureSQLSaver(session_factory, lock=shared_lock)
+
+        assert saver._lock is shared_lock
+
+        # Prove it's genuinely used, not just stored: held externally, a put()
+        # on another thread should block until released.
+        shared_lock.acquire()
+        entered = threading.Event()
+
+        def _put() -> None:
+            saver.put({"configurable": {"thread_id": "t-lock"}}, _checkpoint("c1"), {}, {})
+            entered.set()
+
+        thread = threading.Thread(target=_put)
+        thread.start()
+        blocked_in_time = not entered.wait(timeout=0.2)
+        shared_lock.release()
+        thread.join(timeout=2)
+
+        assert blocked_in_time
+        assert entered.is_set()
 
     def test_put_then_get_tuple_round_trips_checkpoint_and_metadata(self, session_factory) -> None:
         saver = AzureSQLSaver(session_factory)

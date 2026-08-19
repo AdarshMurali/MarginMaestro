@@ -7,6 +7,7 @@ from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy.orm import Session, sessionmaker
 
 from agents.orchestrator import build_orchestrator_graph, resume_run
+from api.audit_log import get_margin_call_audit_log
 from api.auth import require_approver, require_manager, verify_credentials
 from api.exposure import (
     build_exposure_board,
@@ -26,6 +27,7 @@ from api.middleware import CorrelationIdMiddleware
 from api.schemas import (
     ApprovalRequest,
     ApprovalResponse,
+    AuditLogResponse,
     AuthVerifyRequest,
     AuthVerifyResponse,
     CounterpartyExposure,
@@ -236,6 +238,19 @@ async def margin_call_trace(thread_id: str) -> MarginCallTraceResponse:
     if trace is None:
         raise HTTPException(status_code=404, detail=f"No run found for thread_id {thread_id!r}")
     return trace
+
+
+@app.get("/margin-calls/{thread_id}/audit-log", response_model=AuditLogResponse)
+async def margin_call_audit_log(thread_id: str) -> AuditLogResponse:
+    """Immutable audit trail (MM-91) -- a plain SQL table, distinct from
+    /trace's checkpoint-derived view above."""
+    session_factory = get_db_session_factory()
+    graph = get_orchestrator_graph()
+    with session_factory() as session:
+        audit_log = get_margin_call_audit_log(graph, session, thread_id)
+    if audit_log is None:
+        raise HTTPException(status_code=404, detail=f"No run found for thread_id {thread_id!r}")
+    return audit_log
 
 
 @app.get("/counterparties", response_model=CounterpartyListResponse)

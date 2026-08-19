@@ -172,6 +172,24 @@ class MarginCallTraceResponse(BaseModel):
     steps: list[TraceStep]
 
 
+class AuditLogEntry(BaseModel):
+    """One immutable row from audit_log (MM-91) -- distinct from TraceStep
+    above: this is read from a plain insert-only SQL table, not
+    reconstructed from LangGraph's own checkpoint history, so it's reliable
+    independent of the checkpointer's known ability to silently drop a
+    checkpoint row under concurrent writes."""
+
+    event_type: str
+    payload: dict | None
+    created_at: datetime
+
+
+class AuditLogResponse(BaseModel):
+    thread_id: str
+    correlation_id: str
+    entries: list[AuditLogEntry]
+
+
 class SimulateEventRequest(BaseModel):
     """A user-chosen single-ticker shock: which of the two price-driven event
     types to label it as, which curated-universe ticker to shock, and a

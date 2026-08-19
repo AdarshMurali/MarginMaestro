@@ -82,12 +82,25 @@ class CollateralItemORM(Base):
 
 
 class AuditLogORM(Base):
-    """Immutable record of an agent/orchestration action (MM-91, Phase 9)."""
+    """Immutable record of an agent/orchestration action (MM-91, Phase 9).
+
+    correlation_id alone is NOT unique per run: /simulate's fan-out gives
+    every counterparty affected by one triggering event the same
+    correlation_id (by design -- it's meant to group everything that
+    resulted from one event, matching the (correlation_id, counterparty_id)
+    pair every structlog call in orchestrator.py already binds together).
+    A single run/thread is only ever identified by that pair -- found live
+    while verifying MM-91's audit-log endpoint, which initially queried by
+    correlation_id alone and returned other counterparties' events mixed
+    in. counterparty_id is nullable because non-run-scoped audit events
+    (e.g. persistence.batch_loader's "batch_load" entry) have none.
+    """
 
     __tablename__ = "audit_log"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     correlation_id: Mapped[str] = mapped_column(String(64))
+    counterparty_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
     event_type: Mapped[str] = mapped_column(String(100))
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime]

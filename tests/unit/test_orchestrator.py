@@ -35,6 +35,7 @@ from agents.orchestrator import (
 )
 from calc.models import BreachResult, CSATerms, InitialMargin, PricingError, VariationMargin
 from config.settings import Settings
+from persistence.audit import list_audit_events
 from persistence.db.models import (
     Base,
     CollateralItemORM,
@@ -894,6 +895,125 @@ def _breach_market_feed() -> MagicMock:
         "TSLA": PriceQuote(ticker="TSLA", price=500.0, as_of=datetime.now(UTC), source="yfinance")
     }
     return market_feed
+
+
+class TestAuditLogging:
+    """MM-91: a real run writes one immutable audit_log row per real
+    lifecycle step, independent of LangGraph's own checkpoint history."""
+
+    def test_full_approved_run_writes_one_audit_row_per_lifecycle_step(
+        self, session_factory
+    ) -> None:
+        _seed_breach_scenario(session_factory)
+        state = _state()
+
+        with (
+            patch(
+                "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+            ),
+            _patch_draft_notice(),
+            _patch_send_slack_notice(),
+        ):
+            graph = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=_breach_market_feed(),
+                settings=Settings(_env_file=None),
+            )
+            thread_id = thread_id_for(state.impact, state.counterparty_id)
+            start_run(graph, state)
+            resume_run(graph, thread_id, {"decision": "approved", "approver_username": "alice"})
+            resume_run(graph, thread_id, {"responded": True})
+
+        with session_factory() as session:
+            events = list_audit_events(session, state.correlation_id, state.counterparty_id)
+
+        assert [e.event_type for e in events] == [
+            "compute_exposure",
+            "fetch_csa_terms",
+            "evaluate_breach",
+            "await_approval",
+            "send_notification",
+            "await_sla_response",
+        ]
+        approval_event = events[3]
+        assert approval_event.payload["decision"] == "approved"
+        assert approval_event.payload["approver_username"] == "alice"
+
+    def test_no_breach_run_writes_only_the_first_three_steps(self, session_factory) -> None:
+        _seed_position(session_factory, "CP-1", "TSLA", 100)
+        with session_factory() as session:
+            session.add(
+                PriceHistoryORM(
+                    ticker="TSLA",
+                    price_date=date(2026, 7, 30),
+                    price=100.0,
+                    currency="USD",
+                    source="yfinance",
+                )
+            )
+            session.add(
+                ReferenceRateORM(series_id="VIXCLS", rate_date=date(2026, 7, 30), value=20.0)
+            )
+            session.commit()
+        state = _state()
+
+        market_feed = MagicMock()
+        market_feed.get_prices.return_value = {
+            "TSLA": PriceQuote(
+                ticker="TSLA", price=100.0, as_of=datetime.now(UTC), source="yfinance"
+            )
+        }
+
+        with patch(
+            "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000_000.0)
+        ):
+            graph = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=market_feed,
+                settings=Settings(_env_file=None),
+            )
+            start_run(graph, state)
+
+        with session_factory() as session:
+            events = list_audit_events(session, state.correlation_id, state.counterparty_id)
+
+        assert [e.event_type for e in events] == [
+            "compute_exposure",
+            "fetch_csa_terms",
+            "evaluate_breach",
+        ]
+        assert events[2].payload["breach_result"]["breached"] is False
+
+    def test_elite_counterparty_writes_a_manager_approval_event(self, session_factory) -> None:
+        _seed_breach_scenario(session_factory)
+        with session_factory() as session:
+            session.query(CounterpartyORM).filter_by(id="CP-1").update({"tier": "elite"})
+            session.commit()
+        state = _state()
+
+        with (
+            patch(
+                "agents.orchestrator.answer_csa_terms", return_value=_csa_result(threshold=1_000.0)
+            ),
+            _patch_draft_notice(),
+            _patch_send_slack_notice(),
+        ):
+            graph = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=_breach_market_feed(),
+                settings=Settings(_env_file=None),
+            )
+            thread_id = thread_id_for(state.impact, state.counterparty_id)
+            start_run(graph, state)
+            resume_run(graph, thread_id, {"decision": "approved", "approver_username": "alice"})
+            resume_run(graph, thread_id, {"decision": "approved", "manager_username": "bob"})
+
+        with session_factory() as session:
+            events = list_audit_events(session, state.correlation_id, state.counterparty_id)
+
+        manager_event = next(e for e in events if e.event_type == "await_manager_approval")
+        assert manager_event.payload["manager_decision"] == "approved"
+        assert manager_event.payload["manager_username"] == "bob"
 
 
 class TestRestartSurvival:
