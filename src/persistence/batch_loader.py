@@ -20,6 +20,7 @@ from persistence.db.models import (
     ReferenceRateORM,
 )
 from persistence.fred_feed import REFERENCE_SERIES, FredFeed
+from persistence.generators.collateral_calibration import calibrate_collateral_to_exposure
 from persistence.generators.run import DEFAULT_SEED, generate_all
 from persistence.generators.securities import securities_universe
 from streaming.market_feed import MarketDataUnavailableError, MarketFeed, get_market_feed
@@ -126,12 +127,17 @@ def run_batch_load(seed: int = DEFAULT_SEED, as_of: date | None = None) -> dict[
         price_count = load_prices(session, market_feed, securities_universe(), as_of)
         rate_count = load_reference_rates(session, fred_feed, as_of)
         backfill_count = backfill_price_history(session, securities_universe())
+        # MM-77: must run after prices/reference rates above -- needs real
+        # current+prior prices and VIX already in the DB to compute each
+        # counterparty's actual exposure and calibrate collateral to it.
+        calibrated_collateral = calibrate_collateral_to_exposure(session, seed, as_of)
 
         summary = {
             **synthetic_counts,
             "prices": price_count,
             "reference_rates": rate_count,
             "price_history_backfill": backfill_count,
+            "collateral_calibrated": len(calibrated_collateral),
         }
         session.add(
             AuditLogORM(

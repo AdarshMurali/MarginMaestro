@@ -174,6 +174,15 @@ class TestRunBatchLoad:
             patch(
                 "persistence.batch_loader.backfill_price_history", return_value=0
             ) as mock_backfill,
+            # Same rationale as backfill_price_history above -- its own
+            # behavior against a real session is covered by
+            # test_collateral_calibration.py; this test only needs to
+            # confirm run_batch_load wires it in after prices are loaded and
+            # folds its result count into the summary.
+            patch(
+                "persistence.batch_loader.calibrate_collateral_to_exposure",
+                return_value={"CP-1": 500_000.0},
+            ) as mock_calibrate,
         ):
             summary = run_batch_load(seed=42, as_of=date(2026, 7, 26))
 
@@ -182,7 +191,9 @@ class TestRunBatchLoad:
         assert summary["prices"] == 1
         assert summary["reference_rates"] == len(REFERENCE_SERIES)
         assert summary["price_history_backfill"] == 0
+        assert summary["collateral_calibrated"] == 1
         mock_backfill.assert_called_once()
+        mock_calibrate.assert_called_once_with(session, 42, date(2026, 7, 26))
         session.commit.assert_called_once()
 
         audit_rows = [
