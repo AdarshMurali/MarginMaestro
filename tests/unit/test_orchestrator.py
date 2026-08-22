@@ -52,7 +52,7 @@ from persistence.db.models import (
     ReferenceRateORM,
 )
 from persistence.models import CounterpartyTier, RatingGrade, RatingTrigger
-from rag.models import CSATermsResult
+from rag.models import Citation, CSATermsResult
 from streaming.market_feed import PriceQuote
 from streaming.schemas import ImpactSet, MarketEventType
 
@@ -97,7 +97,11 @@ def _state(counterparty_id: str = "CP-1") -> MarginCallState:
     return MarginCallState(correlation_id="corr-1", impact=impact, counterparty_id=counterparty_id)
 
 
-def _csa_result(counterparty_id: str = "CP-1", threshold: float = 100_000.0) -> CSATermsResult:
+def _csa_result(
+    counterparty_id: str = "CP-1",
+    threshold: float = 100_000.0,
+    citations: list[Citation] | None = None,
+) -> CSATermsResult:
     return CSATermsResult(
         counterparty_id=counterparty_id,
         threshold=threshold,
@@ -106,7 +110,7 @@ def _csa_result(counterparty_id: str = "CP-1", threshold: float = 100_000.0) -> 
         eligible_collateral=["cash"],
         haircuts={"cash": 0.0},
         rating_triggers=[],
-        citations=[],
+        citations=citations or [],
     )
 
 
@@ -263,6 +267,15 @@ class TestFetchCsaTerms:
             result = fetch_csa_terms(_state(), Settings(_env_file=None))
 
         assert result["csa_terms"].rating_triggers == [trigger]
+
+    def test_citations_pass_through_from_the_rag_result(self) -> None:
+        citation = Citation(source_file="csa/CP-1.md", section="Threshold")
+        csa_result = _csa_result(threshold=250_000.0, citations=[citation])
+
+        with patch("agents.orchestrator.answer_csa_terms", return_value=csa_result):
+            result = fetch_csa_terms(_state(), Settings(_env_file=None))
+
+        assert result["csa_citations"] == [citation]
 
 
 class TestEvaluateBreachNode:
@@ -943,6 +956,37 @@ class TestAuditLogging:
         approval_event = events[3]
         assert approval_event.payload["decision"] == "approved"
         assert approval_event.payload["approver_username"] == "alice"
+
+    def test_fetch_csa_terms_audit_event_includes_citations(self, session_factory) -> None:
+        """MM-78: citations were computed by answer_csa_terms() but silently
+        discarded before this story -- confirms they now actually reach the
+        one place they're persisted (the audit log), not just state."""
+        _seed_breach_scenario(session_factory)
+        state = _state()
+        citation = Citation(source_file="csa/CP-1.md", section="Threshold")
+
+        with (
+            patch(
+                "agents.orchestrator.answer_csa_terms",
+                return_value=_csa_result(threshold=1_000.0, citations=[citation]),
+            ),
+            _patch_draft_notice(),
+            _patch_send_slack_notice(),
+        ):
+            graph = build_orchestrator_graph(
+                session_factory=session_factory,
+                market_feed=_breach_market_feed(),
+                settings=Settings(_env_file=None),
+            )
+            start_run(graph, state)
+
+        with session_factory() as session:
+            events = list_audit_events(session, state.correlation_id, state.counterparty_id)
+
+        fetch_event = next(e for e in events if e.event_type == "fetch_csa_terms")
+        assert fetch_event.payload["citations"] == [
+            {"source_file": "csa/CP-1.md", "section": "Threshold"}
+        ]
 
     def test_no_breach_run_writes_only_the_first_three_steps(self, session_factory) -> None:
         _seed_position(session_factory, "CP-1", "TSLA", 100)

@@ -51,6 +51,7 @@ from persistence.db.models import (
     ReferenceRateORM,
 )
 from persistence.models import AssetClass, CounterpartyTier, Position, RatingGrade
+from rag.models import Citation
 from streaming.event_agent import latest_close_before
 from streaming.market_feed import MarketFeed, get_market_feed
 from streaming.schemas import ImpactSet
@@ -73,6 +74,12 @@ class MarginCallState(BaseModel):
     variation_margin: VariationMargin | None = None
     initial_margin: InitialMargin | None = None
     csa_terms: CSATerms | None = None
+    # MM-78: the CSA-RAG evidence trail behind csa_terms -- kept off calc/'s
+    # CSATerms (that layer is deliberately RAG-free, see docs/ROADMAP.md's
+    # Phase 2 note) and instead threaded through state so fetch_csa_terms's
+    # audit write can persist it, rather than discard it like every other
+    # consumer of answer_csa_terms() did before this story.
+    csa_citations: list[Citation] = Field(default_factory=list)
     breach_result: BreachResult | None = None
     counterparty_tier: CounterpartyTier | None = None
     approval_decision: Literal["approved", "rejected", "adjusted", "disputed"] | None = None
@@ -170,7 +177,8 @@ def fetch_csa_terms(state: MarginCallState, settings: Settings) -> dict:
             mta=result.mta,
             currency=result.currency,
             rating_triggers=result.rating_triggers,
-        )
+        ),
+        "csa_citations": result.citations,
     }
 
 
@@ -550,7 +558,10 @@ def build_orchestrator_graph(
                     session,
                     state,
                     "fetch_csa_terms",
-                    {"csa_terms": result["csa_terms"].model_dump(mode="json")},
+                    {
+                        "csa_terms": result["csa_terms"].model_dump(mode="json"),
+                        "citations": [c.model_dump(mode="json") for c in result["csa_citations"]],
+                    },
                 )
         log.info("fetch_csa_terms_completed", threshold=result["csa_terms"].threshold)
         return result
