@@ -199,12 +199,14 @@ class TestGatingAgainstTheRealDependency:
         assert response.status_code == 403
 
     def test_approve_with_a_valid_approver_token_reaches_the_endpoint(self) -> None:
+        mock_graph = MagicMock()
+        mock_graph.get_state.return_value.next = ("await_approval",)
         with (
             patch(
                 "api.auth.get_settings",
                 return_value=Settings(_env_file=None, auth_backend_secret=TEST_SECRET),
             ),
-            patch("api.main.get_orchestrator_graph", return_value=MagicMock()),
+            patch("api.main.get_orchestrator_graph", return_value=mock_graph),
             patch("api.main.resume_run", return_value={"approval_decision": "approved"}),
         ):
             response = self.client.post(
@@ -230,6 +232,7 @@ class TestGatingAgainstTheRealDependency:
 
     def test_manager_approve_with_a_valid_manager_token_reaches_the_endpoint(self) -> None:
         mock_graph = MagicMock()
+        mock_graph.get_state.return_value.next = ("await_manager_approval",)
         mock_graph.get_state.return_value.values = {"first_approver_username": "alice"}
         with (
             patch(

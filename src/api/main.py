@@ -127,6 +127,37 @@ async def auth_verify(body: AuthVerifyRequest) -> AuthVerifyResponse:
     return AuthVerifyResponse(username=body.username, role=role)
 
 
+def _require_pending_node(graph: CompiledStateGraph, thread_id: str, expected_node: str) -> dict:
+    """Guards every resume_run() call against a real bug found live while
+    testing MM-70's two-person sign-off: LangGraph's Command(resume=...)
+    resumes *whatever* interrupt() is currently pending for a thread,
+    regardless of which endpoint (and therefore which role check) called
+    it -- there was previously no check that the thread was actually paused
+    at the node an endpoint's own payload shape was meant for. A user
+    authenticated only as `approver`, calling /approve a second time on an
+    elite-tier thread already paused at await_manager_approval, had that
+    call silently delivered into the second gate's interrupt() instead of
+    being rejected -- decision="approved" happened to be a key both payload
+    shapes share, so it silently satisfied the second signature too, with
+    manager_username landing None (confirmed via the audit log) since no
+    manager-role check ever ran. Raises 409 if the thread isn't currently
+    paused at expected_node; returns the snapshot's values dict so callers
+    that also need it (e.g. the same-person check below) don't fetch state
+    twice."""
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    snapshot = graph.get_state(config)
+    if snapshot.next != (expected_node,):
+        pending = snapshot.next[0] if snapshot.next else None
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This margin call is not currently awaiting '{expected_node}' "
+                f"(pending step: {pending!r})."
+            ),
+        )
+    return snapshot.values
+
+
 @app.post("/margin-calls/{thread_id}/approve", response_model=ApprovalResponse)
 async def approve_margin_call(
     thread_id: str, body: ApprovalRequest, approver: str = Depends(require_approver)
@@ -137,6 +168,7 @@ async def approve_margin_call(
     (require_approver), never the request body -- so a client can't spoof
     who signed."""
     graph = get_orchestrator_graph()
+    _require_pending_node(graph, thread_id, "await_approval")
     resume_payload = {
         "decision": body.decision,
         "adjusted_call_amount": body.adjusted_call_amount,
@@ -156,14 +188,12 @@ async def manager_approve_margin_call(
 ) -> ManagerApprovalResponse:
     """Second signature for elite-tier counterparties (Phase 9 scope
     addition) -- only reachable once await_manager_approval is the run's
-    paused node (the orchestrator graph itself already gates this to elite
-    tier + an approved/adjusted first decision; resuming a run that isn't
-    actually paused there is a LangGraph-level no-op/error, not a security
-    hole). Enforces the same-person block here, before resuming: the same
+    paused node, now actually enforced by _require_pending_node (previously
+    just assumed, incorrectly -- see that function's docstring for the real
+    bug this closes). Enforces the same-person block here too: the same
     username can't provide both signatures on one call."""
     graph = get_orchestrator_graph()
-    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-    current_state = graph.get_state(config).values
+    current_state = _require_pending_node(graph, thread_id, "await_manager_approval")
     if current_state.get("first_approver_username") == manager:
         raise HTTPException(
             status_code=403,
@@ -186,7 +216,9 @@ async def respond_to_margin_call(
     channel, which doesn't exist in this demo -- simulates the counterparty
     fulfilling the call within the SLA window. See docs/ROADMAP.md's Phase 6
     note; revisit before treating as final."""
-    result = resume_run(get_orchestrator_graph(), thread_id, {"responded": True})
+    graph = get_orchestrator_graph()
+    _require_pending_node(graph, thread_id, "await_sla_response")
+    result = resume_run(graph, thread_id, {"responded": True})
     return SlaResponse(thread_id=thread_id, sla_outcome=result.get("sla_outcome"))
 
 
@@ -324,5 +356,7 @@ async def check_margin_call_sla(
     A no-op (stays pending) if called before the deadline -- there's no real
     scheduler calling this periodically yet; a human or a future cron would
     call it. See docs/ROADMAP.md's Phase 6 note."""
-    result = resume_run(get_orchestrator_graph(), thread_id, {"check": True})
+    graph = get_orchestrator_graph()
+    _require_pending_node(graph, thread_id, "await_sla_response")
+    result = resume_run(graph, thread_id, {"check": True})
     return SlaResponse(thread_id=thread_id, sla_outcome=result.get("sla_outcome"))
