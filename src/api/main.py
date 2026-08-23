@@ -127,6 +127,27 @@ async def auth_verify(body: AuthVerifyRequest) -> AuthVerifyResponse:
     return AuthVerifyResponse(username=body.username, role=role)
 
 
+# Human-readable description of what's actually happening at each pending
+# node, keyed by node name (or None for a finished run) -- used to build a
+# real explanation in _require_pending_node's 409, not just a technical
+# node-name dump. Copy lives here, not in the frontend, per CLAUDE.md's
+# "keep the frontend thin" rule -- it visualizes state, it doesn't own the
+# wording for what that state means.
+_PENDING_NODE_DESCRIPTIONS: dict[str | None, str] = {
+    "await_approval": "This margin call is awaiting first-level approval.",
+    "await_manager_approval": (
+        "This margin call already has a first-level approval and is now waiting on a "
+        "second sign-off from a manager -- no further approver action is needed here."
+    ),
+    "await_sla_response": (
+        "This margin call has already been approved and notified; it's now waiting on "
+        "the SLA response window, not an approval action."
+    ),
+    "escalate": "This margin call has already been escalated.",
+    None: "This margin call has already finished its lifecycle -- no further action is possible.",
+}
+
+
 def _require_pending_node(graph: CompiledStateGraph, thread_id: str, expected_node: str) -> dict:
     """Guards every resume_run() call against a real bug found live while
     testing MM-70's two-person sign-off: LangGraph's Command(resume=...)
@@ -148,13 +169,10 @@ def _require_pending_node(graph: CompiledStateGraph, thread_id: str, expected_no
     snapshot = graph.get_state(config)
     if snapshot.next != (expected_node,):
         pending = snapshot.next[0] if snapshot.next else None
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"This margin call is not currently awaiting '{expected_node}' "
-                f"(pending step: {pending!r})."
-            ),
+        detail = _PENDING_NODE_DESCRIPTIONS.get(
+            pending, f"This margin call is not currently awaiting this step (pending: {pending!r})."
         )
+        raise HTTPException(status_code=409, detail=detail)
     return snapshot.values
 
 

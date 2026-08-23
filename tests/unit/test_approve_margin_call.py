@@ -97,7 +97,7 @@ class TestApproveMarginCall:
             )
 
         assert response.status_code == 409
-        assert "await_approval" in response.json()["detail"]
+        assert "second sign-off from a manager" in response.json()["detail"]
         mock_resume.assert_not_called()
 
 
@@ -182,7 +182,7 @@ class TestManagerApproveMarginCall:
             app.dependency_overrides.pop(require_manager, None)
 
         assert response.status_code == 409
-        assert "await_manager_approval" in response.json()["detail"]
+        assert "first-level approval" in response.json()["detail"]
         mock_resume.assert_not_called()
 
 

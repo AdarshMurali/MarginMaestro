@@ -76,8 +76,8 @@ function ApprovalCard({
         }
         await postApproval(token, item.thread_id, decision, adjustedAmount);
         onActed();
-      } catch {
-        setError("Action failed -- is the API running?");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Action failed -- is the API running?");
       } finally {
         setBusy(false);
       }
@@ -155,8 +155,8 @@ function SlaCard({
         if (action === "respond") await postRespond(token, item.thread_id);
         else await postCheckSla(token, item.thread_id);
         onActed();
-      } catch {
-        setError("Action failed -- is the API running?");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Action failed -- is the API running?");
       } finally {
         setBusy(false);
       }

@@ -126,7 +126,19 @@ async function postJson<T>(path: string, token: string, body?: unknown): Promise
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
-    throw new Error(`POST ${path} failed: ${res.status} ${res.statusText}`);
+    // FastAPI error responses carry the real reason in a {"detail": "..."}
+    // body (e.g. a 409 explaining exactly which step a margin call is
+    // actually paused at) -- surfacing it here, not just the status code,
+    // is what lets callers show that instead of a generic failure message.
+    let detail: string | undefined;
+    try {
+      const payload = (await res.json()) as { detail?: string };
+      detail = payload?.detail;
+    } catch {
+      // Response body wasn't JSON (or was empty) -- fall through to the
+      // generic status-based message below.
+    }
+    throw new Error(detail ?? `POST ${path} failed: ${res.status} ${res.statusText}`);
   }
   return res.json() as Promise<T>;
 }
