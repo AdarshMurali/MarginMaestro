@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Tabs } from "@base-ui/react/tabs";
 import { useSession } from "next-auth/react";
 
 import {
@@ -13,6 +14,7 @@ import {
 } from "@/lib/api";
 import { formatDateTime, formatUsd } from "@/lib/format";
 import { DARK_GREEN, LIGHT_GREEN } from "@/lib/brand";
+import { cn } from "@/lib/utils";
 
 function slaRemainingLabel(deadline: string): string {
   const diffMs = new Date(deadline).getTime() - Date.now();
@@ -260,10 +262,50 @@ function SlaCard({
   );
 }
 
+function EmptyState({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="rounded-xl border border-dashed border-neutral-200 px-4 py-8 text-center text-sm text-neutral-500">
+      {children}
+    </p>
+  );
+}
+
+function TabTrigger({
+  value,
+  label,
+  count,
+  active,
+}: {
+  value: string;
+  label: string;
+  count: number;
+  active: boolean;
+}) {
+  return (
+    <Tabs.Tab
+      value={value}
+      className={cn(
+        "relative flex-1 rounded-lg px-3 py-2.5 text-sm font-medium outline-none transition-colors",
+        active ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-black",
+      )}
+      style={active ? { color: DARK_GREEN } : undefined}
+    >
+      {label}
+      <span className="ml-1.5 font-mono text-xs text-neutral-400">({count})</span>
+    </Tabs.Tab>
+  );
+}
+
 export default function ApprovalsPage() {
   const { data: session } = useSession();
   const [items, setItems] = useState<MarginCallSummary[] | null>(null);
   const [error, setError] = useState(false);
+  // Independent of the data-fetch cycle on purpose -- refetch() (called
+  // after every action) must never reset which tab the user is looking at.
+  // Defaults to "manager": rarer (elite tier only) and the easiest of the
+  // three to miss, so it gets first look (MM-80 follow-up's ordering fix,
+  // now expressed as a default tab instead of section order).
+  const [activeTab, setActiveTab] = useState("manager");
 
   const refetch = useCallback(() => {
     getMarginCallFeed()
@@ -285,7 +327,7 @@ export default function ApprovalsPage() {
 
   return (
     <main className="flex min-h-full flex-1 flex-col bg-white">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-6 py-12">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-12">
         <h1 className="text-2xl font-semibold tracking-tight text-black">Approvals &amp; SLA</h1>
 
         {error && (
@@ -296,19 +338,31 @@ export default function ApprovalsPage() {
         {!error && !items && <p className="text-sm text-neutral-500">Loading...</p>}
 
         {items && (
-          <>
-            {/* Second sign-off shown first, ahead of first-level approvals --
-                rarer (elite tier only) and easy to bury under a much longer
-                first-approval list otherwise (found live: a real manager
-                action sat below 20+ items and needed a long scroll to find). */}
-            <section className="flex flex-col gap-3">
-              <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">
-                Awaiting second sign-off ({awaitingManagerApproval.length})
-              </h2>
+          <Tabs.Root value={activeTab} onValueChange={(value) => setActiveTab(value as string)}>
+            <Tabs.List className="flex gap-1 rounded-xl border border-neutral-200 bg-neutral-50 p-1">
+              <TabTrigger
+                value="manager"
+                label="Second sign-off"
+                count={awaitingManagerApproval.length}
+                active={activeTab === "manager"}
+              />
+              <TabTrigger
+                value="approval"
+                label="Approvals"
+                count={awaitingApproval.length}
+                active={activeTab === "approval"}
+              />
+              <TabTrigger
+                value="sla"
+                label="SLA response"
+                count={awaitingSla.length}
+                active={activeTab === "sla"}
+              />
+            </Tabs.List>
+
+            <Tabs.Panel value="manager" className="flex flex-col gap-3 pt-5 outline-none">
               {awaitingManagerApproval.length === 0 && (
-                <p className="text-sm text-neutral-500">
-                  Nothing awaiting a manager&apos;s second sign-off.
-                </p>
+                <EmptyState>Nothing awaiting a manager&apos;s second sign-off.</EmptyState>
               )}
               {awaitingManagerApproval.map((item) => (
                 <ManagerApprovalCard
@@ -319,15 +373,10 @@ export default function ApprovalsPage() {
                   onActed={refetch}
                 />
               ))}
-            </section>
+            </Tabs.Panel>
 
-            <section className="flex flex-col gap-3">
-              <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">
-                Awaiting approval ({awaitingApproval.length})
-              </h2>
-              {awaitingApproval.length === 0 && (
-                <p className="text-sm text-neutral-500">Nothing awaiting approval.</p>
-              )}
+            <Tabs.Panel value="approval" className="flex flex-col gap-3 pt-5 outline-none">
+              {awaitingApproval.length === 0 && <EmptyState>Nothing awaiting approval.</EmptyState>}
               {awaitingApproval.map((item) => (
                 <ApprovalCard
                   key={item.thread_id}
@@ -337,14 +386,11 @@ export default function ApprovalsPage() {
                   onActed={refetch}
                 />
               ))}
-            </section>
+            </Tabs.Panel>
 
-            <section className="flex flex-col gap-3">
-              <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">
-                Awaiting SLA response ({awaitingSla.length})
-              </h2>
+            <Tabs.Panel value="sla" className="flex flex-col gap-3 pt-5 outline-none">
               {awaitingSla.length === 0 && (
-                <p className="text-sm text-neutral-500">Nothing awaiting an SLA response.</p>
+                <EmptyState>Nothing awaiting an SLA response.</EmptyState>
               )}
               {awaitingSla.map((item) => (
                 <SlaCard
@@ -355,8 +401,8 @@ export default function ApprovalsPage() {
                   onActed={refetch}
                 />
               ))}
-            </section>
-          </>
+            </Tabs.Panel>
+          </Tabs.Root>
         )}
       </div>
     </main>
