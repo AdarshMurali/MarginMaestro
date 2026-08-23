@@ -30,6 +30,9 @@ publish-live-prices:
 live-feed-poller:
 	python -m streaming.live_feed_poller
 
+demo:
+	python -m demo.run_demo
+
 test:
 	pytest
 
