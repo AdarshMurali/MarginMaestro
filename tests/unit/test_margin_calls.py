@@ -626,6 +626,34 @@ class TestListMarginCallBuckets:
 
         assert result.buckets[0].latest.thread_id == "t-later"
 
+    def test_an_old_escalated_call_does_not_bury_a_newer_active_run(self, session_factory) -> None:
+        # MM-80 follow-up: found live -- ESCALATED used to rank as urgent as
+        # AWAITING_APPROVAL, so an old, already-resolved-elsewhere (in
+        # ServiceNow) escalated call outranked, and hid, a genuinely active
+        # newer awaiting_sla_response run for the same counterparty. Nothing
+        # further is actionable in this app once escalated, so it belongs in
+        # the resolved tier, not competing with genuinely pending work.
+        _seed_counterparty(session_factory, "CP-5", "Hall Financial")
+        old_escalated = _summary(
+            "CP-5",
+            "t-old-escalated",
+            MarginCallLifecycleStatus.ESCALATED,
+            datetime(2026, 8, 22, tzinfo=UTC),
+        )
+        new_active = _summary(
+            "CP-5",
+            "t-new-active",
+            MarginCallLifecycleStatus.AWAITING_SLA_RESPONSE,
+            datetime(2026, 8, 23, tzinfo=UTC),
+        )
+        with (
+            patch("api.margin_calls._all_summaries", return_value=[new_active, old_escalated]),
+            session_factory() as session,
+        ):
+            result = list_margin_call_buckets(MagicMock(), session)
+
+        assert result.buckets[0].latest.thread_id == "t-new-active"
+
     def test_buckets_are_sorted_urgency_first(self, session_factory) -> None:
         _seed_counterparty(session_factory, "CP-RESOLVED", "Resolved Co")
         _seed_counterparty(session_factory, "CP-URGENT", "Urgent Co")

@@ -28,20 +28,26 @@ from persistence.db.models import CheckpointORM
 from persistence.models import CounterpartyTier
 from persistence.queries import get_counterparty, list_counterparties
 
-# Lower rank = more urgent = shown first (MM-63) -- awaiting_approval and
-# escalated sit in a human's queue right now; awaiting_sla_response is
-# time-sensitive but not yet actionable; everything else is resolved and
-# only recency (not urgency) distinguishes them.
+# Lower rank = more urgent = shown first (MM-63) -- awaiting_approval sits
+# in a human's queue right now; awaiting_sla_response is time-sensitive but
+# not yet actionable; everything else is resolved and only recency (not
+# urgency) distinguishes them. ESCALATED demoted to the resolved tier
+# (found live, MM-80 follow-up): it had been ranked as urgent as
+# awaiting_approval, but escalation is itself a terminal state within this
+# app -- the ServiceNow incident is where a human actually acts next, not
+# here -- so an old escalated call was outranking, and hiding, a genuinely
+# active awaiting_sla_response run for the same counterparty in the
+# bucketed view, regardless of which was more recent.
 _URGENCY_RANK: dict[MarginCallLifecycleStatus, int] = {
     MarginCallLifecycleStatus.AWAITING_APPROVAL: 0,
     MarginCallLifecycleStatus.AWAITING_MANAGER_APPROVAL: 0,
-    MarginCallLifecycleStatus.ESCALATED: 1,
-    MarginCallLifecycleStatus.AWAITING_SLA_RESPONSE: 2,
-    MarginCallLifecycleStatus.EVALUATING: 3,
-    MarginCallLifecycleStatus.REJECTED: 4,
-    MarginCallLifecycleStatus.DISPUTED: 4,
-    MarginCallLifecycleStatus.SLA_MET: 4,
-    MarginCallLifecycleStatus.NO_BREACH: 4,
+    MarginCallLifecycleStatus.AWAITING_SLA_RESPONSE: 1,
+    MarginCallLifecycleStatus.EVALUATING: 2,
+    MarginCallLifecycleStatus.ESCALATED: 3,
+    MarginCallLifecycleStatus.REJECTED: 3,
+    MarginCallLifecycleStatus.DISPUTED: 3,
+    MarginCallLifecycleStatus.SLA_MET: 3,
+    MarginCallLifecycleStatus.NO_BREACH: 3,
 }
 
 
