@@ -161,14 +161,30 @@ def _require_pending_node(graph: CompiledStateGraph, thread_id: str, expected_no
     being rejected -- decision="approved" happened to be a key both payload
     shapes share, so it silently satisfied the second signature too, with
     manager_username landing None (confirmed via the audit log) since no
-    manager-role check ever ran. Raises 409 if the thread isn't currently
-    paused at expected_node; returns the snapshot's values dict so callers
-    that also need it (e.g. the same-person check below) don't fetch state
-    twice."""
+    manager-role check ever ran.
+
+    Checks `snapshot.tasks` (which task names have a real pending
+    interrupt), not `snapshot.next` -- found live: `.next` goes empty `()`
+    for `await_sla_response` once it's resumed and re-loops back to its own
+    internal `interrupt()` call a second time (its `while True` polling
+    design, see agents/orchestrator.py's `await_sla_response`), even though
+    the thread is genuinely still paused there. `.next` reflects the graph's
+    own routing schedule, not "is there a live interrupt right now" -- for
+    a node that re-enters its own interrupt() in a loop rather than being
+    re-scheduled via a graph edge, only `.tasks` stays reliable across every
+    resume. Confirmed `.next` *does* work for the simple, non-looped nodes
+    (await_approval, await_manager_approval) -- this bug is specific to
+    await_sla_response's polling design, but `.tasks` is correct for both,
+    so it's now the single check used everywhere.
+
+    Raises 409 if the thread isn't currently paused at expected_node;
+    returns the snapshot's values dict so callers that also need it (e.g.
+    the same-person check below) don't fetch state twice."""
     config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
     snapshot = graph.get_state(config)
-    if snapshot.next != (expected_node,):
-        pending = snapshot.next[0] if snapshot.next else None
+    pending_names = {task.name for task in snapshot.tasks if task.interrupts}
+    if expected_node not in pending_names:
+        pending = next(iter(pending_names), None)
         detail = _PENDING_NODE_DESCRIPTIONS.get(
             pending, f"This margin call is not currently awaiting this step (pending: {pending!r})."
         )

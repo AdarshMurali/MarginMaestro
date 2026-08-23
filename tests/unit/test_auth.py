@@ -200,7 +200,10 @@ class TestGatingAgainstTheRealDependency:
 
     def test_approve_with_a_valid_approver_token_reaches_the_endpoint(self) -> None:
         mock_graph = MagicMock()
-        mock_graph.get_state.return_value.next = ("await_approval",)
+        pending_task = MagicMock()
+        pending_task.name = "await_approval"
+        pending_task.interrupts = (MagicMock(),)
+        mock_graph.get_state.return_value.tasks = (pending_task,)
         with (
             patch(
                 "api.auth.get_settings",
@@ -232,7 +235,10 @@ class TestGatingAgainstTheRealDependency:
 
     def test_manager_approve_with_a_valid_manager_token_reaches_the_endpoint(self) -> None:
         mock_graph = MagicMock()
-        mock_graph.get_state.return_value.next = ("await_manager_approval",)
+        pending_task = MagicMock()
+        pending_task.name = "await_manager_approval"
+        pending_task.interrupts = (MagicMock(),)
+        mock_graph.get_state.return_value.tasks = (pending_task,)
         mock_graph.get_state.return_value.values = {"first_approver_username": "alice"}
         with (
             patch(

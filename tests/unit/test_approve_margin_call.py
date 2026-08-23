@@ -20,10 +20,18 @@ def _authenticated_as_approver():
 
 
 def _graph_pending_at(node: str) -> MagicMock:
-    """A MagicMock graph whose get_state().next reports the given node as
-    the sole pending step -- _require_pending_node's happy path."""
+    """A MagicMock graph whose get_state().tasks reports the given node as
+    the sole task with a real pending interrupt -- _require_pending_node's
+    happy path. Mocks `.tasks`, not `.next`: found live that `.next` goes
+    empty for await_sla_response once it's resumed and re-loops into its
+    own interrupt() a second time, even though it's genuinely still
+    paused -- `.tasks` is the reliable signal in both cases (see
+    _require_pending_node's docstring)."""
     graph = MagicMock()
-    graph.get_state.return_value.next = (node,)
+    task = MagicMock()
+    task.name = node
+    task.interrupts = (MagicMock(),)  # non-empty -- a real pending interrupt
+    graph.get_state.return_value.tasks = (task,)
     graph.get_state.return_value.values = {}
     return graph
 
@@ -211,6 +219,28 @@ class TestRespondToMarginCall:
 
         assert response.status_code == 409
         mock_resume.assert_not_called()
+
+    def test_succeeds_even_when_next_is_empty_but_tasks_shows_the_real_interrupt(self) -> None:
+        """MM-79 follow-up: reproduces a real bug found live -- LangGraph's
+        snapshot.next goes empty () for await_sla_response once it's been
+        resumed and re-loops into its own interrupt() a second time (its
+        `while True` polling design), even though the thread is genuinely
+        still paused there. .tasks stays correct; _require_pending_node
+        must not 409 a thread that's actually still legitimately pending."""
+        mock_graph = MagicMock()
+        mock_graph.get_state.return_value.next = ()  # the exact bug condition
+        pending_task = MagicMock()
+        pending_task.name = "await_sla_response"
+        pending_task.interrupts = (MagicMock(),)
+        mock_graph.get_state.return_value.tasks = (pending_task,)
+        with (
+            patch("api.main.get_orchestrator_graph", return_value=mock_graph),
+            patch("api.main.resume_run", return_value={"sla_outcome": "met"}) as mock_resume,
+        ):
+            response = client.post("/margin-calls/evt-1:CP-1/respond")
+
+        assert response.status_code == 200
+        mock_resume.assert_called_once()
 
 
 class TestCheckMarginCallSla:
