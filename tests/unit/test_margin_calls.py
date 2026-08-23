@@ -23,6 +23,7 @@ from api.margin_calls import (
     list_margin_calls_for_counterparty,
 )
 from api.schemas import MarginCallLifecycleStatus, MarginCallSummary
+from calc.models import BreachResult
 from config.settings import Settings
 from persistence.db.models import (
     Base,
@@ -34,6 +35,7 @@ from persistence.db.models import (
     PriceHistoryORM,
     ReferenceRateORM,
 )
+from persistence.models import CounterpartyTier
 from rag.models import CSATermsResult
 from streaming.market_feed import PriceQuote
 from streaming.schemas import ImpactSet, MarketEventType
@@ -184,6 +186,60 @@ class TestLifecycleStatus:
         assert (
             _lifecycle_status({"sla_outcome": "breached", "escalation_result": None})
             == MarginCallLifecycleStatus.ESCALATED
+        )
+
+    def test_disputed_when_a_manager_overturns_the_first_approval(self) -> None:
+        # MM-79 follow-up: previously fell through to AWAITING_APPROVAL,
+        # incorrectly implying the run still needed a first-level decision.
+        assert (
+            _lifecycle_status({"approval_decision": "disputed"})
+            == MarginCallLifecycleStatus.DISPUTED
+        )
+
+    def test_awaiting_manager_approval_for_elite_tier_after_first_approval(self) -> None:
+        # MM-79 follow-up: the real bug this closes -- an elite-tier run
+        # paused at the second gate was indistinguishable from one still
+        # waiting on the first, so a manager had no way to find their own
+        # pending action in the feed.
+        assert (
+            _lifecycle_status(
+                {
+                    "counterparty_tier": CounterpartyTier.ELITE,
+                    "approval_decision": "approved",
+                    "manager_decision": None,
+                    "breach_result": None,
+                }
+            )
+            == MarginCallLifecycleStatus.AWAITING_MANAGER_APPROVAL
+        )
+
+    def test_awaiting_manager_approval_also_applies_after_an_adjusted_decision(self) -> None:
+        assert (
+            _lifecycle_status(
+                {
+                    "counterparty_tier": CounterpartyTier.ELITE,
+                    "approval_decision": "adjusted",
+                    "manager_decision": None,
+                }
+            )
+            == MarginCallLifecycleStatus.AWAITING_MANAGER_APPROVAL
+        )
+
+    def test_standard_tier_never_routes_to_awaiting_manager_approval(self) -> None:
+        # Gated on ELITE tier specifically -- a standard-tier run with an
+        # approval already recorded (an unreachable-in-practice snapshot,
+        # since send_notification runs synchronously right after for
+        # standard tier) must not be misreported as needing a manager.
+        assert (
+            _lifecycle_status(
+                {
+                    "counterparty_tier": CounterpartyTier.STANDARD,
+                    "approval_decision": "approved",
+                    "manager_decision": None,
+                    "breach_result": BreachResult(breached=True, call_amount=1_000.0),
+                }
+            )
+            == MarginCallLifecycleStatus.AWAITING_APPROVAL
         )
 
 

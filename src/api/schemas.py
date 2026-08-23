@@ -87,7 +87,20 @@ class MarginCallLifecycleStatus(StrEnum):
     EVALUATING = "evaluating"
     NO_BREACH = "no_breach"
     AWAITING_APPROVAL = "awaiting_approval"
+    # MM-79 follow-up: elite-tier counterparties (MM-70's two-person sign-off)
+    # have a second gate distinct from AWAITING_APPROVAL -- previously both
+    # gates collapsed onto AWAITING_APPROVAL, so the frontend had no way to
+    # tell a "needs an approver" call apart from a "needs a manager" one,
+    # found live when a manager couldn't see any actionable card for a run
+    # actually waiting on them.
+    AWAITING_MANAGER_APPROVAL = "awaiting_manager_approval"
     REJECTED = "rejected"
+    # A manager overturning an already-approved first decision -- distinct
+    # from REJECTED (which means nobody ever approved it). Previously fell
+    # through to AWAITING_APPROVAL incorrectly (a real, adjacent bug fixed
+    # alongside AWAITING_MANAGER_APPROVAL above), since nothing checked for
+    # approval_decision == "disputed" before falling back to breach_result.
+    DISPUTED = "disputed"
     AWAITING_SLA_RESPONSE = "awaiting_sla_response"
     SLA_MET = "sla_met"
     ESCALATED = "escalated"

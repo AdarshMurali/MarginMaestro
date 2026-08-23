@@ -7,6 +7,7 @@ import {
   getMarginCallFeed,
   postApproval,
   postCheckSla,
+  postManagerApproval,
   postRespond,
   type MarginCallSummary,
 } from "@/lib/api";
@@ -133,6 +134,71 @@ function ApprovalCard({
   );
 }
 
+function ManagerApprovalCard({
+  item,
+  token,
+  canAct,
+  onActed,
+}: {
+  item: MarginCallSummary;
+  token: string;
+  canAct: boolean;
+  onActed: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const act = useCallback(
+    async (decision: "approved" | "rejected") => {
+      setError(null);
+      setBusy(true);
+      try {
+        await postManagerApproval(token, item.thread_id, decision);
+        onActed();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Action failed -- is the API running?");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [token, item.thread_id, onActed],
+  );
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-5 text-sm">
+      <div className="flex items-center gap-2">
+        <span className="font-medium text-black">{item.counterparty_id}</span>
+        <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+          Elite -- second sign-off
+        </span>
+      </div>
+      <p className="text-neutral-500">{item.reason}</p>
+      <p className="font-mono text-black">
+        Call amount:{" "}
+        <span style={{ color: DARK_GREEN }}>{formatUsd(item.call_amount, item.currency)}</span>
+      </p>
+
+      {error && <p className="text-red-600">{error}</p>}
+      {!canAct && (
+        <p className="text-xs text-neutral-400">
+          Already approved once -- needs a second, different person signed in as manager.
+        </p>
+      )}
+
+      {canAct && (
+        <div className="flex flex-wrap items-center gap-2">
+          <PrimaryButton disabled={busy} onClick={() => act("approved")}>
+            Approve (2nd signature)
+          </PrimaryButton>
+          <OutlineButton disabled={busy} onClick={() => act("rejected")}>
+            Reject
+          </OutlineButton>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SlaCard({
   item,
   token,
@@ -210,9 +276,12 @@ export default function ApprovalsPage() {
   }, [refetch]);
 
   const awaitingApproval = items?.filter((item) => item.status === "awaiting_approval") ?? [];
+  const awaitingManagerApproval =
+    items?.filter((item) => item.status === "awaiting_manager_approval") ?? [];
   const awaitingSla = items?.filter((item) => item.status === "awaiting_sla_response") ?? [];
   const token = session?.backendAccessToken ?? "";
   const canAct = session?.user.role === "approver";
+  const canActAsManager = session?.user.role === "manager";
 
   return (
     <main className="flex min-h-full flex-1 flex-col bg-white">
@@ -241,6 +310,26 @@ export default function ApprovalsPage() {
                   item={item}
                   token={token}
                   canAct={canAct}
+                  onActed={refetch}
+                />
+              ))}
+            </section>
+
+            <section className="flex flex-col gap-3">
+              <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">
+                Awaiting second sign-off ({awaitingManagerApproval.length})
+              </h2>
+              {awaitingManagerApproval.length === 0 && (
+                <p className="text-sm text-neutral-500">
+                  Nothing awaiting a manager&apos;s second sign-off.
+                </p>
+              )}
+              {awaitingManagerApproval.map((item) => (
+                <ManagerApprovalCard
+                  key={item.thread_id}
+                  item={item}
+                  token={token}
+                  canAct={canActAsManager}
                   onActed={refetch}
                 />
               ))}

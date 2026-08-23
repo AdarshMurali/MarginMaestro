@@ -25,6 +25,7 @@ from api.schemas import (
 from calc.models import BreachResult
 from config.settings import Settings, get_settings
 from persistence.db.models import CheckpointORM
+from persistence.models import CounterpartyTier
 from persistence.queries import get_counterparty, list_counterparties
 
 # Lower rank = more urgent = shown first (MM-63) -- awaiting_approval and
@@ -33,10 +34,12 @@ from persistence.queries import get_counterparty, list_counterparties
 # only recency (not urgency) distinguishes them.
 _URGENCY_RANK: dict[MarginCallLifecycleStatus, int] = {
     MarginCallLifecycleStatus.AWAITING_APPROVAL: 0,
+    MarginCallLifecycleStatus.AWAITING_MANAGER_APPROVAL: 0,
     MarginCallLifecycleStatus.ESCALATED: 1,
     MarginCallLifecycleStatus.AWAITING_SLA_RESPONSE: 2,
     MarginCallLifecycleStatus.EVALUATING: 3,
     MarginCallLifecycleStatus.REJECTED: 4,
+    MarginCallLifecycleStatus.DISPUTED: 4,
     MarginCallLifecycleStatus.SLA_MET: 4,
     MarginCallLifecycleStatus.NO_BREACH: 4,
 }
@@ -57,8 +60,22 @@ def _lifecycle_status(values: dict) -> MarginCallLifecycleStatus:
         return MarginCallLifecycleStatus.ESCALATED
     if values.get("notification_sent_at") is not None:
         return MarginCallLifecycleStatus.AWAITING_SLA_RESPONSE
-    if values.get("approval_decision") == "rejected":
+    approval_decision = values.get("approval_decision")
+    if approval_decision == "rejected":
         return MarginCallLifecycleStatus.REJECTED
+    if approval_decision == "disputed":
+        return MarginCallLifecycleStatus.DISPUTED
+    # MM-79 follow-up: elite tier + a first decision already in (approved or
+    # adjusted) + no manager decision yet + no notification yet means the
+    # run is paused at the second gate specifically, not the first --
+    # previously indistinguishable from AWAITING_APPROVAL, so a logged-in
+    # manager had no way to find their own pending action in the feed.
+    if (
+        values.get("counterparty_tier") == CounterpartyTier.ELITE
+        and approval_decision in ("approved", "adjusted")
+        and values.get("manager_decision") is None
+    ):
+        return MarginCallLifecycleStatus.AWAITING_MANAGER_APPROVAL
     breach_result = values.get("breach_result")
     if breach_result is not None:
         if breach_result.breached:

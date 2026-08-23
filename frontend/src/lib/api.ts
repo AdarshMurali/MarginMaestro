@@ -56,7 +56,9 @@ export type MarginCallLifecycleStatus =
   | "evaluating"
   | "no_breach"
   | "awaiting_approval"
+  | "awaiting_manager_approval"
   | "rejected"
+  | "disputed"
   | "awaiting_sla_response"
   | "sla_met"
   | "escalated";
@@ -199,6 +201,14 @@ export interface ApprovalResponse {
   adjusted_call_amount: number | null;
 }
 
+export type ManagerApprovalDecision = "approved" | "rejected";
+
+export interface ManagerApprovalResponse {
+  thread_id: string;
+  approval_decision: string | null;
+  manager_decision: string | null;
+}
+
 export interface SlaResponse {
   thread_id: string;
   sla_outcome: string | null;
@@ -214,6 +224,18 @@ export function postApproval(
     `/margin-calls/${encodeURIComponent(threadId)}/approve`,
     token,
     { decision, adjusted_call_amount: adjustedCallAmount ?? null },
+  );
+}
+
+export function postManagerApproval(
+  token: string,
+  threadId: string,
+  decision: ManagerApprovalDecision,
+): Promise<ManagerApprovalResponse> {
+  return postJson<ManagerApprovalResponse>(
+    `/margin-calls/${encodeURIComponent(threadId)}/manager-approve`,
+    token,
+    { decision },
   );
 }
 
