@@ -28,8 +28,15 @@ COPY src ./src
 # imports streaming.market_feed -> yfinance, hence `data` too). rag: chromadb
 # for the CSA-RAG agent's retriever, which transitively imports
 # rag.s3_upload -> boto3 (aws extra), even though the API never calls it.
-# notify: slack-sdk for the Communication Agent (MM-41).
-RUN pip install --no-cache-dir ".[db,llm,streaming,rag,aws,data,notify]"
+# notify: slack-sdk for the Communication Agent (MM-41). auth: bcrypt/pyjwt
+# for api.auth (require_approver/require_manager, MM-57/MM-70), imported at
+# api/main.py module level. observability: OTel/prometheus-client for
+# api/main.py's configure_tracing()/GET /metrics (MM-92), also imported at
+# module level -- found live, both missing here: the image built from this
+# Dockerfile would ModuleNotFoundError on startup without them, never
+# caught until an actual deploy attempt since nothing runs this container
+# image directly in CI/tests today.
+RUN pip install --no-cache-dir ".[db,llm,streaming,rag,aws,data,notify,auth,observability]"
 
 
 FROM python:3.11-slim-bookworm
