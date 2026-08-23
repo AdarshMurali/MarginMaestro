@@ -297,24 +297,10 @@ export default function ApprovalsPage() {
 
         {items && (
           <>
-            <section className="flex flex-col gap-3">
-              <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">
-                Awaiting approval ({awaitingApproval.length})
-              </h2>
-              {awaitingApproval.length === 0 && (
-                <p className="text-sm text-neutral-500">Nothing awaiting approval.</p>
-              )}
-              {awaitingApproval.map((item) => (
-                <ApprovalCard
-                  key={item.thread_id}
-                  item={item}
-                  token={token}
-                  canAct={canAct}
-                  onActed={refetch}
-                />
-              ))}
-            </section>
-
+            {/* Second sign-off shown first, ahead of first-level approvals --
+                rarer (elite tier only) and easy to bury under a much longer
+                first-approval list otherwise (found live: a real manager
+                action sat below 20+ items and needed a long scroll to find). */}
             <section className="flex flex-col gap-3">
               <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">
                 Awaiting second sign-off ({awaitingManagerApproval.length})
@@ -330,6 +316,24 @@ export default function ApprovalsPage() {
                   item={item}
                   token={token}
                   canAct={canActAsManager}
+                  onActed={refetch}
+                />
+              ))}
+            </section>
+
+            <section className="flex flex-col gap-3">
+              <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">
+                Awaiting approval ({awaitingApproval.length})
+              </h2>
+              {awaitingApproval.length === 0 && (
+                <p className="text-sm text-neutral-500">Nothing awaiting approval.</p>
+              )}
+              {awaitingApproval.map((item) => (
+                <ApprovalCard
+                  key={item.thread_id}
+                  item={item}
+                  token={token}
+                  canAct={canAct}
                   onActed={refetch}
                 />
               ))}
