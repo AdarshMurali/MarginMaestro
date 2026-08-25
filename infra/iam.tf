@@ -1,20 +1,18 @@
-data "aws_iam_policy_document" "read_parameters" {
+data "aws_iam_policy_document" "read_secrets" {
   statement {
-    sid    = "ReadMarginMaestroParameters"
+    sid    = "ReadMarginMaestroSecrets"
     effect = "Allow"
 
     actions = [
-      "ssm:GetParameter",
-      "ssm:GetParameters",
-      "ssm:GetParametersByPath",
+      "secretsmanager:GetSecretValue",
     ]
 
-    resources = [for p in aws_ssm_parameter.secrets : p.arn]
+    resources = [data.aws_secretsmanager_secret.app.arn]
   }
 }
 
-resource "aws_iam_policy" "read_parameters" {
-  name        = "marginmaestro-${var.environment}-read-parameters"
-  description = "Least-privilege read access to MarginMaestro's SSM Parameter Store secrets"
-  policy      = data.aws_iam_policy_document.read_parameters.json
+resource "aws_iam_policy" "read_secrets" {
+  name        = "marginmaestro-${var.environment}-read-secrets"
+  description = "Least-privilege read access to MarginMaestro's Secrets Manager secret"
+  policy      = data.aws_iam_policy_document.read_secrets.json
 }

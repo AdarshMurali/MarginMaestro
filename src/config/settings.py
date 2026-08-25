@@ -3,7 +3,7 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
-from config.parameter_store import ParameterStoreSource
+from config.secrets_manager import SecretsManagerSource
 
 
 class Settings(BaseSettings):
@@ -115,7 +115,7 @@ class Settings(BaseSettings):
         return (
             init_settings,
             env_settings,
-            ParameterStoreSource(settings_cls, app_env),
+            SecretsManagerSource(settings_cls, app_env),
             dotenv_settings,
             file_secret_settings,
         )

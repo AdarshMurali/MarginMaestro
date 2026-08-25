@@ -1,11 +1,11 @@
-output "secret_parameter_names" {
-  description = "SSM Parameter Store paths created for MarginMaestro secrets"
-  value       = [for p in aws_ssm_parameter.secrets : p.name]
+output "secrets_manager_secret_arn" {
+  description = "ARN of MarginMaestro's Secrets Manager secret (created out-of-band, referenced via data source)"
+  value       = data.aws_secretsmanager_secret.app.arn
 }
 
-output "read_parameters_policy_arn" {
-  description = "ARN of the least-privilege policy for reading MarginMaestro's SSM parameters"
-  value       = aws_iam_policy.read_parameters.arn
+output "read_secrets_policy_arn" {
+  description = "ARN of the least-privilege policy for reading MarginMaestro's Secrets Manager secret"
+  value       = aws_iam_policy.read_secrets.arn
 }
 
 output "documents_bucket_name" {
@@ -16,4 +16,9 @@ output "documents_bucket_name" {
 output "read_write_documents_policy_arn" {
   description = "ARN of the least-privilege policy for reading/writing the document corpus bucket"
   value       = aws_iam_policy.read_write_documents.arn
+}
+
+output "api_url" {
+  description = "Public URL of the deployed MarginMaestro API (ALB DNS name, HTTP only -- no custom domain/cert yet)"
+  value       = "http://${aws_lb.api.dns_name}"
 }

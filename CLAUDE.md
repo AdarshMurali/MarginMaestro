@@ -11,7 +11,7 @@ It is a **portfolio / proof-of-concept** built to production-engineering standar
 ## Golden rules (do not violate)
 
 1. **LLM for reasoning, code for math.** NEVER compute MTM, VM, IM, thresholds, or any number with the LLM. Financial calculations are deterministic Python with exhaustive unit tests. The LLM is only for: RAG over documents, dispute rationale, entity/impact judgment, and drafting notification text. (See `docs/adr/0005`.)
-2. **No secrets in code.** All config/secrets via env vars locally and **AWS Parameter Store** in deployed envs. Never hardcode keys, tokens, or connection strings. `.env` is git-ignored; only `.env.example` is committed.
+2. **No secrets in code.** All config/secrets via env vars locally and **AWS Secrets Manager** (a single JSON secret, `marginmaestro/<app_env>`) in deployed envs; AWS Parameter Store remains available for non-secret config. Never hardcode keys, tokens, or connection strings. `.env` is git-ignored; only `.env.example` is committed.
 3. **One story at a time, fully finished.** Follow the loop in `CONTRIBUTING.md`. Do not start the next story until the current one meets the Definition of Done and `docs/PROGRESS.md` is updated.
 4. **Tests are mandatory.** Every story ships with tests. Coverage must stay ≥ 80%. Mock the LLM in tests; assert on orchestration decisions, not model prose.
 5. **Human-in-the-loop is a feature.** A margin call is never fired fully autonomously — there is always an approval gate before a client-facing call goes out.
@@ -53,7 +53,7 @@ make simulate SCENARIO=price_shock   # inject a synthetic market event
 
 - **Language/runtime:** Python 3.11+ (backend), TypeScript/Next.js (frontend).
 - **Validation:** Pydantic models at every external boundary (feeds, API, tool IO).
-- **Structure (target):** `src/agents/`, `src/calc/`, `src/streaming/`, `src/rag/`, `src/api/`, `src/mcp_servers/` (named to avoid colliding with the third-party `mcp` SDK package this project also depends on), `src/persistence/`, `src/config/` (shared Pydantic settings — env locally, AWS Parameter Store when deployed; added in MM-9), `src/observability/` (OTel tracing config + Prometheus metrics; added in MM-92/real key MM-74), `tests/`, `infra/` (Terraform + Prometheus/Grafana provisioning), `frontend/`.
+- **Structure (target):** `src/agents/`, `src/calc/`, `src/streaming/`, `src/rag/`, `src/api/`, `src/mcp_servers/` (named to avoid colliding with the third-party `mcp` SDK package this project also depends on), `src/persistence/`, `src/config/` (shared Pydantic settings — env locally, AWS Secrets Manager when deployed; added in MM-9, migrated from Parameter Store in MM-102), `src/observability/` (OTel tracing config + Prometheus metrics; added in MM-92/real key MM-74), `tests/`, `infra/` (Terraform + Prometheus/Grafana provisioning), `frontend/`.
 - **Errors:** fail loud in calc/agent code; never silently swallow. Events are processed **idempotently** (replaying the same event must not double-raise a call).
 - **Logging:** structured JSON logs; every agent action is logged with a correlation id for the margin-call run.
 - **Commits:** conventional commits + Jira key, e.g. `feat(calc): add VM computation [MM-12]`.

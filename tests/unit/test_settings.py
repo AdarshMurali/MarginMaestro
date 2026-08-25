@@ -1,10 +1,11 @@
+import json
 from unittest.mock import patch
 
 import boto3
 import pytest
 from moto import mock_aws
 
-from config.parameter_store import ParameterStoreSource
+from config.secrets_manager import SecretsManagerSource
 from config.settings import Settings
 
 
@@ -59,35 +60,30 @@ def test_local_env_never_touches_aws(monkeypatch) -> None:
 
 
 @mock_aws
-def test_deployed_env_reads_from_parameter_store(monkeypatch) -> None:
+def test_deployed_env_reads_from_secrets_manager(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "dev")
-    ssm = boto3.client("ssm", region_name="ap-south-1")
-    ssm.put_parameter(
-        Name="/marginmaestro/dev/OPENAI_API_KEY",
-        Value="sk-from-ssm",
-        Type="SecureString",
-    )
-    ssm.put_parameter(
-        Name="/marginmaestro/dev/MARGIN_CALL_SLA_MINUTES",
-        Value="45",
-        Type="String",
+    sm = boto3.client("secretsmanager", region_name="ap-south-1")
+    sm.create_secret(
+        Name="marginmaestro/dev",
+        SecretString=json.dumps(
+            {"OPENAI_API_KEY": "sk-from-secrets-manager", "MARGIN_CALL_SLA_MINUTES": "45"}
+        ),
     )
 
     settings = Settings(_env_file=None)
 
-    assert settings.openai_api_key == "sk-from-ssm"
+    assert settings.openai_api_key == "sk-from-secrets-manager"
     assert settings.margin_call_sla_minutes == 45
 
 
 @mock_aws
-def test_explicit_env_var_wins_over_parameter_store(monkeypatch) -> None:
+def test_explicit_env_var_wins_over_secrets_manager(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "dev")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
-    ssm = boto3.client("ssm", region_name="ap-south-1")
-    ssm.put_parameter(
-        Name="/marginmaestro/dev/OPENAI_API_KEY",
-        Value="sk-from-ssm",
-        Type="SecureString",
+    sm = boto3.client("secretsmanager", region_name="ap-south-1")
+    sm.create_secret(
+        Name="marginmaestro/dev",
+        SecretString=json.dumps({"OPENAI_API_KEY": "sk-from-secrets-manager"}),
     )
 
     settings = Settings(_env_file=None)
@@ -96,14 +92,13 @@ def test_explicit_env_var_wins_over_parameter_store(monkeypatch) -> None:
 
 
 @mock_aws
-def test_parameter_store_source_get_field_value() -> None:
-    ssm = boto3.client("ssm", region_name="ap-south-1")
-    ssm.put_parameter(
-        Name="/marginmaestro/dev/OPENAI_API_KEY",
-        Value="sk-direct",
-        Type="SecureString",
+def test_secrets_manager_source_get_field_value() -> None:
+    sm = boto3.client("secretsmanager", region_name="ap-south-1")
+    sm.create_secret(
+        Name="marginmaestro/dev",
+        SecretString=json.dumps({"OPENAI_API_KEY": "sk-direct"}),
     )
-    source = ParameterStoreSource(Settings, "dev")
+    source = SecretsManagerSource(Settings, "dev")
     field = Settings.model_fields["openai_api_key"]
 
     value, key, is_complex = source.get_field_value(field, "openai_api_key")
@@ -114,8 +109,10 @@ def test_parameter_store_source_get_field_value() -> None:
 
 
 @mock_aws
-def test_parameter_store_source_get_field_value_missing() -> None:
-    source = ParameterStoreSource(Settings, "dev")
+def test_secrets_manager_source_get_field_value_missing() -> None:
+    sm = boto3.client("secretsmanager", region_name="ap-south-1")
+    sm.create_secret(Name="marginmaestro/dev", SecretString=json.dumps({}))
+    source = SecretsManagerSource(Settings, "dev")
     field = Settings.model_fields["openai_api_key"]
 
     value, key, _ = source.get_field_value(field, "openai_api_key")
