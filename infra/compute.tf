@@ -122,7 +122,7 @@ resource "aws_security_group" "chroma" {
 
 resource "aws_security_group" "efs" {
   name        = "marginmaestro-${var.app_env}-efs"
-  description = "EFS mount targets for Chroma's persistent /data volume"
+  description = "EFS mount targets for Chromas persistent /data volume"
   vpc_id      = data.aws_vpc.default.id
 
   ingress {
