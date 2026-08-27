@@ -116,7 +116,12 @@ def run_batch_load(seed: int = DEFAULT_SEED, as_of: date | None = None) -> dict[
     settings = get_settings()
     as_of = as_of or datetime.now(UTC).date()
 
-    ensure_database_exists(settings)
+    # Only local dev's own fresh Azure SQL Edge container needs its database
+    # created -- deployed envs reuse an already-existing database via a
+    # contained DB user with no `master` access at all (see migrations/env.py
+    # for the same guard and the real failure this was found from).
+    if settings.app_env == "local":
+        ensure_database_exists(settings)
     session_factory = get_session_factory(settings)
 
     market_feed = get_market_feed(settings)

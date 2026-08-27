@@ -184,6 +184,7 @@ class TestRunBatchLoad:
                 return_value={"CP-1": 500_000.0},
             ) as mock_calibrate,
         ):
+            mock_get_settings.return_value.app_env = "local"
             summary = run_batch_load(seed=42, as_of=date(2026, 7, 26))
 
         mock_ensure_db.assert_called_once_with(mock_get_settings.return_value)
@@ -204,6 +205,44 @@ class TestRunBatchLoad:
         assert len(audit_rows) == 1
         assert audit_rows[0].event_type == "batch_load"
         assert audit_rows[0].payload == summary
+
+    def test_skips_ensure_database_exists_outside_local(self) -> None:
+        # Deployed envs reuse an already-existing database via a contained
+        # DB user with no `master` access at all -- calling
+        # ensure_database_exists there fails with a genuine "Login failed",
+        # not a no-op (found live running MM-102's first deployed
+        # migration). The database already exists by construction, so this
+        # step should just be skipped, not attempted.
+        session = MagicMock()
+        session_context = MagicMock()
+        session_context.__enter__.return_value = session
+        session_context.__exit__.return_value = None
+        session_factory = MagicMock(return_value=session_context)
+
+        market_feed = MagicMock()
+        market_feed.get_prices.return_value = {}
+
+        fred_feed_instance = MagicMock()
+        fred_feed_instance.get_latest.return_value = RateObservation(
+            series_id="SOFR", date=date(2026, 7, 23), value=4.0
+        )
+
+        with (
+            patch("persistence.batch_loader.get_settings") as mock_get_settings,
+            patch("persistence.batch_loader.ensure_database_exists") as mock_ensure_db,
+            patch("persistence.batch_loader.get_session_factory", return_value=session_factory),
+            patch("persistence.batch_loader.get_market_feed", return_value=market_feed),
+            patch("persistence.batch_loader.FredFeed", return_value=fred_feed_instance),
+            patch("persistence.batch_loader.backfill_price_history", return_value=0),
+            patch(
+                "persistence.batch_loader.calibrate_collateral_to_exposure",
+                return_value={},
+            ),
+        ):
+            mock_get_settings.return_value.app_env = "prod"
+            run_batch_load(seed=42, as_of=date(2026, 7, 26))
+
+        mock_ensure_db.assert_not_called()
 
 
 class TestMain:

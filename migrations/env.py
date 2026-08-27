@@ -57,7 +57,14 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    ensure_database_exists(_settings)
+    # Only local dev's own fresh Azure SQL Edge container needs its database
+    # created -- deployed envs reuse an already-existing database (see
+    # docs/ROADMAP.md Phase 10) via a contained DB user with no `master`
+    # access at all, so this would fail with a genuine "Login failed" (not
+    # a credentials problem) rather than a no-op. Found live running MM-102's
+    # first deployed migration.
+    if _settings.app_env == "local":
+        ensure_database_exists(_settings)
     connectable = create_engine(_connection_url, poolclass=pool.NullPool)
 
     with connectable.connect() as connection:
