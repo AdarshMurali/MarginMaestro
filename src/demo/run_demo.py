@@ -14,6 +14,7 @@ point at a deployed instance once Phase 10's AWS backend is live.
 import argparse
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlparse
 
 import httpx
 import jwt
@@ -130,6 +131,17 @@ def run_scenario(client: httpx.Client, settings: Settings, scenario: DemoScenari
 
 
 def run_demo(settings: Settings, base_url: str) -> list[dict]:
+    # A fixed domain allowlist (SonarCloud python:S8703's default suggested
+    # fix) doesn't fit here -- this CLI's whole purpose is pointing at
+    # whichever backend the caller names (local dev, a deployed instance),
+    # not a closed set of trusted hosts. Validating the shape of the URL
+    # instead still addresses the real concern (an LLM/agent invoking this
+    # with a malformed or unintended -- e.g. non-http(s) -- argument ending
+    # up as a real network target) without breaking that flexibility.
+    parsed = urlparse(base_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ValueError(f"base_url must be an absolute http(s) URL, got {base_url!r}")
+
     with httpx.Client(base_url=base_url, timeout=90.0) as client:
         return [run_scenario(client, settings, scenario) for scenario in SCENARIOS]
 

@@ -148,6 +148,14 @@ class TestRunDemo:
         assert results == fake_results
         assert mock_run.call_count == len(SCENARIOS)
 
+    @pytest.mark.parametrize(
+        "base_url",
+        ["not-a-url", "file:///etc/passwd", "javascript:alert(1)", "ftp://example.com"],
+    )
+    def test_rejects_a_non_http_base_url(self, settings: Settings, base_url: str) -> None:
+        with pytest.raises(ValueError, match="must be an absolute http"):
+            run_demo(settings, base_url)
+
 
 class TestMain:
     def test_parses_base_url_and_prints_results(self, capsys) -> None:
