@@ -19,7 +19,14 @@ def build_connection_url(settings: Settings) -> str:
 
 
 def get_engine(settings: Settings | None = None) -> Engine:
-    return create_engine(build_connection_url(settings or get_settings()))
+    # pool_pre_ping: without it, a connection Azure SQL has silently dropped
+    # (idle timeout, network blip) sits in the pool looking valid until the
+    # next checkout, then fails on the caller's first query with a raw TCP
+    # error instead of SQLAlchemy transparently replacing it. Found live
+    # both during MM-70's local verification (a stale connection after the
+    # dev container sat idle) and again running MM-102's first deployed
+    # queries against Azure SQL for real.
+    return create_engine(build_connection_url(settings or get_settings()), pool_pre_ping=True)
 
 
 def get_session_factory(settings: Settings | None = None) -> sessionmaker[Session]:
