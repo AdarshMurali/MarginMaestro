@@ -22,11 +22,16 @@ from api.auth import JWT_ALGORITHM
 from config.settings import Settings, get_settings
 
 
-# Both scenarios were hand-verified live against real market data during
-# Phase 9.5's testing (see docs/PROGRESS.md's MM-77/78/79 entries) -- exact
-# figures drift day to day with real prices, but the direction/magnitude
-# reliably clears each counterparty's threshold+collateral gap without
-# also tipping any *other* holder of the same ticker into breach.
+# Both scenarios were hand-verified live against real market data, most
+# recently 2026-08-27 (re-tuned against the deployed instance -- CP-6's
+# original +7.0% no longer breached after real ETH-USD/collateral drift
+# since Phase 9.5's original calibration; see docs/PROGRESS.md's 2026-08-27
+# entry). Exact figures drift day to day with real prices -- re-verify with
+# GET /simulate against a real deployment before assuming these still
+# breach. CP-6's ETH-USD shock also currently breaches CP-3 as a side
+# effect (CP-3 sits close to its own threshold independent of this
+# scenario) -- accepted, not chased away, since the demo only acts on its
+# own two target counterparties' threads.
 @dataclass(frozen=True)
 class DemoScenario:
     counterparty_id: str
@@ -40,9 +45,9 @@ SCENARIOS = [
     DemoScenario(
         counterparty_id="CP-6",
         ticker="ETH-USD",
-        pct_change=7.0,
+        pct_change=15.0,
         tier="standard",
-        narrative="A modest crypto rally pushes CP-6 over its CSA threshold.",
+        narrative="A crypto rally pushes CP-6 over its CSA threshold.",
     ),
     DemoScenario(
         counterparty_id="CP-5",
