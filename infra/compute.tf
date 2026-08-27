@@ -161,19 +161,6 @@ resource "aws_instance" "app" {
         volumes:
           - chroma_data:/data
 
-      # Writes straight to latest_prices, no Kafka/Redpanda needed (deploy
-      # scope deliberately skips those -- see docs/ROADMAP.md Phase 10).
-      # Without this, /exposure's board reports every counterparty
-      # "unavailable" forever -- found live after MM-103, see
-      # streaming/latest_price_poller.py's own docstring for the full why.
-      price-poller:
-        image: adarshmurali/marginmaestro:latest
-        restart: unless-stopped
-        command: ["python", "-m", "streaming.latest_price_poller"]
-        environment:
-          APP_ENV: ${var.app_env}
-          AWS_REGION: ${var.aws_region}
-
     volumes:
       chroma_data:
     COMPOSE

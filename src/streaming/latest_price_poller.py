@@ -10,7 +10,17 @@ deployed instance's `latest_prices` table permanently empty and /exposure's
 board reporting every counterparty "unavailable" -- found live by the user
 after MM-103. This poller exists purely to keep that one table fresh in a
 Kafka-free deployment; it has no threshold/classification logic and never
-triggers a margin-call run (that's still exclusively /simulate's job)."""
+triggers a margin-call run (that's still exclusively /simulate's job).
+
+**Not deployed as an always-on service.** The deployed database
+(finsight-sql-server, GP_S_Gen5 Serverless) auto-pauses to near-zero cost
+after an hour of no activity -- a continuous 60s-interval poller would
+touch the DB far more often than that, keeping it permanently "Online"
+and billing 24/7 regardless of whether anyone's using the app. Briefly
+deployed as a persistent container, then removed the same day once this
+was noticed (see docs/PROGRESS.md). Meant to be run on demand -- a short,
+bounded burst (e.g. `max_iterations=1`) right before a demo -- not left
+running."""
 
 import itertools
 import time

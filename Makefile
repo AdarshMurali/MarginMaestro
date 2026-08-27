@@ -31,7 +31,9 @@ live-feed-poller:
 	python -m streaming.live_feed_poller
 
 # Kafka-free equivalent, for deployed envs that skip Kafka/Redpanda entirely
-# (see docs/ROADMAP.md Phase 10) -- writes straight to latest_prices.
+# (see docs/ROADMAP.md Phase 10) -- writes straight to latest_prices. Not
+# meant to be left running against a Serverless Azure SQL DB (defeats
+# auto-pause, runs up cost) -- run on demand before a demo, not as a service.
 latest-price-poller:
 	python -m streaming.latest_price_poller
 

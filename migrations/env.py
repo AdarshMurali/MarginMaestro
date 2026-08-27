@@ -6,7 +6,7 @@ from sqlalchemy.engine import create_engine
 
 from config.settings import get_settings
 from persistence.db.bootstrap import ensure_database_exists
-from persistence.db.engine import build_connection_url
+from persistence.db.engine import AZURE_SERVERLESS_RESUME_TIMEOUT_SECONDS, build_connection_url
 from persistence.db.models import Base
 
 # this is the Alembic Config object, which provides
@@ -65,7 +65,11 @@ def run_migrations_online() -> None:
     # first deployed migration.
     if _settings.app_env == "local":
         ensure_database_exists(_settings)
-    connectable = create_engine(_connection_url, poolclass=pool.NullPool)
+    connectable = create_engine(
+        _connection_url,
+        poolclass=pool.NullPool,
+        connect_args={"timeout": AZURE_SERVERLESS_RESUME_TIMEOUT_SECONDS},
+    )
 
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
