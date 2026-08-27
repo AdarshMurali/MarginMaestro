@@ -6,6 +6,16 @@ import { API_BASE_URL } from "@/lib/env";
 
 const BACKEND_TOKEN_TTL_SECONDS = 15 * 60;
 
+// authorize() below runs server-side (Node.js), never in the browser --
+// API_BASE_URL is `/api` in production (MM-103's rewrite proxy exists so
+// *browser* fetches avoid mixed content against the HTTP-only backend),
+// but a relative URL isn't valid in a server-side fetch() at all (no
+// document to resolve it against -- found live as NextAuth's generic
+// "Configuration" error, thrown by authorize() failing to parse the URL).
+// BACKEND_API_URL is the real absolute backend URL either way; falls back
+// to API_BASE_URL for local dev, where that's already absolute.
+const SERVER_API_BASE_URL = process.env.BACKEND_API_URL ?? API_BASE_URL;
+
 function backendSecretKey(): Uint8Array {
   const secret = process.env.AUTH_BACKEND_SECRET;
   if (!secret) {
@@ -28,7 +38,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       async authorize(credentials) {
         if (!credentials?.username || !credentials?.password) return null;
 
-        const res = await fetch(`${API_BASE_URL}/auth/verify`, {
+        const res = await fetch(`${SERVER_API_BASE_URL}/auth/verify`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
