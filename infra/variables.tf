@@ -21,3 +21,9 @@ variable "app_env" {
   type        = string
   default     = "prod"
 }
+
+variable "instance_type" {
+  description = "EC2 instance type for the app box (runs the API + Chroma via Docker Compose). t3.small comfortably covers both containers; the app's URL is always-on (linked from a resume), so this isn't scaled to zero between uses."
+  type        = string
+  default     = "t3.small"
+}

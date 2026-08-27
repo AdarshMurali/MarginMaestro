@@ -19,6 +19,11 @@ output "read_write_documents_policy_arn" {
 }
 
 output "api_url" {
-  description = "Public URL of the deployed MarginMaestro API (ALB DNS name, HTTP only -- no custom domain/cert yet)"
-  value       = "http://${aws_lb.api.dns_name}"
+  description = "Public URL of the deployed MarginMaestro API (Elastic IP, HTTP only -- no custom domain/cert yet)"
+  value       = "http://${aws_eip.app.public_ip}:8000"
+}
+
+output "app_instance_id" {
+  description = "EC2 instance ID -- use with `aws ssm start-session --target <id>` for remote shell access (redeploys, log checks; no SSH port is open)"
+  value       = aws_instance.app.id
 }
