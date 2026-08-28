@@ -67,6 +67,41 @@ def draft_margin_call_notice(
     return text.strip()
 
 
+def draft_sla_met_notice(
+    counterparty_id: str,
+    call_amount: float,
+    currency: str,
+    openai_client: OpenAI | None = None,
+    settings: Settings | None = None,
+) -> str:
+    """Confirms, in the same Slack channel as the original call notice, that
+    the counterparty met its obligation within the SLA window. Before this,
+    "SLA met" was only ever visible inside the app itself (trace/API) --
+    found live by the user, who expected a Slack confirmation and never got
+    one."""
+    settings = settings or get_settings()
+    openai_client = openai_client or OpenAI(api_key=settings.openai_api_key)
+
+    prompt = (
+        f"Counterparty: {counterparty_id}\n"
+        f"Margin call amount: {call_amount:,.2f} {currency}\n\n"
+        "Draft a short confirmation notice that this counterparty met its margin call "
+        "obligation within the SLA window, using exactly this figure. This is a "
+        "resolution confirmation, not a new call -- do not restate it as a demand."
+    )
+    completion = openai_client.chat.completions.create(
+        model=settings.openai_model,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    text = completion.choices[0].message.content
+    if not text or not text.strip():
+        raise NoticeDraftingError(f"LLM returned an empty SLA-met notice for {counterparty_id}")
+    return text.strip()
+
+
 def send_slack_notice(
     text: str,
     settings: Settings | None = None,

@@ -30,6 +30,7 @@ from agents.orchestrator import (
     get_or_start_run,
     resume_run,
     send_notification,
+    send_sla_met_notification,
     start_run,
     thread_id_for,
 )
@@ -128,6 +129,12 @@ def _patch_send_slack_notice():
             slack_channel="C0BMCAL6L74",
             slack_ts="123.456",
         ),
+    )
+
+
+def _patch_draft_sla_met_notice():
+    return patch(
+        "agents.orchestrator.draft_sla_met_notice", return_value="Mock SLA-met confirmation."
     )
 
 
@@ -532,10 +539,43 @@ class TestRouteAfterSla:
         state.sla_outcome = "breached"
         assert _route_after_sla(state) == "escalate"
 
-    def test_routes_to_end_when_met(self) -> None:
+    def test_routes_to_send_sla_met_notification_when_met(self) -> None:
         state = _state()
         state.sla_outcome = "met"
-        assert _route_after_sla(state) != "escalate"
+        assert _route_after_sla(state) == "send_sla_met_notification"
+
+
+class TestSendSlaMetNotification:
+    def test_uses_effective_call_amount(self) -> None:
+        state = _state()
+        state.breach_result = BreachResult(breached=True, call_amount=474_000.0)
+        state.csa_terms = CSATerms(threshold=1_000.0, mta=100.0, currency="USD")
+        state.approval_decision = "adjusted"
+        state.adjusted_call_amount = 42_000.0
+
+        with (
+            _patch_draft_sla_met_notice() as mock_draft,
+            _patch_send_slack_notice(),
+        ):
+            send_sla_met_notification(state, Settings(_env_file=None))
+
+        args, _ = mock_draft.call_args
+        assert args[1] == 42_000.0
+
+    def test_raises_if_breach_result_or_csa_terms_missing(self) -> None:
+        with pytest.raises(PricingError):
+            send_sla_met_notification(_state(), Settings(_env_file=None))
+
+    def test_returns_notification_result(self) -> None:
+        state = _state()
+        state.breach_result = BreachResult(breached=True, call_amount=474_000.0)
+        state.csa_terms = CSATerms(threshold=1_000.0, mta=100.0, currency="USD")
+        state.approval_decision = "approved"
+
+        with _patch_draft_sla_met_notice(), _patch_send_slack_notice():
+            result = send_sla_met_notification(state, Settings(_env_file=None))
+
+        assert result["sla_met_notification_result"].slack_channel == "C0BMCAL6L74"
 
 
 class TestEscalate:
@@ -709,6 +749,7 @@ class TestBuildOrchestratorGraph:
             ),
             _patch_draft_notice(),
             _patch_send_slack_notice(),
+            _patch_draft_sla_met_notice(),
         ):
             graph = build_orchestrator_graph(
                 session_factory=session_factory,
@@ -825,6 +866,7 @@ class TestBuildOrchestratorGraph:
             ),
             _patch_draft_notice(),
             _patch_send_slack_notice(),
+            _patch_draft_sla_met_notice(),
         ):
             graph = build_orchestrator_graph(
                 session_factory=session_factory,
@@ -931,6 +973,7 @@ class TestAuditLogging:
             ),
             _patch_draft_notice(),
             _patch_send_slack_notice(),
+            _patch_draft_sla_met_notice(),
         ):
             graph = build_orchestrator_graph(
                 session_factory=session_factory,
@@ -952,6 +995,7 @@ class TestAuditLogging:
             "await_approval",
             "send_notification",
             "await_sla_response",
+            "send_sla_met_notification",
         ]
         approval_event = events[3]
         assert approval_event.payload["decision"] == "approved"
@@ -1107,6 +1151,7 @@ class TestObservability:
             ),
             _patch_draft_notice(),
             _patch_send_slack_notice(),
+            _patch_draft_sla_met_notice(),
         ):
             graph = build_orchestrator_graph(
                 session_factory=session_factory,
@@ -1235,7 +1280,8 @@ class TestSlaTimer:
         )
         assert "__interrupt__" in paused_at_sla
 
-        resolved = resume_run(graph, thread_id, {"responded": True})
+        with _patch_draft_sla_met_notice(), _patch_send_slack_notice():
+            resolved = resume_run(graph, thread_id, {"responded": True})
 
         assert "__interrupt__" not in resolved
         assert resolved["sla_outcome"] == "met"

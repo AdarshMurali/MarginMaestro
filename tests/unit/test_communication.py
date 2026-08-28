@@ -7,6 +7,7 @@ from agents.communication import (
     NoticeDraftingError,
     SlackDeliveryError,
     draft_margin_call_notice,
+    draft_sla_met_notice,
     send_slack_notice,
 )
 from calc.models import CSATerms
@@ -68,6 +69,37 @@ class TestDraftMarginCallNotice:
                 CSA_TERMS,
                 openai_client=client,
                 settings=Settings(_env_file=None),
+            )
+
+
+class TestDraftSlaMetNotice:
+    def test_prompt_carries_the_given_figures_verbatim(self) -> None:
+        client = _mock_openai_client("CP-3 met its margin call in full.")
+
+        draft_sla_met_notice(
+            "CP-3", 474_000.0, "USD", openai_client=client, settings=Settings(_env_file=None)
+        )
+
+        _, kwargs = client.chat.completions.create.call_args
+        user_message = kwargs["messages"][1]["content"]
+        assert "CP-3" in user_message
+        assert "474,000.00" in user_message
+
+    def test_returns_stripped_llm_text(self) -> None:
+        client = _mock_openai_client("  CP-3 met its margin call in full.  \n")
+
+        result = draft_sla_met_notice(
+            "CP-3", 474_000.0, "USD", openai_client=client, settings=Settings(_env_file=None)
+        )
+
+        assert result == "CP-3 met its margin call in full."
+
+    def test_empty_llm_response_raises(self) -> None:
+        client = _mock_openai_client("   ")
+
+        with pytest.raises(NoticeDraftingError, match="CP-3"):
+            draft_sla_met_notice(
+                "CP-3", 474_000.0, "USD", openai_client=client, settings=Settings(_env_file=None)
             )
 
 

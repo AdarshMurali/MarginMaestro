@@ -14,7 +14,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from agents.communication import NotificationResult, draft_margin_call_notice, send_slack_notice
+from agents.communication import (
+    NotificationResult,
+    draft_margin_call_notice,
+    draft_sla_met_notice,
+    send_slack_notice,
+)
 from agents.csa_rag import answer_csa_terms
 from agents.escalation import (
     IncidentResult,
@@ -94,6 +99,11 @@ class MarginCallState(BaseModel):
     notification_result: NotificationResult | None = None
     notification_sent_at: datetime | None = None
     sla_outcome: Literal["met", "breached"] | None = None
+    # Confirms "SLA met" back in the same Slack channel as the original call
+    # notice -- before this, that outcome was only ever visible inside the
+    # app itself (trace/API), found live by the user expecting a Slack
+    # confirmation and never getting one.
+    sla_met_notification_result: NotificationResult | None = None
     escalation_result: IncidentResult | None = None
 
 
@@ -338,6 +348,25 @@ def send_notification(state: MarginCallState, settings: Settings) -> dict:
     return {"notification_result": result, "notification_sent_at": datetime.now(UTC)}
 
 
+def send_sla_met_notification(state: MarginCallState, settings: Settings) -> dict:
+    """Communication Agent follow-up (only reached when the SLA was met,
+    _route_after_sla): confirms in Slack that the counterparty fulfilled its
+    obligation, using the same effective call amount send_notification and
+    escalate already agree on."""
+    if state.breach_result is None or state.csa_terms is None:
+        raise PricingError(
+            "send_sla_met_notification requires breach_result and csa_terms to already "
+            "be set on state"
+        )
+
+    call_amount = _effective_call_amount(state)
+    notice_text = draft_sla_met_notice(
+        state.counterparty_id, call_amount, state.csa_terms.currency, settings=settings
+    )
+    result = send_slack_notice(notice_text, settings=settings)
+    return {"sla_met_notification_result": result}
+
+
 def await_sla_response(state: MarginCallState, settings: Settings) -> dict:
     """SLA timer (MM-42, docs/AGENTS.md "SLA & Escalation"): pauses
     (interrupt()) after notification, resolving "met" if a response signal
@@ -405,6 +434,8 @@ def _route_after_breach(state: MarginCallState) -> str:
 def _route_after_sla(state: MarginCallState) -> str:
     if state.sla_outcome == "breached":
         return "escalate"
+    if state.sla_outcome == "met":
+        return "send_sla_met_notification"
     return END
 
 
@@ -649,6 +680,29 @@ def build_orchestrator_graph(
             _audit(session, state, "await_sla_response", {"sla_outcome": result.get("sla_outcome")})
         return result
 
+    def _send_sla_met_notification_node(state: MarginCallState) -> dict:
+        log = logger.bind(
+            correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
+        )
+        with observe_step(tracer, "send_sla_met_notification"):
+            result = send_sla_met_notification(state, settings)
+            with session_factory() as session:
+                _audit(
+                    session,
+                    state,
+                    "send_sla_met_notification",
+                    {
+                        "notification_result": result["sla_met_notification_result"].model_dump(
+                            mode="json"
+                        )
+                    },
+                )
+        log.info(
+            "send_sla_met_notification_completed",
+            slack_channel=result["sla_met_notification_result"].slack_channel,
+        )
+        return result
+
     def _escalate_node(state: MarginCallState) -> dict:
         log = logger.bind(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
@@ -676,6 +730,7 @@ def build_orchestrator_graph(
     graph.add_node("await_manager_approval", _await_manager_approval_node)
     graph.add_node("send_notification", _send_notification_node)
     graph.add_node("await_sla_response", _await_sla_response_node)
+    graph.add_node("send_sla_met_notification", _send_sla_met_notification_node)
     graph.add_node("escalate", _escalate_node)
 
     graph.add_edge(START, "compute_exposure")
@@ -700,8 +755,15 @@ def build_orchestrator_graph(
     )
     graph.add_edge("send_notification", "await_sla_response")
     graph.add_conditional_edges(
-        "await_sla_response", _route_after_sla, {"escalate": "escalate", END: END}
+        "await_sla_response",
+        _route_after_sla,
+        {
+            "escalate": "escalate",
+            "send_sla_met_notification": "send_sla_met_notification",
+            END: END,
+        },
     )
     graph.add_edge("escalate", END)
+    graph.add_edge("send_sla_met_notification", END)
 
     return graph.compile(checkpointer=checkpointer)

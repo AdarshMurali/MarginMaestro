@@ -170,6 +170,9 @@ def _patch_notify():
                 notice_text="Mock notice.", slack_channel="C0BMCAL6L74", slack_ts="123.456"
             ),
         ),
+        patch(
+            "agents.orchestrator.draft_sla_met_notice", return_value="Mock SLA-met confirmation."
+        ),
     )
 
 
@@ -298,6 +301,7 @@ class TestListMarginCalls:
             patch("agents.orchestrator.answer_csa_terms") as mock_csa,
             notify_patches[0],
             notify_patches[1],
+            notify_patches[2],
         ):
 
             def _csa_side_effect(counterparty_id, **_):

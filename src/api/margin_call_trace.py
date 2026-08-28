@@ -35,6 +35,7 @@ NODE_LABELS = {
     "await_manager_approval": "Await second sign-off",
     "send_notification": "Send notification",
     "await_sla_response": "Await SLA response",
+    "send_sla_met_notification": "Send SLA-met notification",
     "escalate": "Escalate",
 }
 
@@ -100,6 +101,14 @@ def _summarize_step(node: str, values: dict) -> str:
     if node == "await_sla_response":
         outcome = values.get("sla_outcome")
         return f"SLA {outcome}" if outcome else "Awaiting SLA response"
+
+    if node == "send_sla_met_notification":
+        result = values.get("sla_met_notification_result")
+        return (
+            f"Slack confirmation sent to {result.slack_channel}"
+            if result is not None
+            else "SLA-met confirmation sent"
+        )
 
     if node == "escalate":
         result = values.get("escalation_result")

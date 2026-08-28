@@ -214,6 +214,14 @@ class TestSummarizeStep:
         assert _summarize_step("await_sla_response", {"sla_outcome": "met"}) == "SLA met"
         assert _summarize_step("await_sla_response", {}) == "Awaiting SLA response"
 
+    def test_send_sla_met_notification_happy_path_and_fallback(self) -> None:
+        result = NotificationResult(notice_text="x", slack_channel="C123", slack_ts="1")
+        assert (
+            _summarize_step("send_sla_met_notification", {"sla_met_notification_result": result})
+            == "Slack confirmation sent to C123"
+        )
+        assert _summarize_step("send_sla_met_notification", {}) == "SLA-met confirmation sent"
+
     def test_escalate_happy_path_and_fallback(self) -> None:
         result = IncidentResult(incident_number="INC001", sys_id="abc", urgency="2")
         assert _summarize_step("escalate", {"escalation_result": result}) == (
