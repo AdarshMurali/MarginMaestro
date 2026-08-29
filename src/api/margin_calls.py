@@ -28,28 +28,6 @@ from persistence.db.models import CheckpointORM
 from persistence.models import CounterpartyTier
 from persistence.queries import get_counterparty, list_counterparties
 
-# Lower rank = more urgent = shown first (MM-63) -- awaiting_approval sits
-# in a human's queue right now; awaiting_sla_response is time-sensitive but
-# not yet actionable; everything else is resolved and only recency (not
-# urgency) distinguishes them. ESCALATED demoted to the resolved tier
-# (found live, MM-80 follow-up): it had been ranked as urgent as
-# awaiting_approval, but escalation is itself a terminal state within this
-# app -- the ServiceNow incident is where a human actually acts next, not
-# here -- so an old escalated call was outranking, and hiding, a genuinely
-# active awaiting_sla_response run for the same counterparty in the
-# bucketed view, regardless of which was more recent.
-_URGENCY_RANK: dict[MarginCallLifecycleStatus, int] = {
-    MarginCallLifecycleStatus.AWAITING_APPROVAL: 0,
-    MarginCallLifecycleStatus.AWAITING_MANAGER_APPROVAL: 0,
-    MarginCallLifecycleStatus.AWAITING_SLA_RESPONSE: 1,
-    MarginCallLifecycleStatus.EVALUATING: 2,
-    MarginCallLifecycleStatus.ESCALATED: 3,
-    MarginCallLifecycleStatus.REJECTED: 3,
-    MarginCallLifecycleStatus.DISPUTED: 3,
-    MarginCallLifecycleStatus.SLA_MET: 3,
-    MarginCallLifecycleStatus.NO_BREACH: 3,
-}
-
 
 def _lifecycle_status(values: dict) -> MarginCallLifecycleStatus:
     if values.get("escalation_result") is not None:
@@ -181,11 +159,19 @@ def list_margin_calls_for_counterparty(
 def list_margin_call_buckets(
     graph: CompiledStateGraph, session: Session, settings: Settings | None = None
 ) -> MarginCallBucketFeedResponse:
-    """One row per counterparty (MM-63): whichever call is most urgent for
-    that counterparty, plus how many calls they have in total. Bucket order
-    is itself urgency-first (then most-recent-first) so the counterparties
-    needing attention right now surface at the top of the whole list, not
-    just within their own row."""
+    """One row per counterparty (MM-63): their single most recent call,
+    plus how many calls they have in total. Bucket order is itself
+    most-recent-first, matching every other feed in this module.
+
+    Previously ranked by urgency (awaiting_approval first, resolved calls
+    last) instead of recency -- reverted (found live, 2026-08-28): a
+    counterparty's *own* older pending call (e.g. a stale test run stuck
+    mid-lifecycle) would permanently outrank and hide their genuinely
+    newer, already-resolved activity, which is exactly backwards for a
+    trace/activity view where "what happened most recently" is the whole
+    point. Urgency-based surfacing of what needs a human's attention right
+    now belongs on the Approvals & SLA page, which already filters by
+    status rather than relying on this feed's ordering."""
     settings = settings or get_settings()
     summaries = _all_summaries(graph, session, settings)  # already most-recent-first
     names = {cp.id: cp.name for cp in list_counterparties(session)}
@@ -194,22 +180,17 @@ def list_margin_call_buckets(
     for summary in summaries:
         calls_by_counterparty.setdefault(summary.counterparty_id, []).append(summary)
 
-    buckets = []
-    for counterparty_id, calls in calls_by_counterparty.items():
-        # calls are already most-recent-first, so min() -- which returns the
-        # first minimal element it sees -- picks the most urgent call,
-        # tie-broken by recency, with no separate sort needed.
-        most_urgent = min(calls, key=lambda c: _URGENCY_RANK[c.status])
-        buckets.append(
-            MarginCallBucket(
-                counterparty_id=counterparty_id,
-                counterparty_name=names.get(counterparty_id, counterparty_id),
-                latest=most_urgent,
-                total_count=len(calls),
-            )
+    buckets = [
+        MarginCallBucket(
+            counterparty_id=counterparty_id,
+            counterparty_name=names.get(counterparty_id, counterparty_id),
+            latest=calls[0],  # calls are already most-recent-first
+            total_count=len(calls),
         )
+        for counterparty_id, calls in calls_by_counterparty.items()
+    ]
 
-    buckets.sort(key=lambda b: (_URGENCY_RANK[b.latest.status], -b.latest.occurred_at.timestamp()))
+    buckets.sort(key=lambda b: b.latest.occurred_at, reverse=True)
     return MarginCallBucketFeedResponse(as_of=datetime.now(UTC), buckets=buckets)
 
 

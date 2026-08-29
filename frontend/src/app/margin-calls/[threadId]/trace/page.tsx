@@ -34,7 +34,7 @@ export default function MarginCallTracePage() {
 
   return (
     <main className="flex min-h-full flex-1 flex-col bg-white">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-12">
+      <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-6 px-6 py-12">
         <div className="flex flex-col gap-1">
           {/* Three different places link into this page (Margin Calls, Agent
               Trace, a counterparty's margin-call-history section) -- a fixed

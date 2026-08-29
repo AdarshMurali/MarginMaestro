@@ -91,9 +91,9 @@ export default function MarginCallsPage() {
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight text-black">Margin Calls</h1>
           <p className="text-sm text-neutral-500">
-            One row per counterparty -- whichever call needs attention most, with older resolved
-            calls tucked behind it rather than cluttering the list. Full history lives on each
-            counterparty&apos;s own page.
+            One row per counterparty, most recent activity first -- older calls are tucked behind
+            it rather than cluttering the list. Full history lives on each counterparty&apos;s own
+            page.
           </p>
         </div>
 

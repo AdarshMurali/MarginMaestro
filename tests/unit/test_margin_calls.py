@@ -577,11 +577,13 @@ class TestListMarginCallBuckets:
         assert {b.counterparty_name for b in result.buckets} == {"Alpha", "Beta"}
         assert all(b.total_count == 1 for b in result.buckets)
 
-    def test_picks_the_most_urgent_call_not_just_the_latest(self, session_factory) -> None:
+    def test_picks_the_most_recent_call_for_the_bucket(self, session_factory) -> None:
         _seed_counterparty(session_factory, "CP-1", "Alpha")
-        # Most recent call is resolved (NO_BREACH); an OLDER call is still
-        # awaiting approval -- the older, more urgent one must win, not the
-        # newer resolved one that would otherwise silently bury it.
+        # An older call is still awaiting approval; a newer one already
+        # resolved (NO_BREACH) -- the newer one must win now (found live,
+        # 2026-08-28: urgency-based selection meant a counterparty's own
+        # stale pending call could permanently hide their real newer
+        # activity, exactly backwards for a recency-ordered feed).
         calls = [
             _summary(
                 "CP-1",
@@ -591,7 +593,7 @@ class TestListMarginCallBuckets:
             ),
             _summary(
                 "CP-1",
-                "t-old-urgent",
+                "t-old-pending",
                 MarginCallLifecycleStatus.AWAITING_APPROVAL,
                 datetime(2026, 8, 1, tzinfo=UTC),
             ),
@@ -603,40 +605,14 @@ class TestListMarginCallBuckets:
             result = list_margin_call_buckets(MagicMock(), session)
 
         bucket = result.buckets[0]
-        assert bucket.latest.thread_id == "t-old-urgent"
+        assert bucket.latest.thread_id == "t-new-resolved"
         assert bucket.total_count == 2
 
-    def test_ties_in_urgency_break_by_recency(self, session_factory) -> None:
-        _seed_counterparty(session_factory, "CP-1", "Alpha")
-        earlier = _summary(
-            "CP-1",
-            "t-earlier",
-            MarginCallLifecycleStatus.AWAITING_APPROVAL,
-            datetime(2026, 8, 1, tzinfo=UTC),
-        )
-        later = _summary(
-            "CP-1",
-            "t-later",
-            MarginCallLifecycleStatus.AWAITING_APPROVAL,
-            datetime(2026, 8, 2, tzinfo=UTC),
-        )
-        # _all_summaries always returns most-recent-first in practice -- the
-        # tie-break relies on that ordering, so mirror it here.
-        with (
-            patch("api.margin_calls._all_summaries", return_value=[later, earlier]),
-            session_factory() as session,
-        ):
-            result = list_margin_call_buckets(MagicMock(), session)
-
-        assert result.buckets[0].latest.thread_id == "t-later"
-
     def test_an_old_escalated_call_does_not_bury_a_newer_active_run(self, session_factory) -> None:
-        # MM-80 follow-up: found live -- ESCALATED used to rank as urgent as
-        # AWAITING_APPROVAL, so an old, already-resolved-elsewhere (in
-        # ServiceNow) escalated call outranked, and hid, a genuinely active
-        # newer awaiting_sla_response run for the same counterparty. Nothing
-        # further is actionable in this app once escalated, so it belongs in
-        # the resolved tier, not competing with genuinely pending work.
+        # MM-80 follow-up regression guard, still valid under plain recency
+        # sorting: the newer awaiting_sla_response run must win over the
+        # older escalated one purely because it's newer, not because of any
+        # status-based ranking (which no longer exists).
         _seed_counterparty(session_factory, "CP-5", "Hall Financial")
         old_escalated = _summary(
             "CP-5",
@@ -658,18 +634,18 @@ class TestListMarginCallBuckets:
 
         assert result.buckets[0].latest.thread_id == "t-new-active"
 
-    def test_buckets_are_sorted_urgency_first(self, session_factory) -> None:
-        _seed_counterparty(session_factory, "CP-RESOLVED", "Resolved Co")
-        _seed_counterparty(session_factory, "CP-URGENT", "Urgent Co")
+    def test_buckets_are_sorted_most_recent_first(self, session_factory) -> None:
+        _seed_counterparty(session_factory, "CP-OLDER", "Older Co")
+        _seed_counterparty(session_factory, "CP-NEWER", "Newer Co")
         calls = [
             _summary(
-                "CP-RESOLVED",
+                "CP-NEWER",
                 "t1",
                 MarginCallLifecycleStatus.NO_BREACH,
                 datetime(2026, 8, 2, tzinfo=UTC),
             ),
             _summary(
-                "CP-URGENT",
+                "CP-OLDER",
                 "t2",
                 MarginCallLifecycleStatus.AWAITING_APPROVAL,
                 datetime(2026, 8, 1, tzinfo=UTC),
@@ -681,7 +657,7 @@ class TestListMarginCallBuckets:
         ):
             result = list_margin_call_buckets(MagicMock(), session)
 
-        assert [b.counterparty_id for b in result.buckets] == ["CP-URGENT", "CP-RESOLVED"]
+        assert [b.counterparty_id for b in result.buckets] == ["CP-NEWER", "CP-OLDER"]
 
     def test_falls_back_to_counterparty_id_if_name_unknown(self, session_factory) -> None:
         # No CounterpartyORM seeded for CP-GHOST.
