@@ -61,13 +61,8 @@ Historically this is done with **spreadsheets, email, and phone calls**, and it 
 
 ## High-level architecture
 
-**[`docs/architecture/functional-lifecycle.svg`](docs/architecture/functional-lifecycle.svg)** — the margin-call lifecycle as actually implemented in the LangGraph orchestrator: every node from `compute_exposure` through approval, notification, and SLA/escalation, color-coded by CLAUDE.md's golden rule (deterministic code vs. LLM reasoning/RAG vs. hybrid vs. the human-approval gate).
-
-<img src="docs/architecture/functional-lifecycle.svg" alt="MarginMaestro functional lifecycle diagram" width="100%" />
-
-**[`docs/architecture/tech-architecture.svg`](docs/architecture/tech-architecture.svg)** — the real, currently-deployed infrastructure: AWS (EC2 + Elastic IP, Secrets Manager, S3, IAM), Vercel, Azure SQL, the CI/CD pipeline, and the third-party integrations (OpenAI, Slack, ServiceNow), with a clearly separated box for what's local-dev-only (Kafka/Redpanda, OTel/Prometheus/Grafana) and not part of the live deployment.
-
-<img src="docs/architecture/tech-architecture.svg" alt="MarginMaestro technical architecture diagram" width="100%" />
+- **[`docs/architecture/functional-lifecycle.svg`](docs/architecture/functional-lifecycle.svg)** — the margin-call lifecycle as actually implemented in the LangGraph orchestrator: every node from `compute_exposure` through approval, notification, and SLA/escalation, color-coded by CLAUDE.md's golden rule (deterministic code vs. LLM reasoning/RAG vs. hybrid vs. the human-approval gate).
+- **[`docs/architecture/tech-architecture.svg`](docs/architecture/tech-architecture.svg)** — the real, currently-deployed infrastructure: AWS (EC2 + Elastic IP, Secrets Manager, S3, IAM), Vercel, Azure SQL, the CI/CD pipeline, and the third-party integrations (OpenAI, Slack, ServiceNow), with a clearly separated box for what's local-dev-only (Kafka/Redpanda, OTel/Prometheus/Grafana) and not part of the live deployment.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full written design.
 
