@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1760" height="1000" viewBox="0 0 1760 1000" font-family="Segoe UI, Arial, sans-serif">
+<title>MarginMaestro Margin Call Lifecycle</title>
+<rect x="0" y="0" width="1760" height="1000" fill="#ffffff"/>
+
+<defs>
+  <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="6.5" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+    <path d="M0,0 L7,3 L0,6 z" fill="#111111"/>
+  </marker>
+</defs>
+
+<text x="880.0" y="42.0" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="25" font-weight="700" fill="#1a1a1a">MarginMaestro — Margin Call Lifecycle</text>
+<text x="880.0" y="68.0" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="13.5" font-weight="400" fill="#6b6b6b">LangGraph-orchestrated agents. The LLM reasons, retrieves, and drafts — it never computes a number.</text>
+<rect x="47.0" y="147.0" width="86" height="86" rx="18" fill="#ffffff" fill-opacity="1" stroke="#5b5b5b" stroke-width="2"/>
+<g transform="translate(75.0,175.0) scale(1.2500)" fill="#5b5b5b"><path fill="currentColor" d="m16 11.78l4.24-7.33l1.73 1l-5.23 9.05l-6.51-3.75L5.46 19H22v2H2V3h2v14.54L9.5 8z"/></g>
+<text x="90.0" y="245.2" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">Market Event</text><text x="90.0" y="260.8" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">(price / vol / rating / news)</text>
+<rect x="217.0" y="147.0" width="86" height="86" rx="18" fill="#ffffff" fill-opacity="1" stroke="#0f766e" stroke-width="2"/>
+<g transform="translate(243.0,173.0) scale(1.4167)" fill="#0f766e"><path fill="currentColor" d="M17.5 15.5c0 1.11-.89 2-2 2s-2-.89-2-2s.9-2 2-2s2 .9 2 2m-9-2c-1.1 0-2 .9-2 2s.9 2 2 2s2-.89 2-2s-.89-2-2-2M23 15v3c0 .55-.45 1-1 1h-1v1c0 1.11-.89 2-2 2H5a2 2 0 0 1-2-2v-1H2c-.55 0-1-.45-1-1v-3c0-.55.45-1 1-1h1c0-3.87 3.13-7 7-7h1V5.73c-.6-.34-1-.99-1-1.73c0-1.1.9-2 2-2s2 .9 2 2c0 .74-.4 1.39-1 1.73V7h1c3.87 0 7 3.13 7 7h1c.55 0 1 .45 1 1m-2 1h-2v-2c0-2.76-2.24-5-5-5h-4c-2.76 0-5 2.24-5 5v2H3v1h2v3h14v-3h2z"/></g>
+<text x="260.0" y="245.2" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">Event Agent</text><text x="260.0" y="260.8" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">classify + map entities</text>
+<rect x="387.0" y="147.0" width="86" height="86" rx="18" fill="#ffffff" fill-opacity="1" stroke="#2563eb" stroke-width="2"/>
+<g transform="translate(413.0,173.0) scale(1.4167)" fill="#2563eb"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2m0 16H5V5h14zM6.2 7.7h5v1.5h-5zm6.8 8.1h5v1.5h-5zm0-2.6h5v1.5h-5zM8 18h1.5v-2h2v-1.5h-2v-2H8v2H6V16h2zm6.1-7.1l1.4-1.4l1.4 1.4l1.1-1l-1.4-1.4L18 7.1L16.9 6l-1.4 1.4L14.1 6L13 7.1l1.4 1.4L13 9.9z"/></g>
+<text x="430.0" y="245.2" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">Calculation Agent</text><text x="430.0" y="260.8" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">MTM · VM · IM (code only)</text>
+<rect x="557.0" y="147.0" width="86" height="86" rx="18" fill="#ffffff" fill-opacity="1" stroke="#7c3aed" stroke-width="2"/>
+<g transform="translate(583.0,173.0) scale(1.4167)" fill="#7c3aed"><path fill="currentColor" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h7c-.41-.25-.8-.56-1.14-.9c-.33-.33-.61-.7-.86-1.1H6V4h7v5h5v1.18c.71.16 1.39.43 2 .82V8zm6.31 16.9c1.33-2.11.69-4.9-1.4-6.22c-2.11-1.33-4.91-.68-6.22 1.4c-1.34 2.11-.69 4.89 1.4 6.22c1.46.93 3.32.93 4.79.02L22 23.39L23.39 22zm-3.81.1a2.5 2.5 0 0 1-2.5-2.5a2.5 2.5 0 0 1 2.5-2.5a2.5 2.5 0 0 1 2.5 2.5a2.5 2.5 0 0 1-2.5 2.5"/></g>
+<text x="600.0" y="245.2" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">CSA-RAG Agent</text><text x="600.0" y="260.8" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">threshold, MTA, collateral terms</text>
+<polygon points="760,155.0 810.0,190 760,225.0 710.0,190" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+<text x="760.0" y="188.0" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">Breach?</text>
+<rect x="897.0" y="147.0" width="86" height="86" rx="18" fill="#ffffff" fill-opacity="1" stroke="#b45309" stroke-width="2"/>
+<g transform="translate(923.0,173.0) scale(1.4167)" fill="#b45309"><path fill="currentColor" d="m21.1 12.5l1.4 1.41l-6.53 6.59L12.5 17l1.4-1.41l2.07 2.08zM11 4a4 4 0 0 1 4 4a4 4 0 0 1-4 4a4 4 0 0 1-4-4a4 4 0 0 1 4-4m0 2a2 2 0 0 0-2 2a2 2 0 0 0 2 2a2 2 0 0 0 2-2a2 2 0 0 0-2-2m0 7c.68 0 1.5.09 2.41.26l-1.67 1.67l-.74-.03c-2.97 0-6.1 1.46-6.1 2.1v1.1h6.2L13 20H3v-3c0-2.66 5.33-4 8-4"/></g>
+<text x="940.0" y="245.2" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">Human Approval Gate</text><text x="940.0" y="260.8" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">approve · reject · adjust</text>
+<rect x="1087.0" y="147.0" width="86" height="86" rx="18" fill="#ffffff" fill-opacity="1" stroke="#0f766e" stroke-width="2"/>
+<g transform="translate(1113.0,173.0) scale(1.4167)" fill="#0f766e"><path fill="currentColor" d="M12 3C6.5 3 2 6.58 2 11a7.22 7.22 0 0 0 2.75 5.5c0 .6-.42 2.17-2.75 4.5c2.37-.11 4.64-1 6.47-2.5c1.14.33 2.34.5 3.53.5c5.5 0 10-3.58 10-8s-4.5-8-10-8m0 14c-4.42 0-8-2.69-8-6s3.58-6 8-6s8 2.69 8 6s-3.58 6-8 6m5-5v-2h-2v2zm-4 0v-2h-2v2zm-4 0v-2H7v2z"/></g>
+<text x="1130.0" y="245.2" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">Communication Agent</text><text x="1130.0" y="260.8" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">draft + send Slack notice</text>
+<rect x="1257.0" y="147.0" width="86" height="86" rx="18" fill="#ffffff" fill-opacity="1" stroke="#2563eb" stroke-width="2"/>
+<g transform="translate(1283.0,173.0) scale(1.4167)" fill="#2563eb"><path fill="currentColor" d="M12 20a8 8 0 0 0 8-8a8 8 0 0 0-8-8a8 8 0 0 0-8 8a8 8 0 0 0 8 8m0-18a10 10 0 0 1 10 10a10 10 0 0 1-10 10C6.47 22 2 17.5 2 12A10 10 0 0 1 12 2m.5 5v5.25l4.5 2.67l-.75 1.23L11 13V7z"/></g>
+<text x="1300.0" y="245.2" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">SLA Timer</text><text x="1300.0" y="260.8" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">await counterparty response</text>
+<line x1="114.0" y1="190.0" x2="208.0" y2="190.0" stroke="#111111" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+<line x1="312.0" y1="190.0" x2="378.0" y2="190.0" stroke="#111111" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+<line x1="482.0" y1="190.0" x2="548.0" y2="190.0" stroke="#111111" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+<line x1="652.0" y1="190.0" x2="705.0" y2="190.0" stroke="#111111" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+<line x1="815.0" y1="190.0" x2="888.0" y2="190.0" stroke="#111111" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+<text x="850.0" y="174.0" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#2563eb">yes</text>
+<line x1="992.0" y1="190.0" x2="1078.0" y2="190.0" stroke="#111111" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+<text x="1035.0" y="174.0" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6b6b6b">standard tier</text>
+<line x1="1182.0" y1="190.0" x2="1248.0" y2="190.0" stroke="#111111" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+<circle cx="760" cy="400" r="34" fill="#ffffff" stroke="#178a3e" stroke-width="2.2"/>
+<g transform="translate(747.0,387.0) scale(1.0833)" fill="#178a3e"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10s10-4.5 10-10S17.5 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8s8 3.59 8 8s-3.59 8-8 8m4.59-12.42L10 14.17l-2.59-2.58L6 13l4 4l8-8z"/></g>
+<text x="760.0" y="452.0" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="600" fill="#178a3e">No breach — logged, no call</text>
+<line x1="760.0" y1="245.0" x2="760.0" y2="366.0" stroke="#111111" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+<text x="795.0" y="300.0" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#2563eb">no</text>
+<circle cx="940" cy="400" r="34" fill="#ffffff" stroke="#c0392b" stroke-width="2.2"/>
+<g transform="translate(927.0,387.0) scale(1.0833)" fill="#c0392b"><path fill="currentColor" d="M12 20c-4.41 0-8-3.59-8-8s3.59-8 8-8s8 3.59 8 8s-3.59 8-8 8m0-18C6.47 2 2 6.47 2 12s4.47 10 10 10s10-4.47 10-10S17.53 2 12 2m2.59 6L12 10.59L9.41 8L8 9.41L10.59 12L8 14.59L9.41 16L12 13.41L14.59 16L16 14.59L13.41 12L16 9.41z"/></g>
+<text x="940.0" y="452.0" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="600" fill="#c0392b">Rejected / adjusted — no call sent</text>
+<line x1="940.0" y1="242.0" x2="940.0" y2="366.0" stroke="#111111" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+<text x="985.0" y="300.0" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#c0392b">reject / adjust</text>
+<rect x="1052.0" y="302.0" width="76" height="76" rx="18" fill="#ffffff" fill-opacity="1" stroke="#b45309" stroke-width="2"/>
+<g transform="translate(1076.0,326.0) scale(1.1667)" fill="#b45309"><path fill="currentColor" d="M16.5 15.5c1.72 0 3.75.8 4 1.28v.72h-8v-.72c.25-.48 2.28-1.28 4-1.28m0-1.5c-1.83 0-5.5.92-5.5 2.75V19h11v-2.25c0-1.83-3.67-2.75-5.5-2.75M9 13c-2.33 0-7 1.17-7 3.5V19h7v-1.5H3.5v-1c0-.63 2.79-2.16 6.32-2a5.1 5.1 0 0 1 1.55-1.25A12.3 12.3 0 0 0 9 13m0-6.5A1.5 1.5 0 1 1 7.5 8A1.5 1.5 0 0 1 9 6.5M9 5a3 3 0 1 0 3 3a3 3 0 0 0-3-3m7.5 3.5a1 1 0 1 1-1 1a1 1 0 0 1 1-1m0-1.5A2.5 2.5 0 1 0 19 9.5A2.5 2.5 0 0 0 16.5 7"/></g>
+<text x="1090.0" y="390.2" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">2nd Sign-off</text><text x="1090.0" y="405.8" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">elite-tier counterparties only</text>
+<line x1="970.0" y1="220.0" x2="1080.0" y2="302.0" stroke="#9a9a9a" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrowhead)"/>
+<text x="1075.0" y="285.0" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6b6b6b">elite tier</text>
+<line x1="1120.0" y1="320.0" x2="1130.0" y2="236.0" stroke="#9a9a9a" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrowhead)"/>
+<rect x="562.0" y="362.0" width="76" height="76" rx="18" fill="#ffffff" fill-opacity="1" stroke="#2563eb" stroke-width="2"/>
+<g transform="translate(587.0,387.0) scale(1.0833)" fill="#2563eb"><path fill="currentColor" d="M5 6h18v12H5zm9 3a3 3 0 0 1 3 3a3 3 0 0 1-3 3a3 3 0 0 1-3-3a3 3 0 0 1 3-3M9 8a2 2 0 0 1-2 2v4a2 2 0 0 1 2 2h10a2 2 0 0 1 2-2v-4a2 2 0 0 1-2-2zm-8 2h2v10h16v2H1z"/></g>
+<text x="600.0" y="450.2" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">Collateral Optimizer</text><text x="600.0" y="465.8" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">cheapest-to-deliver proposal (supporting)</text>
+<line x1="600.0" y1="242.0" x2="600.0" y2="362.0" stroke="#9a9a9a" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrowhead)"/>
+<circle cx="1490" cy="100" r="34" fill="#ffffff" stroke="#178a3e" stroke-width="2.2"/>
+<g transform="translate(1477.0,87.0) scale(1.0833)" fill="#178a3e"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10s10-4.5 10-10S17.5 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8s8 3.59 8 8s-3.59 8-8 8m4.59-12.42L10 14.17l-2.59-2.58L6 13l4 4l8-8z"/></g>
+<text x="1490.0" y="152.0" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="600" fill="#178a3e">SLA met — confirmation sent, resolved</text>
+<path d="M 1347.0,167.7 Q 1396.7,127.6 1459.3,114.6" fill="none" stroke="#111111" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+<text x="1405.0" y="145.0" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="600" fill="#178a3e">met</text>
+<rect x="1450.0" y="220.0" width="80" height="80" rx="18" fill="#ffffff" fill-opacity="1" stroke="#c0392b" stroke-width="2"/>
+<g transform="translate(1475.0,245.0) scale(1.2500)" fill="#c0392b"><path fill="currentColor" d="M8.27 3L3 8.27v7.46L8.27 21h7.46C17.5 19.24 21 15.73 21 15.73V8.27L15.73 3M9.1 5h5.8L19 9.1v5.8L14.9 19H9.1L5 14.9V9.1m6 5.9h2v2h-2zm0-8h2v6h-2z"/></g>
+<text x="1490.0" y="312.2" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">Escalation Agent</text><text x="1490.0" y="327.8" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">RAG procedure + ServiceNow incident</text>
+<path d="M 1348.8,208.0 Q 1395.4,241.1 1452.5,246.2" fill="none" stroke="#111111" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+<text x="1405.0" y="232.0" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="600" fill="#c0392b">breached</text>
+<circle cx="1660" cy="260" r="34" fill="#ffffff" stroke="#c0392b" stroke-width="2.2"/>
+<g transform="translate(1647.0,247.0) scale(1.0833)" fill="#c0392b"><path fill="currentColor" d="M12 20c-4.41 0-8-3.59-8-8s3.59-8 8-8s8 3.59 8 8s-3.59 8-8 8m0-18C6.47 2 2 6.47 2 12s4.47 10 10 10s10-4.47 10-10S17.53 2 12 2m2.59 6L12 10.59L9.41 8L8 9.41L10.59 12L8 14.59L9.41 16L12 13.41L14.59 16L16 14.59L13.41 12L16 9.41z"/></g>
+<text x="1660.0" y="312.0" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="600" fill="#c0392b">Escalated</text>
+<line x1="1530.0" y1="260.0" x2="1626.0" y2="260.0" stroke="#111111" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+<rect x="1086.0" y="516.0" width="88" height="88" rx="18" fill="#ffffff" fill-opacity="1" stroke="#0f766e" stroke-width="2"/>
+<g transform="translate(1114.0,544.0) scale(1.3333)" fill="#0f766e"><path fill="currentColor" d="M12 3c-1.27 0-2.4.8-2.82 2H3v2h1.95L2 14c-.47 2 1 3 3.5 3s4.06-1 3.5-3L6.05 7h3.12c.33.85.98 1.5 1.83 1.83V20H2v2h20v-2h-9V8.82c.85-.32 1.5-.97 1.82-1.82h3.13L15 14c-.47 2 1 3 3.5 3s4.06-1 3.5-3l-2.95-7H21V5h-6.17C14.4 3.8 13.27 3 12 3m0 2a1 1 0 0 1 1 1a1 1 0 0 1-1 1a1 1 0 0 1-1-1a1 1 0 0 1 1-1m-6.5 5.25L7 14H4zm13 0L20 14h-3z"/></g>
+<text x="1130.0" y="616.2" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">Dispute &amp; Reconciliation Agent</text><text x="1130.0" y="631.8" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">diff trades, draft rationale via RAG over dispute history</text>
+<line x1="1130.0" y1="242.0" x2="1130.0" y2="520.0" stroke="#9a9a9a" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrowhead)"/>
+<text x="1240.0" y="453.2" text-anchor="start" font-family="Segoe UI, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6b6b6b">if the counterparty disputes</text><text x="1240.0" y="466.8" text-anchor="start" font-family="Segoe UI, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6b6b6b">the call, any time after notice</text>
+<line x1="60" y1="700" x2="1700" y2="700" stroke="#e3e3e3" stroke-width="1.2"/>
+<g transform="translate(77.0,727.0) scale(1.0833)" fill="#444444"><path fill="currentColor" d="M13 20.7c0 .46.1.9.27 1.3H6c-1.11 0-2-.89-2-2V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v6.11c-.32-.07-.66-.11-1-.11s-.68.04-1 .11V4h-5v8l-2.5-2.25L8 12V4H6v16h7zm10-3.4v3.5c0 .6-.6 1.2-1.3 1.2h-5.5c-.6 0-1.2-.6-1.2-1.3v-3.5c0-.6.6-1.2 1.2-1.2v-1.5c0-1.4 1.4-2.5 2.8-2.5s2.8 1.1 2.8 2.5V16c.6 0 1.2.6 1.2 1.3m-2.5-2.8c0-.8-.7-1.3-1.5-1.3s-1.5.5-1.5 1.3V16h3z"/></g>
+<text x="120.0" y="745.0" text-anchor="start" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#3a3a3a">Every step above is written to an immutable audit log, keyed by the run's correlation id — not skippable, not an agent decision.</text>
+<rect x="60" y="790" width="1640" height="60" rx="10" fill="#f7f7f5" fill-opacity="1" stroke="#e3e3e3" stroke-width="1"/>
+<text x="90.0" y="815.0" text-anchor="start" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700" fill="#1a1a1a">Golden rule:</text>
+<text x="90.0" y="835.0" text-anchor="start" font-family="Segoe UI, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#3a3a3a">no client-facing margin call is ever fired without the human approval gate above.</text>
+<rect x="90" y="888" width="16" height="16" rx="4" fill="#2563eb"/>
+<text x="114.0" y="900.0" text-anchor="start" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="400" fill="#2a2a2a">Code — deterministic (math, routing)</text>
+<rect x="391.6" y="888" width="16" height="16" rx="4" fill="#7c3aed"/>
+<text x="415.6" y="900.0" text-anchor="start" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="400" fill="#2a2a2a">LLM — reasoning / RAG / drafting</text>
+<rect x="666.8" y="888" width="16" height="16" rx="4" fill="#0f766e"/>
+<text x="690.8" y="900.0" text-anchor="start" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="400" fill="#2a2a2a">Hybrid — code + LLM</text>
+<rect x="856.1999999999999" y="888" width="16" height="16" rx="4" fill="#b45309"/>
+<text x="880.2" y="900.0" text-anchor="start" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="400" fill="#2a2a2a">Human-in-the-loop gate</text>
+</svg>
