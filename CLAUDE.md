@@ -62,6 +62,7 @@ make simulate SCENARIO=price_shock   # inject a synthetic market event
 
 - `docs/ARCHITECTURE.md` — lifecycle, agent mesh, streaming, data flow.
 - `docs/AGENTS.md` — each agent's responsibility, inputs, outputs, tools.
+- `docs/AGENT_ORCHESTRATION_FAQ.md` — code vs. LLM breakdown per component, and why the real (live-feed) trigger path runs the identical agent trace as the simulator.
 - `docs/DATA_SOURCES.md` — structured vs unstructured data map + free sources.
 - `docs/ROADMAP.md` — phased plan, mapped to Jira epics/stories with DoD.
 - `docs/PROGRESS.md` — **living handoff log; update at the end of every story.**

@@ -64,7 +64,7 @@ Historically this is done with **spreadsheets, email, and phone calls**, and it 
 - **[`docs/architecture/functional-lifecycle.svg`](docs/architecture/functional-lifecycle.svg)** — the margin-call lifecycle as actually implemented in the LangGraph orchestrator: every node from `compute_exposure` through approval, notification, and SLA/escalation, color-coded by CLAUDE.md's golden rule (deterministic code vs. LLM reasoning/RAG vs. hybrid vs. the human-approval gate).
 - **[`docs/architecture/tech-architecture.svg`](docs/architecture/tech-architecture.svg)** — the real, currently-deployed infrastructure: AWS (EC2 + Elastic IP, Secrets Manager, S3, IAM), Vercel, Azure SQL, the CI/CD pipeline, and the third-party integrations (OpenAI, Slack, ServiceNow), with a clearly separated box for what's local-dev-only (Kafka/Redpanda, OTel/Prometheus/Grafana) and not part of the live deployment.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full written design.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full written design, and [`docs/AGENT_ORCHESTRATION_FAQ.md`](docs/AGENT_ORCHESTRATION_FAQ.md) for which parts are deterministic code vs. LLM-driven, and what happens end-to-end when a real (not simulated) market move triggers a run.
 
 ## Tech stack
 
@@ -107,6 +107,7 @@ MarginMaestro/
     ├── DATA_SOURCES.md       # Structured vs unstructured data map + free sources
     ├── ROADMAP.md            # Phased, Jira-ready plan (epics/stories/DoD)
     ├── PROGRESS.md           # Living handoff log — updated at end of every task
+    ├── AGENT_ORCHESTRATION_FAQ.md  # Code vs. LLM breakdown; real vs. simulated trigger parity
     ├── architecture/         # Functional lifecycle + technical architecture diagrams (see above)
     └── adr/                  # Architecture Decision Records
         ├── 0001-record-architecture-decisions.md
