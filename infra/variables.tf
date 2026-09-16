@@ -23,7 +23,7 @@ variable "app_env" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type for the app box (runs the API + Chroma via Docker Compose). t3.small comfortably covers both containers; the app's URL is always-on (linked from a resume), so this isn't scaled to zero between uses."
+  description = "EC2 instance type for the app box (runs the API + Chroma via Docker Compose). Downsized from t3.small to t3.micro (2026-09-16, AWS cost reduction pass) -- measured live usage was ~245MB (app) + ~20MB (chroma) + ~320MB OS/Docker overhead against t3.small's 2GB, comfortably fitting t3.micro's 1GB with headroom; t3.nano's 512MB was ruled out since OS/Docker overhead alone exceeds it. The app's URL is still always-on (linked from a resume), so this isn't scaled to zero between uses -- only the instance size changed, not the always-on architecture."
   type        = string
-  default     = "t3.small"
+  default     = "t3.micro"
 }

@@ -171,6 +171,19 @@ resource "aws_instance" "app" {
   tags = {
     Name = "marginmaestro-${var.app_env}-app"
   }
+
+  # data.aws_ami.al2023 re-resolves to whatever AL2023 build is "most recent"
+  # on every plan -- that drifts from the AMI this instance actually launched
+  # with, and `ami` forces replacement, so an unguarded apply would destroy
+  # and recreate this live instance (fresh EBS root volume, re-run user_data,
+  # new instance ID) just because a newer AL2023 AMI shipped. Found 2026-09-16
+  # while resizing to t3.micro: `terraform plan` showed `-/+ replace` from AMI
+  # drift alone, unrelated to the instance_type change being made. Ignore it;
+  # a deliberate AMI upgrade should be a conscious `terraform taint`/replace,
+  # not an incidental side effect of an unrelated attribute change.
+  lifecycle {
+    ignore_changes = [ami]
+  }
 }
 
 resource "aws_eip" "app" {
