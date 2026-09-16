@@ -28,7 +28,7 @@ dev = [
     "moto",
     "testcontainers[kafka]",
 ]
-rag = ["chromadb", "mcp<2.0"]
+rag = ["chromadb-client", "mcp<2.0"]
 streaming = ["confluent-kafka"]
 llm = ["langgraph", "openai"]
 data = ["yfinance", "pandas", "fredapi", "faker"]
