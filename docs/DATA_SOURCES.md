@@ -54,6 +54,8 @@ These feed the vector store and are what the RAG agents reason over. Each docume
 | **Historical margin dispute notes** | Precedent for resolving disputes (retrieve similar past cases) — tied to specific past events, not 1:1 per counterparty | Synthetic corpus | Reconciliation | Phase 7 |
 | **SIMM / IM methodology** | Reference notes on the IM proxy's methodology — not currently queried by any agent | ISDA SIMM public methodology + synthetic notes | (deferred — no consumer yet) | Deferred |
 
+> **Planned change (Phase 13, optional, not yet built):** the "Client / master agreement" row above reflects today's design — master-agreement terms are said to be "folded into" the CSA document, but no actual master-agreement content (events of default, close-out netting, termination events, governing law) exists in any seeded document; only CSA collateral mechanics do. Phase 13 plans to seed real ISDA Master Agreement documents as a distinct `doc_type=isda`, at which point this row should be split into two.
+
 ### 2a. Document corpus & storage (decided Phase 3 planning, 2026-07-26)
 
 - **9 documents total for Phase 3:** 8 per-counterparty CSA docs (`src/rag/csa_corpus.py`, seeded/reproducible — threshold, MTA, eligible collateral, haircuts, and rating triggers all *vary* per counterparty, so retrieval is a real test, not a lookup table in disguise) + 1 shared, hand-authored margin policy doc.
