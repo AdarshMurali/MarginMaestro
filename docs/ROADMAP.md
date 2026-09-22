@@ -194,6 +194,28 @@ Goal: an empty-but-production-grade skeleton — anything you build after this i
 
 **Exit criteria:** the same solution runs unmodified (config-only differences) on an open-source Kubernetes distribution, demonstrating platform portability.
 
+## Phase 13 — OPTIONAL: ISDA Master Agreement layer (Epic: MM-EPIC-13)
+
+> Added 2026-09-22, prompted by a hackathon-fit question: does MarginMaestro model both the ISDA Master Agreement and the CSA, or only the CSA? Today it's CSA-only — Phase 3's design (`docs/DATA_SOURCES.md` §2, "Client / master agreement" row) deliberately folded master-agreement terms into the CSA document as one family, but no actual master-agreement content (events of default, close-out netting, termination events, governing law) exists in any seeded document — only CSA collateral mechanics (threshold/MTA/eligible collateral/haircuts/rating triggers) do. Modeling the full two-document legal relationship is real, differentiating capital-markets depth for a submission audience, not required for the margin-call math itself (which only ever needs CSA terms, per ADR-0005).
+
+- **MM-130** Seed real ISDA Master Agreement documents (one per counterparty, or one shared template with counterparty-specific schedule terms — mirrors real practice): events of default, close-out netting, termination events, governing law. New `data/documents/isda/`, tagged `doc_type=isda` in Chroma metadata, S3-backed like the existing CSA corpus.
+- **MM-131** Extend retrieval so a query can span both documents for one counterparty (e.g., "is CP-3 in default under its ISDA Master, and does that change its CSA threshold?") — either widen CSA-RAG's scope or add a small, distinct Agreement-RAG agent; decide based on how much the two documents' answers actually need combining once real content exists.
+- **MM-132** Update `docs/DATA_SOURCES.md`'s "Client / master agreement" row to reflect the real design once built (currently says "folded into the CSA document itself," which will no longer be accurate).
+- **MM-133** Tests: retrieval precision on seeded ISDA questions; citation presence; confirm the CSA-only margin-call math path is unaffected (ISDA terms are informational/reasoning-only, never consumed by `calc/`, matching ADR-0005).
+
+**Exit criteria:** a question spanning both documents ("what happens to CP-X's collateral obligations if its ISDA Master's events-of-default clause is triggered?") returns a correct, cited answer grounded in both documents.
+
+## Phase 14 — OPTIONAL: GCP portability for a hackathon submission (Epic: MM-EPIC-14)
+
+> Added 2026-09-22, for a Google-Cloud-themed BFSI hackathon entry. Same spirit as Phase 12's OKD phase: **additive portability, not a replacement** for the primary AWS deployment — `CLAUDE.md`'s AWS/OpenAI/Azure SQL stack stays the system of record; this is a parallel target for one submission. Deliberately scoped to the pieces judges are most likely to check (LLM provider, compute host); a full re-platform (Pub/Sub replacing Kafka, BigQuery/AlloyDB replacing Azure SQL) is explicitly out of scope by default per `CLAUDE.md`'s "don't swap [core stack] without an ADR" rule — nothing here changes the primary stack, it only adds an alternate target.
+
+- **MM-140** Add `gemini`/`vertex` as a third `LLM_PROVIDER` option in `Settings`, alongside the existing `openai`/`ollama` branches (ADR-0006) — reasoning + drafting calls only; no change to embeddings or the deterministic calc layer.
+- **MM-141** Deploy the existing Dockerized FastAPI API to **Cloud Run** as a parallel target to the AWS EC2 deployment (Phase 10) — same image, config-only differences (secrets via Google Secret Manager or env vars instead of AWS Secrets Manager).
+- **MM-142** (Stretch) Swap ChromaDB for **Vertex AI Search** as the RAG backend, if time allows — same retriever interface (`src/rag/retriever.py`), different vector store underneath.
+- **MM-143** (Stretch, out of scope unless a specific judging requirement demands it) Pub/Sub in place of Kafka/Redpanda, BigQuery/AlloyDB in place of Azure SQL.
+
+**Exit criteria:** the same margin-call lifecycle runs end to end on Gemini + Cloud Run, demoable for the hackathon submission, without disturbing the AWS deployment.
+
 ---
 
 ## Milestones for the resume story
