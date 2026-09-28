@@ -67,6 +67,7 @@ make simulate SCENARIO=price_shock   # inject a synthetic market event
 - `docs/ROADMAP.md` — phased plan, mapped to Jira epics/stories with DoD.
 - `docs/PROGRESS.md` — **living handoff log; update at the end of every story.**
 - `docs/adr/` — architecture decision records (the *why* behind choices).
+- `docs/gcp/` — GCP migration track: `GCP_ROADMAP.md` (plan), `GCP_PROGRESS.md` (its own handoff log — GCP stories log there, not in `PROGRESS.md`), `adr/` (ADR-0008+).
 
 ## Handoff protocol
 
