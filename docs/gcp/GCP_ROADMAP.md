@@ -45,7 +45,7 @@
 | 21 | **Cloud Logging / Trace / Monitoring** | Structured JSON logs, OTel traces (one span per lifecycle step), metrics + alerts | Jaeger / Prometheus / Grafana (deployed env) | G5 | Low (free quotas) |
 | 22 | **Cloud Audit Logs** | Admin + data-access logs on Cloud SQL, BigQuery, GCS, Secret Manager | — (new) | G8 | Low |
 | 23 | **IAM + Workload Identity Federation** | Least-privilege service account per service; keyless GitHub Actions deploys | AWS IAM | G0 | Free |
-| 24 | **Cloud Billing budgets + kill-switch function** | $50 cumulative trial budget (usage before credits), alerts at $1/$10/$25/$40, automatic billing detach at $50 | — (new) | G0 | Free |
+| 24 | **Cloud Billing budgets + kill-switch function** | $150 (₹12,600) cumulative trial budget (usage before credits), alerts at ≈ $25/$50/$75/$100/$125, automatic billing detach at $150 | — (new) | G0 | Free |
 | — | *Non-GCP:* WhatsApp Business Cloud API | Client-facing margin-call notices + replies | Slack (client side only) | G6 | $0 (test number, ≤ 5 recipients) |
 | — | *Non-GCP, unchanged:* Slack, ServiceNow PDI, GitHub Actions, SonarCloud, Terraform | Internal ops alerts, SLA escalation incidents, CI, quality, IaC | — | — | Free |
 
@@ -56,7 +56,7 @@
 ### Phase G0 — GCP foundation & cost guardrails (Epic: MM-87)
 ADRs: 0008, 0017
 
-- **MM-G01** (MM-98) GCP billing budget — **$50 cumulative for the trial, counting usage before credits**, alerts at $1/$10/$25/$40 — and **billing kill-switch** at $50 (budget → Pub/Sub → function that detaches billing). Verified with a test notification in dry-run mode.
+- **MM-G01** (MM-98) GCP billing budget — **$150 (₹12,600) cumulative for the trial, counting usage before credits**, alerts at ≈ $25/$50/$75/$100/$125 — and a live **billing kill-switch** at $150 (budget → Pub/Sub → function that detaches billing). Verified with a test notification in dry-run mode first.
 - **MM-G02** Terraform `infra/gcp/`: enabled APIs, one service account per service, least-privilege IAM, a module per provider with `enable_*` toggles.
 - **MM-G03** Workload Identity Federation for GitHub Actions; CI pushes images to **Artifact Registry**.
 - **MM-G04** **Secret Manager** source in `src/config/` (replaces `secrets_manager.py`'s AWS source behind the same `Settings` interface; `SECRETS_SOURCE=gcp|aws|env`).

@@ -4,6 +4,12 @@ Terraform for GCP (project `marginmaestro-demo`, region `us-central1`). Plan: `d
 
 Prerequisites: gcloud configuration `marginmaestro` active, and Application Default Credentials set (`gcloud auth application-default login` + `set-quota-project marginmaestro-demo`).
 
+Local, gitignored `terraform.tfvars` (the repo is public):
+
+```hcl
+budget_alert_emails = ["you@example.com"]
+```
+
 ## First-time setup
 
 ```bash
@@ -28,3 +34,4 @@ terraform -chdir=infra/gcp apply
 - `outputs.tf` — project, region, service account emails.
 
 CI (`terraform-gcp` job) runs `fmt -check` and `validate` on both roots with `-backend=false`, so it needs no GCP credentials.
+- `billing_killswitch.tf` — trial budget (₹12,600 ≈ $150, usage before credits, alerts at ≈ $25/$50/$75/$100/$125), Pub/Sub `billing-alerts`, and the live `billing-killswitch` function (code: `src/ops/billing_killswitch.py`) that unlinks billing at 100%.
