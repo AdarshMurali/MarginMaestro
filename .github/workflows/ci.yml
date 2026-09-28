@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege for GITHUB_TOKEN: every job only needs to read the repo.
+# A job that needs more (e.g. id-token: write for GCP WIF in MM-100) must
+# ask for it explicitly at job level.
+permissions:
+  contents: read
+
 jobs:
   lint-test:
     runs-on: ubuntu-latest
