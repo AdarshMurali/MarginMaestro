@@ -149,6 +149,7 @@ ADR: 0015
 - **MM-G84** Data quality: fail-loud ingestion checks in code + **Dataplex data-quality scans** on BigQuery.
 - **MM-G85** **Sensitive Data Protection** scans on GCS documents and BigQuery tables.
 - **MM-G86** **Cloud Audit Logs** (data access) on Cloud SQL, BigQuery, GCS, Secret Manager; retention policies (GCS bucket retention, BigQuery table expiration); append-only audit enforced by DB grants.
+- **MM-G88** **Security scanning in CI** (free alternatives to Black Duck / Checkmarx). Already on since 2026-09-28 via repo settings: Dependabot alerts + grouped security updates, CodeQL default setup (SAST), secret scanning + push protection. This story adds a `security` CI job: **Trivy** (container image CVEs, licence scan, Terraform misconfig), **pip-audit** (Python deps — Dependabot can't check them while `pyproject.toml` is unpinned), **gitleaks** (secrets in diffs), **Checkov** (Terraform), plus a licence allow-list that fails on GPL/AGPL. Findings uploaded as SARIF to the Security tab.
 - **MM-G87** Governance docs: section in `docs/ARCHITECTURE.md` and `docs/DATA_SOURCES.md`; tests for each quality, masking and classification rule.
 
 **Exit:** every dataset has an owner and class; any call is traceable to its source data and cited documents; bad data is rejected loudly; confidential fields never reach the LLM unmasked.
