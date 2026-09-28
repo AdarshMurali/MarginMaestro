@@ -54,6 +54,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 - **Cost impact:** none — state bucket (KB-sized) is inside the 5 GB always-free tier; APIs and service accounts are free.
 - **Known issues / tech debt:** project sits outside the `lavanyaasha71-org` organization (created via gcloud with no parent) — fine for the demo, no org policies apply.
 - **Next step:** MM-98 — budget alerts + billing kill-switch.
+- **Follow-up (same day, docs):** ADR-0010 and ADR-0014 amended to adopt Agent Platform's governance layer (Agent Identity, Agent Gateway with deny-by-default tool policies + Model Armor, Semantic Governance Policies) — new roadmap stories MM-G37 (G3) and MM-G56 (G5); pricing to be confirmed before enabling. ADR-0017 amended: kill-switch at **$50 cumulative for the trial**, budget counts usage before credits, alerts at $1/$10/$25/$40 (user decision; expected trial usage ~$25–60).
 
 ### 2026-09-28 — GCP track planning (no story key)
 - **Done:** GCP migration plan agreed with the user. Wrote `docs/gcp/GCP_ROADMAP.md` (service catalog + Phases G0–G10) and ADR-0008 … ADR-0017. Moved all GCP docs into `docs/gcp/`; merged the earlier drafts (`GCP_MIGRATION.md`, `GCP_DEPLOYMENT_PLAN.md`) into the roadmap's *Background notes* and removed them. Marked old ROADMAP Phases 14/15 superseded and Phase 16 dropped; ADR-0004 and ADR-0006 superseded.

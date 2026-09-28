@@ -23,6 +23,9 @@
 | 2 | **Vertex AI – Gemini (Flash)** | Reasoning: CSA interpretation, dispute rationale, impact judgment, drafting notice text | OpenAI `gpt-4o-mini` | G2 | Medium → AI Studio free tier / OpenAI |
 | 3 | **Vertex AI – `gemini-embedding-001`** | Embeddings for the RAG corpus and queries (768 dims) | `text-embedding-3-small` | G2 | Medium → same as above |
 | 4 | **Vertex AI Agent Engine** (Agent Platform) | Managed runtime for the LangGraph orchestrator; sessions, tracing | in-process graph in the API | G5 | High → in-process on Cloud Run |
+| 4a | **Agent Identity** (Agent Platform) | Per-agent identity instead of a shared service account; every tool call audited to the agent | shared service account | G5 | Low |
+| 4b | **Agent Gateway** (Agent Platform) | Single control point for agent → MCP tool / Gemini traffic; deny-by-default IAM tool policies; Model Armor attached | direct tool calls | G3, G5 | Unknown (pricing not published) → in-code tool allow-list |
+| 4c | **Semantic Governance Policies** (Agent Platform) | Plain-language runtime rules, e.g. no client notification without a recorded approval | — (new) | G3 | Unknown (billing starts later in 2026) → in-code approval check |
 | 5 | **Vertex AI Gen AI evaluation** | Golden-scenario evaluation: tool trajectory, grounding, citation coverage | — (new) | G5 | Low (on-demand only) |
 | 6 | **Cloud SQL for PostgreSQL** | Transactional store: counterparties, trades, exposures, calls, approvals, audit, LangGraph checkpoints; **row-level security** | Azure SQL | G1 | **High** → Neon / Supabase free Postgres |
 | 7 | **pgvector** (in Cloud SQL) | RAG vector store with metadata filters; RLS applies to retrieval | ChromaDB | G1, G2 | same as Cloud SQL |
@@ -42,7 +45,7 @@
 | 21 | **Cloud Logging / Trace / Monitoring** | Structured JSON logs, OTel traces (one span per lifecycle step), metrics + alerts | Jaeger / Prometheus / Grafana (deployed env) | G5 | Low (free quotas) |
 | 22 | **Cloud Audit Logs** | Admin + data-access logs on Cloud SQL, BigQuery, GCS, Secret Manager | — (new) | G8 | Low |
 | 23 | **IAM + Workload Identity Federation** | Least-privilege service account per service; keyless GitHub Actions deploys | AWS IAM | G0 | Free |
-| 24 | **Cloud Billing budgets + kill-switch function** | $1 alert and automatic billing detach if spend crosses the threshold | — (new) | G0 | Free |
+| 24 | **Cloud Billing budgets + kill-switch function** | $50 cumulative trial budget (usage before credits), alerts at $1/$10/$25/$40, automatic billing detach at $50 | — (new) | G0 | Free |
 | — | *Non-GCP:* WhatsApp Business Cloud API | Client-facing margin-call notices + replies | Slack (client side only) | G6 | $0 (test number, ≤ 5 recipients) |
 | — | *Non-GCP, unchanged:* Slack, ServiceNow PDI, GitHub Actions, SonarCloud, Terraform | Internal ops alerts, SLA escalation incidents, CI, quality, IaC | — | — | Free |
 
@@ -53,7 +56,7 @@
 ### Phase G0 — GCP foundation & cost guardrails (Epic: MM-87)
 ADRs: 0008, 0017
 
-- **MM-G01** GCP project, billing budget ($1 + 50/90% of credits) and **billing kill-switch** (budget → Pub/Sub → function that detaches billing). Verified with a test notification.
+- **MM-G01** (MM-98) GCP billing budget — **$50 cumulative for the trial, counting usage before credits**, alerts at $1/$10/$25/$40 — and **billing kill-switch** at $50 (budget → Pub/Sub → function that detaches billing). Verified with a test notification in dry-run mode.
 - **MM-G02** Terraform `infra/gcp/`: enabled APIs, one service account per service, least-privilege IAM, a module per provider with `enable_*` toggles.
 - **MM-G03** Workload Identity Federation for GitHub Actions; CI pushes images to **Artifact Registry**.
 - **MM-G04** **Secret Manager** source in `src/config/` (replaces `secrets_manager.py`'s AWS source behind the same `Settings` interface; `SECRETS_SOURCE=gcp|aws|env`).
@@ -86,7 +89,8 @@ ADR: 0009
 ADR: 0014
 
 - **MM-G31** `Guardrail` pipeline wrapped around every LLM call (pre + post), failing closed.
-- **MM-G32** **Model Armor** templates: prompt injection / jailbreak, malicious URLs, responsible-AI filters; applied to client replies, retrieved chunks and model outputs.
+- **MM-G32** **Model Armor** templates: prompt injection / jailbreak, malicious URLs, responsible-AI filters; attached to **Agent Gateway** (every prompt and tool response) and called directly for text outside the gateway (WhatsApp webhook).
+- **MM-G37** **Semantic Governance Policies**: plain-language runtime rules (no client notification without a recorded approval; no amounts in drafts that don't match calc output). Confirm pricing first; in-code equivalents stay either way.
 - **MM-G33** **Sensitive Data Protection** de-identification before LLM calls and RAG indexing; data-class filter (only allowed classes reach the model).
 - **MM-G34** Output validation: any amount / date / counterparty in drafted text must exactly match calc output; uncited RAG claims rejected.
 - **MM-G35** Cost / loop limits: per-run token cap, max agent steps, per-user rate limit.
@@ -107,7 +111,8 @@ ADR: 0012
 ### Phase G5 — Agent Platform, Cloud Run deployment, observability (Epic: MM-92)
 ADRs: 0008, 0010
 
-- **MM-G51** Deploy the LangGraph orchestrator to **Vertex AI Agent Engine**; API calls it for simulate / approve / resume (`AGENT_RUNTIME=agent_engine|cloudrun`).
+- **MM-G51** Deploy the LangGraph orchestrator to **Vertex AI Agent Engine**; API calls it for simulate / approve / resume (`AGENT_RUNTIME=agent_engine|cloudrun`). Check idle pricing first (does it keep an instance warm?).
+- **MM-G56** **Agent Identity** for the orchestrator + **Agent Gateway** in front of all MCP servers and Gemini, with deny-by-default IAM tool policies per agent; MCP servers registered behind the gateway.
 - **MM-G52** API + MCP servers on **Cloud Run** (min-instances 0), connected to Cloud SQL, Secret Manager and Pub/Sub.
 - **MM-G53** Frontend on **Cloud Run** (HTTPS by default, which removes the mixed-content rewrite workaround); Vercel kept as fallback.
 - **MM-G54** OTel → **Cloud Trace**, JSON logs → **Cloud Logging**, metrics + alerts in **Cloud Monitoring** (SLA breaches, guardrail blocks, error rate).
@@ -187,6 +192,7 @@ Raised by the user 2026-09-28. Not scheduled into a phase yet; pick up after G8,
 - **Gemini Live API** voice notifications — rejected (ADR-0009).
 - **Vertex AI Vector Search, Vertex AI RAG Engine, AlloyDB** — rejected on cost (ADR-0011).
 - **Rewriting agents in ADK** — rejected; LangGraph stays (ADR-0010).
+- **Agent Platform's RAG Engine and Vector Search** — rejected: paid/always-on and can't apply our row-level security; pgvector instead (ADR-0010, ADR-0011).
 - **Flink** — still deferred (ADR-0003).
 
 ---
