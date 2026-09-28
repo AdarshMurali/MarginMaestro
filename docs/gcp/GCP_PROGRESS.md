@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0 (MM-87) in progress — MM-99 (Terraform foundation) done; next MM-98 (budget + kill-switch).
+- **Phase:** G0 (MM-87) in progress — MM-99 (Terraform foundation) and MM-98 (budget + kill-switch) done; next MM-100 (WIF + Artifact Registry).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
 - **Jira:** epics created 2026-09-28 — G0 MM-87 … G10 MM-97 (label `gcp`). Stories are created when each phase starts. G0 stories: MM-98 (G01 budget/kill-switch), MM-99 (G02 Terraform), MM-100 (G03 WIF + Artifact Registry), MM-101 (G04 Secret Manager), MM-102 (G05 adapter interfaces). Note: MM-100..102 were also *placeholder* keys in the old ROADMAP Phase 10 — those stories got real keys MM-81..85, so the real MM-100..102 are the G0 stories.
@@ -26,7 +26,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 | Phase | Epic | Scope | Status |
 |---|---|---|---|
-| G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | In progress (MM-99 done) |
+| G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | In progress (MM-99, MM-98 done) |
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | Not started |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | Not started |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | Not started |
@@ -42,9 +42,18 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 | Date | Credits used | Biggest spenders | Action |
 |---|---|---|---|
-| — | — | — | — |
+| 2026-09-28 | ₹0 (first real budget notification) | — | Kill-switch deployed, dry run |
 
 ## Log
+
+### 2026-09-28 — MM-98: Budget alerts + billing kill-switch
+- **Done:** Trial budget `marginmaestro-demo trial kill-switch`: **₹4,200** (≈ $50), one cumulative period 2026-09-28 → 2026-12-27, counts usage **before credits** (`EXCLUDE_ALL_CREDITS`), email alerts at 2/20/50/80/100% (~₹84 / ₹840 / ₹2,100 / ₹3,360 / ₹4,200). Budget notifications → Pub/Sub `billing-alerts` → Cloud Run function `billing-killswitch` (Python 3.12, max 1 instance, internal ingress, retry on failure) → unlinks billing when cost ≥ budget. Deployed in **dry run** (`DRY_RUN=true`). Applied by the user.
+- **Decisions:** Billing account currency is **INR**, so the $50 cap became ₹4,200 (budgets must use the account currency). Least privilege: `mm-killswitch-sa` gets **Project Billing Manager** on the project (exactly create/deleteBillingAssignment) instead of Google's documented Billing Account Administrator. Function code lives in `src/ops/billing_killswitch.py` and Terraform packages that same file as `main.py`, so the deployed code is what CI lints/tests. Dedicated `mm-build-sa` for builds (logWriter, artifactregistry.writer, project-level storage.objectViewer). Provider now sets `user_project_override`/`billing_project` (Budgets API rejects ADC without a quota project). New `gcp` extra in `pyproject.toml` (google-cloud-billing, functions-framework), installed in CI.
+- **Changed:** `src/ops/` (new), `tests/unit/test_billing_killswitch.py` (16 tests), `infra/gcp/billing_killswitch.tf` (new), `infra/gcp/{providers,variables,service_accounts}.tf`, lock file (+ hashicorp/archive 2.8.1), `pyproject.toml`, `.github/workflows/ci.yml`, `.gitignore`.
+- **Verified:** 545 passed, coverage 98% (kill-switch 100%); ruff/black/mypy clean; `terraform plan -detailed-exitcode` → no changes. End to end: a fake ₹5,000 notification published to `billing-alerts` logged `CRITICAL Budget reached; billing NOT unlinked (dry run)` (13:54 UTC); the first real Cloud Billing notification logged `INFO Spend within budget; no action` with cost ₹0 (14:12 UTC).
+- **Cost impact:** none expected — Pub/Sub, Cloud Run functions, Cloud Build and Artifact Registry usage are within always-free quotas; source bucket objects auto-delete after 30 days.
+- **Known issues / tech debt:** (1) First apply failed: Cloud Functions copies source into its own `gcf-v2-sources-<number>-us-central1` bucket, which the build account couldn't read — fixed with project-level objectViewer (the bucket doesn't exist before the first deploy, so a bucket-scoped grant isn't possible). (2) Fixed a `.gitignore` bug from MM-99: the appended `*.tfplan` had merged into the `.claude/settings.local.json` line, breaking both rules (no `.claude/` files were committed meanwhile). (3) Kill-switch is still in dry run — until `killswitch_dry_run = false` is applied, reaching the budget only alerts, it doesn't stop spend. (4) PowerShell splits `-out=file.ext` flags; quote them (`"-out=mm98.tfplan"`).
+- **Next step:** user decides on switching the kill-switch live; then MM-100 (Workload Identity Federation + Artifact Registry).
 
 ### 2026-09-28 — MM-99: Terraform foundation for GCP
 - **Done:** New Terraform root `infra/gcp/` (AWS `infra/` untouched). `infra/gcp/bootstrap/` created the remote-state bucket `marginmaestro-demo-tfstate` (us-central1, versioned, public access prevention enforced, old versions pruned) — applied by the user. Foundation applied by the user from a saved plan: 9 APIs, 6 service accounts (`mm-api-sa`, `mm-agent-sa`, `mm-mcp-sa`, `mm-events-sa`, `mm-ci-sa`, `mm-killswitch-sa`), 12 telemetry role bindings (logWriter / cloudtrace.agent / metricWriter on the 4 runtime accounts). New CI job `terraform-gcp` (fmt -check + validate on both roots, no credentials needed).
