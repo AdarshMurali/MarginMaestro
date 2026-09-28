@@ -183,6 +183,8 @@ All services are **containerized** (Docker), images pushed to **Docker Hub**, de
 
 **Security & secrets.** No secrets in code; all via AWS Parameter Store (SecureString) in deployed envs, `.env` locally. Least-privilege IAM for AWS resources. Slack/ServiceNow tokens scoped minimally.
 
+**Supply-chain & code security (ADR-0018).** GitHub CodeQL runs static analysis (Python, TypeScript, GitHub Actions) on every push/PR to `main` and weekly; Dependabot raises alerts for vulnerable dependencies and opens grouped fix PRs; secret scanning with push protection blocks commits containing recognised tokens. CI's `GITHUB_TOKEN` is read-only by default. First scan (MM-103) found and fixed 4 CodeQL and 23 Dependabot alerts. Planned (MM-G88): a CI `security` job with Trivy, pip-audit, Checkov, gitleaks and a licence allow-list.
+
 **Observability.** Structured JSON logging with a per-run correlation id; every agent action logged. Health/readiness endpoints on the API. **Done (MM-74):** OpenTelemetry traces (one span per orchestrator lifecycle step) exported to a `jaeger` container, a `GET /metrics` Prometheus endpoint, and a provisioned Grafana dashboard visualizing agent activity (step rate/errors/duration, breach rate, approval decisions).
 
 **Audit trail.** Every lifecycle step (event → decision → notification → escalation) is written to an immutable audit table in Azure SQL. This is a first-class output, not an afterthought — it is what makes the workflow defensible.

@@ -29,7 +29,7 @@ It is a **portfolio / proof-of-concept** built to production-engineering standar
 - **API:** FastAPI. **Frontend:** Next.js on Vercel.
 - **Tools exposed as MCP servers:** market data, Slack, ServiceNow, RAG retriever. (Jira is this project's own dev-story tracker, not an agent-facing tool — see `docs/adr/0007`; it has no MCP server.)
 - **Notifications:** Slack. **Escalation incidents:** ServiceNow (see `docs/adr/0007` — scoped to the SLA-escalation path only). **Dev-story tracker:** Jira (`MM-#` tickets; unaffected by the ServiceNow decision). **Secrets:** AWS Parameter Store.
-- **CI/CD:** GitHub Actions + Docker Hub. **Quality:** SonarCloud + pytest-cov. **IaC:** Terraform.
+- **CI/CD:** GitHub Actions + Docker Hub. **Quality:** SonarCloud + pytest-cov. **Security scanning:** CodeQL (SAST), Dependabot (dependency CVEs + fix PRs), secret scanning with push protection — see `docs/adr/0018`. **IaC:** Terraform.
 
 ## Commands (keep these current)
 
@@ -56,6 +56,7 @@ make simulate SCENARIO=price_shock   # inject a synthetic market event
 - **Structure (target):** `src/agents/`, `src/calc/`, `src/streaming/`, `src/rag/`, `src/api/`, `src/mcp_servers/` (named to avoid colliding with the third-party `mcp` SDK package this project also depends on), `src/persistence/`, `src/config/` (shared Pydantic settings — env locally, AWS Secrets Manager when deployed; added in MM-9, migrated from Parameter Store in MM-102), `src/observability/` (OTel tracing config + Prometheus metrics; added in MM-92/real key MM-74), `tests/`, `infra/` (Terraform + Prometheus/Grafana provisioning), `frontend/`.
 - **Errors:** fail loud in calc/agent code; never silently swallow. Events are processed **idempotently** (replaying the same event must not double-raise a call).
 - **Logging:** structured JSON logs; every agent action is logged with a correlation id for the margin-call run.
+- **Security:** `ci.yml` grants `GITHUB_TOKEN` only `contents: read`; a job needing more (e.g. `id-token: write`) requests it at job level. Never merge a Dependabot PR blind — build/lint/typecheck first and bundle follow-up fixes into one PR. A story must not leave new high/critical CodeQL or Dependabot alerts open.
 - **Commits:** conventional commits + Jira key, e.g. `feat(calc): add VM computation [MM-12]`.
 
 ## Where to look
