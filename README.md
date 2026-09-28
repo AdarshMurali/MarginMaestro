@@ -56,7 +56,7 @@ Historically this is done with **spreadsheets, email, and phone calls**, and it 
 - **Agent orchestration** — an orchestrator agent conducting specialist agents (event detection, calculation, CSA interpretation, dispute, collateral optimization, communication).
 - **RAG pipeline** — retrieval over CSAs, margin policy, exception rules, escalation procedures, and historical dispute notes.
 - **Real-time streaming** — a Kafka event backbone driving intraday, tick-level margin evaluation, with a pluggable real-vs-simulated market feed.
-- **Production engineering** — containerized services, CI/CD with quality gates and code coverage, IaC, secrets management, observability, and a full audit trail.
+- **Production engineering** — containerized services, CI/CD with quality gates and code coverage, security scanning (CodeQL, Dependabot, secret scanning with push protection), IaC, secrets management, observability, and a full audit trail.
 - **Human-in-the-loop** — approval gates (with a second sign-off for elite-tier counterparties) and SLA-driven escalation to a real ServiceNow incident, reflecting how regulated institutions actually operate.
 
 ## High-level architecture
@@ -86,6 +86,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full written design, 
 | Compute | **AWS EC2 + Elastic IP** | Single instance running the API + ChromaDB via Docker Compose; admin access via SSM Session Manager, no SSH |
 | CI/CD | **GitHub Actions + Docker Hub** | Lint, test, coverage, quality gate, build, push |
 | Quality | **SonarCloud + pytest-cov** | Coverage + quality gate |
+| Security scanning | **CodeQL + Dependabot + secret scanning** | SAST on every push/PR + weekly; dependency CVE alerts with auto fix PRs; push protection blocks leaked secrets — free alternatives to Checkmarx / Black Duck (see ADR-0018) |
 | IaC | **Terraform** | AWS resources provisioned as code |
 
 ## Repository layout
