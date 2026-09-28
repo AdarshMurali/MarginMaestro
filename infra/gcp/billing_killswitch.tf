@@ -4,7 +4,8 @@
 #   --Eventarc--> Cloud Run function (src/ops/billing_killswitch.py)
 #   --> unlinks billing from the project once cost >= budget amount.
 #
-# Budget emails go to the billing account's admins (default IAM recipients).
+# Budget emails go to the billing account's admins (default IAM recipients)
+# plus var.budget_alert_emails via Cloud Monitoring email channels.
 
 locals {
   killswitch_apis = [
@@ -72,9 +73,11 @@ resource "google_billing_budget" "trial" {
     }
   }
 
-  # Email alerts at ~USD 1 / 10 / 25 / 40 / 50 of a INR 4,200 budget.
+  # Email alerts at ~USD 25 / 50 / 75 / 100 / 125 / 150 of a INR 12,600 budget
+  # (INR 2,100 / 4,200 / 6,300 / 8,400 / 10,500 / 12,600). The kill-switch
+  # acts only at 100% (USD 150).
   dynamic "threshold_rules" {
-    for_each = [0.02, 0.2, 0.5, 0.8, 1.0]
+    for_each = [0.1667, 0.3333, 0.5, 0.6667, 0.8333, 1.0]
     content {
       threshold_percent = threshold_rules.value
       spend_basis       = "CURRENT_SPEND"
@@ -82,13 +85,24 @@ resource "google_billing_budget" "trial" {
   }
 
   all_updates_rule {
-    pubsub_topic                    = google_pubsub_topic.billing_alerts.id
-    schema_version                  = "1.0"
-    disable_default_iam_recipients  = false
-    enable_project_level_recipients = false
+    pubsub_topic                     = google_pubsub_topic.billing_alerts.id
+    schema_version                   = "1.0"
+    disable_default_iam_recipients   = false
+    enable_project_level_recipients  = false
+    monitoring_notification_channels = [for c in google_monitoring_notification_channel.budget_email : c.id]
   }
 
   depends_on = [google_project_service.killswitch]
+}
+
+resource "google_monitoring_notification_channel" "budget_email" {
+  for_each = toset(var.budget_alert_emails)
+
+  display_name = "Budget alerts: ${each.value}"
+  type         = "email"
+  labels = {
+    email_address = each.value
+  }
 }
 
 # --- Function source (the same file CI lints and tests) --------------------

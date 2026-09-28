@@ -42,6 +42,7 @@ chroma_db/
 *.tfstate
 *.tfstate.*
 .terraform/
+*.tfvars
 *.tfplan
 infra/gcp/.build/
 

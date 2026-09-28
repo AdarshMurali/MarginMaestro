@@ -17,15 +17,21 @@ variable "billing_account_id" {
 }
 
 variable "killswitch_budget_inr" {
-  description = "Cumulative trial spend (usage before credits, INR) at which billing is unlinked. 4200 INR ~ USD 50 (ADR-0017). Must be in the billing account's currency."
+  description = "Cumulative trial spend (usage before credits, INR) at which billing is unlinked. 12600 INR ~ USD 150 (ADR-0017). Must be in the billing account's currency."
   type        = number
-  default     = 4200
+  default     = 12600
 }
 
 variable "killswitch_dry_run" {
   description = "When true the kill-switch only logs its decision. Set false only after a test notification has been verified end to end."
   type        = bool
-  default     = true
+  default     = false
+}
+
+variable "budget_alert_emails" {
+  description = "Extra addresses for budget threshold emails (in addition to the billing account admins). Set in terraform.tfvars (gitignored) -- the repo is public, so no personal emails in code."
+  type        = list(string)
+  default     = []
 }
 
 variable "trial_start" {
