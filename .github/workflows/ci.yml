@@ -35,6 +35,26 @@ jobs:
           name: coverage-xml
           path: coverage.xml
 
+  terraform-gcp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: "1.15.8"
+
+      - name: Format check
+        run: terraform fmt -check -recursive infra/gcp
+
+      # -backend=false: validation needs no GCP credentials or state access.
+      - name: Validate
+        run: |
+          for dir in infra/gcp infra/gcp/bootstrap; do
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
+
   sonarcloud:
     needs: lint-test
     runs-on: ubuntu-latest

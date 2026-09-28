@@ -1,6 +1,6 @@
 # ADR-0014: Mandatory guardrails for every LLM interaction
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-09-28: Agent Gateway enforcement point added)
 - **Date:** 2026-09-28
 
 ## Context
@@ -13,7 +13,9 @@ Defense in layers, all wrapped behind one `Guardrail` interface called before an
 
 | Layer | Control | Service |
 |---|---|---|
-| Input screening | Prompt-injection / jailbreak detection, malicious URL checks on client replies and retrieved chunks | **Model Armor** |
+| Tool access control | Deny-by-default allow-list of which agent may call which MCP tool; each agent has its own Agent Identity | **Agent Gateway** + IAM policies (ADR-0010) |
+| Runtime business rules | Plain-language policies, e.g. no client notification without a recorded approval | **Semantic Governance Policies** (ADR-0010) |
+| Input screening | Prompt-injection / jailbreak detection, malicious URL checks on client replies and retrieved chunks | **Model Armor**, attached to Agent Gateway so every prompt and tool response is screened, plus direct calls for text that doesn't pass the gateway (e.g. WhatsApp webhook) |
 | Data minimization | Detect and mask PII / account numbers before text reaches the model or the RAG index | **Sensitive Data Protection** (de-identification) |
 | Model-level | Gemini safety settings at block-medium-and-above | Vertex AI |
 | Output validation | Structured output + Pydantic schema; any amount, date or counterparty in drafted text must exactly match calc output, otherwise the draft is rejected | In-code |
@@ -28,3 +30,4 @@ Every guardrail verdict is written to the audit trail and to BigQuery telemetry 
 
 - Tests: mocked Model Armor/SDP verdicts; assert that blocked input stops the run, mismatched amounts are rejected, and a guardrail outage fails closed.
 - Model Armor and SDP have limited free quotas — post-trial fallback is the in-code layer plus Presidio for PII (ADR-0017).
+- **Two enforcement points by design:** Agent Gateway (platform-level: identity, tool access, content screening) and the in-code `Guardrail` pipeline (exact amount matching, citations, approval gate, cost limits). The in-code layer never depends on the gateway, so swapping the gateway out post-trial leaves the golden rules enforced.

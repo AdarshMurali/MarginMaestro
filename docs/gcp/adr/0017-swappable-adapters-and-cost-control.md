@@ -1,6 +1,6 @@
 # ADR-0017: Swappable adapters and post-trial cost control
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-09-28: kill-switch threshold set to $50)
 - **Date:** 2026-09-28
 
 ## Context
@@ -26,8 +26,10 @@ The GCP plan uses GCP-native services while the $300 / 90-day trial credits last
 **Contract tests** run the same test suite against every adapter of an interface, so a swap is a config change that is already proven to work. **Terraform** has one module per provider, each behind an `enable_*` toggle.
 
 **2. Cost guardrails from day one.**
-- Budget alert at $1 (and 50% / 90% of credits).
-- **Billing kill-switch:** budget notification → Pub/Sub → Cloud Run function that detaches the billing account from the project if actual spend exceeds the threshold.
+- **Budget: $50 for the whole trial**, not per month. Custom budget period 2026-09-28 → 2026-12-27, so $50 is cumulative. Expected trial usage is roughly $25–60 in total (Cloud SQL ~$9–10/month is the main line item), so $300 is never approached.
+- **Budget counts usage before credits** (`credit_types_treatment = EXCLUDE_ALL_CREDITS`). Otherwise credits would cover everything, spend would read $0 and the kill-switch would never fire.
+- **Alerts** at $1, $10, $25 and $40 (email).
+- **Billing kill-switch at $50:** budget notification → Pub/Sub → Cloud Run function that detaches the billing account from the project when actual spend reaches $50. Ships in dry-run mode (log only) until tested with a fake notification. Detaching billing stops all paid services immediately — the demo goes offline rather than overspending.
 - Cloud Run `min-instances=0`; no load balancer or static IP (use the default `run.app` HTTPS URL); partitioned BigQuery tables.
 
 **3. Month-2 review (~2026-11-28).** Review billing, then swap each post-trial cost item to its fallback before the trial ends. Known post-trial cost items, in order of risk:
