@@ -15,7 +15,7 @@ Every unit of work follows this cycle. Do not start the next story until the cur
 7. **Update [`docs/PROGRESS.md`](docs/PROGRESS.md)** — the handoff log (see format below).
 8. **Commit** with the Jira key in the message (smart commit), one story per PR.
 9. **Attach evidence** to the Jira story (test output, coverage delta, screenshots).
-10. **Open a PR** — CI must pass (tests, coverage gate, Sonar quality gate) before merge.
+10. **Open a PR** — CI must pass (tests, coverage gate, Sonar quality gate, CodeQL) before merge.
 
 ## Definition of Done (applies to every story)
 
@@ -28,7 +28,8 @@ A story is **done** only when *all* of the following are true:
 - Relevant docs updated (ARCHITECTURE / AGENTS / DATA_SOURCES as needed).
 - `docs/PROGRESS.md` updated with the handoff entry.
 - ADR added if a non-trivial decision was made.
-- CI green (including SonarCloud quality gate).
+- CI green (including SonarCloud quality gate and CodeQL).
+- No new open high/critical CodeQL or Dependabot alerts; push protection never bypassed for a real secret (ADR-0018).
 - Evidence attached to the Jira story.
 
 ## The handoff entry (PROGRESS.md)
