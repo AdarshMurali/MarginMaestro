@@ -166,6 +166,22 @@ ADR: 0017
 
 ---
 
+## Open items — revisit at the end of the track
+
+Raised by the user 2026-09-28. Not scheduled into a phase yet; pick up after G8, before G9 cut-over.
+
+1. **ISDA Master Agreement documents must be *necessary*, not nice-to-have.** Old ROADMAP Phase 13 (MM-130..133) only adds ISDA as extra RAG context. Before building it, find a use case where the lifecycle genuinely can't be right without it. Candidates to evaluate:
+   - **Event of Default / Termination Event gating:** if a counterparty has an ISDA Event of Default (e.g. failure to pay a prior margin call past the grace period), the next step is close-out netting, not another margin call — the orchestrator must branch on ISDA terms.
+   - **Close-out netting amount:** on default, exposure is netted across *all* trades under the ISDA Master, not per CSA — the netting set definition lives in the ISDA, so the calc input depends on it (calc stays deterministic, ADR-0005).
+   - **Cross-default / Additional Termination Events** (e.g. rating downgrade below a threshold) that change collateral obligations or trigger termination.
+   - **Governing law / dispute resolution** clause deciding which dispute path and deadlines apply.
+   Pick the one(s) that change an orchestration decision or a calc input; that is what makes ISDA necessary.
+2. **BigQuery needs a firm reporting requirement, not just analytics.** G7 lists the use cases; before building it, pin down the concrete report(s) that would force a warehouse. Candidates:
+   - **Regulatory margin reporting** (e.g. UMR / EMIR-style daily collateral and margin-call reports per counterparty, with a history that can't live on the OLTP DB).
+   - **Audit / model-risk evidence pack** (SR 11-7 style): every call's inputs, LLM version, guardrail verdicts and approvals over a period, queryable by an auditor.
+   - **Management reporting:** daily exposure/collateral dashboard, SLA breach trends, dispute rates by counterparty tier.
+   Decide which report is the primary requirement and design G7's tables around it.
+
 ## Out of scope
 
 - **Gemini Live API** voice notifications — rejected (ADR-0009).
