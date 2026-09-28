@@ -1,6 +1,6 @@
 # GCP Architect Questions & AI Governance Checklist
 
-> Prep notes for the Google Cloud technical-architect session (hackathon, 2026-09). Tied to Phase 14 in `docs/ROADMAP.md` (GCP portability) — additive, not a replacement for the AWS primary stack.
+> Prep notes for the Google Cloud technical-architect session (hackathon, 2026-09). Originally tied to the old Phase 14 in `docs/ROADMAP.md`; GCP is now the primary platform — see `docs/gcp/GCP_ROADMAP.md` and `docs/gcp/adr/` for the decisions these questions fed into.
 
 ## Questions for Google architects
 

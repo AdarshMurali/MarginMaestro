@@ -1,6 +1,6 @@
 # ADR-0004: Use ChromaDB as the RAG vector store
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0011 (`docs/gcp/adr/`, 2026-09-28)
 - **Date:** 2026-07-23
 
 ## Context

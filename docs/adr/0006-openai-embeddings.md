@@ -1,6 +1,6 @@
 # ADR-0006: Use OpenAI `text-embedding-3-small` for RAG embeddings (supersedes ADR-0004's local-embeddings choice)
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0009 (`docs/gcp/adr/`, 2026-09-28)
 - **Date:** 2026-07-26
 
 ## Context
