@@ -51,3 +51,27 @@ variable "environment" {
   type        = string
   default     = "prod"
 }
+
+variable "github_repository" {
+  description = "GitHub repository trusted by Workload Identity Federation (label only -- access is matched on the numeric IDs below)"
+  type        = string
+  default     = "AdarshMurali/MarginMaestro"
+}
+
+variable "github_repository_id" {
+  description = "Numeric GitHub repository ID (api.github.com/repos/<owner>/<repo> -> id). Matched instead of the name so a renamed or re-created repo can't inherit access."
+  type        = string
+  default     = "1310097546"
+}
+
+variable "github_repository_owner_id" {
+  description = "Numeric GitHub ID of the repository owner (-> owner.id)"
+  type        = string
+  default     = "137914842"
+}
+
+variable "github_deploy_ref" {
+  description = "Only workflow runs on this git ref may authenticate to GCP"
+  type        = string
+  default     = "refs/heads/main"
+}

@@ -29,13 +29,13 @@ GCP becomes the primary runtime. Service-by-service choices are recorded in thei
 Platform services shared by all of the above:
 
 - **Cloud Run** — API, MCP servers, Pub/Sub push consumers, frontend (min-instances = 0).
-- **Artifact Registry** — container images (Docker Hub kept as a mirror).
+- **Docker Hub** stays the container registry (amended 2026-09-29, see ADR-0017) — Artifact Registry is not used for app images.
 - **Secret Manager** — replaces AWS Secrets Manager; same single-JSON-secret shape (`marginmaestro-<app_env>`).
 - **Cloud Tasks** — schedules the SLA-deadline check at the exact deadline, replacing today's re-pause polling in the orchestrator's SLA node.
 - **Cloud Scheduler** — periodic jobs (price refresh, daily BigQuery rollups).
 - **Cloud Storage** — RAG source documents (replaces the S3 bucket).
 - **Cloud Logging / Cloud Trace / Cloud Monitoring** — OTel traces and structured JSON logs go here; replaces self-hosted Jaeger/Prometheus/Grafana in the deployed env (they stay for local dev).
-- **IAM + Workload Identity Federation** — GitHub Actions deploys without long-lived keys; one least-privilege service account per service.
+- **IAM + Workload Identity Federation** — GitHub Actions deploys without long-lived keys (this repo on `main` only, MM-100); one least-privilege service account per service.
 - **Cloud Billing budgets** — alert + automatic billing kill-switch (ADR-0017).
 - **Terraform** — all of the above, in `infra/gcp/`.
 

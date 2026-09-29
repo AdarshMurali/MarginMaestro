@@ -41,7 +41,9 @@ The GCP plan uses GCP-native services while the $300 / 90-day trial credits last
 | Vertex AI Gemini | Medium (per token) | → AI Studio free tier or OpenAI |
 | Dataplex scans | Medium | → governance-as-code |
 | Model Armor / SDP | Low–Medium (small free quotas) | → in-code + Presidio if quota exceeded |
-| Cloud Run, Pub/Sub, BigQuery, Secret Manager, Cloud Tasks/Scheduler, Logging/Trace, Artifact Registry | Low (always-free quotas) | keep |
+| Cloud Run, Pub/Sub, BigQuery, Secret Manager, Cloud Tasks/Scheduler, Logging/Trace | Low (always-free quotas) | keep |
+
+**Container images stay on Docker Hub (amended 2026-09-29, MM-100, user decision).** The original plan moved images to Artifact Registry with Docker Hub as a mirror. Reversed: anything stored in the GCP project is stopped and eventually deleted if the trial ends or the kill-switch unlinks billing, while Docker Hub is independent of GCP. Cloud Run deploys public Docker Hub images directly and keeps its own copy per revision, so a running service doesn't depend on Docker Hub being up. One image (`adarshmurali/marginmaestro:<sha>`) serves every environment; only config differs. If the repo ever goes private, add an Artifact Registry *remote* repository (a pull-through cache with the Docker Hub token in Secret Manager) rather than moving the images.
 
 ## Consequences
 

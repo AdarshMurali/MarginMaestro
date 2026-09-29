@@ -16,7 +16,8 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0 (MM-87) in progress — MM-99 (Terraform foundation) and MM-98 (budget + kill-switch) done; next MM-100 (WIF + Artifact Registry).
+- **Phase:** G0 (MM-87) in progress — MM-99 (Terraform foundation) and MM-98 (budget + kill-switch) done; MM-100 (GitHub Actions WIF) code in review, awaiting the user's `terraform apply` + two GitHub Actions variables; next MM-101 (Secret Manager).
+- **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
 - **Jira:** epics created 2026-09-28 — G0 MM-87 … G10 MM-97 (label `gcp`). Stories are created when each phase starts. G0 stories: MM-98 (G01 budget/kill-switch), MM-99 (G02 Terraform), MM-100 (G03 WIF + Artifact Registry), MM-101 (G04 Secret Manager), MM-102 (G05 adapter interfaces). Note: MM-100..102 were also *placeholder* keys in the old ROADMAP Phase 10 — those stories got real keys MM-81..85, so the real MM-100..102 are the G0 stories.
@@ -26,7 +27,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 | Phase | Epic | Scope | Status |
 |---|---|---|---|
-| G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | In progress (MM-99, MM-98 done) |
+| G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | In progress (MM-99, MM-98 done; MM-100 in review) |
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | Not started |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | Not started |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | Not started |
@@ -45,6 +46,15 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-28 | ₹0 (first real budget notification) | — | Kill-switch live at ₹12,600 (≈ $150) |
 
 ## Log
+
+### 2026-09-29 — MM-100: Workload Identity Federation for GitHub Actions
+- **Done:** `infra/gcp/wif.tf`: pool `github`, OIDC provider `github-actions` (issuer `token.actions.githubusercontent.com`) with condition `repository_id == 1310097546 && repository_owner_id == 137914842 && ref == refs/heads/main`, and `roles/iam.workloadIdentityUser` on `mm-ci-sa` for `principalSet://…/attribute.repository_id/1310097546` only. New CI job `gcp-auth` (push to `main`, after `build-and-push`, job-level `id-token: write`) mints an access token for `mm-ci-sa` via `google-github-actions/auth@v3.0.0` — the proof that the login works. Outputs `github_wif_provider` / `github_ci_service_account` feed the GitHub Actions variables `GCP_WIF_PROVIDER` / `GCP_CI_SERVICE_ACCOUNT`.
+- **Decisions:** (1) **No Artifact Registry** (user decision): Docker Hub stays the image registry — images must survive the trial ending or a kill-switch billing unlink, and Cloud Run pulls public Docker Hub images directly (ADR-0017 amended; ADR-0008, roadmap row 20 and MM-G03 updated). (2) Match on GitHub's **numeric** repo/owner IDs, not names, so a renamed or re-created repo can't inherit access. (3) `mm-ci-sa` gets no project roles yet; Cloud Run deploy roles come with the deploy job. (4) New roadmap story **MM-G57** (G5): automated `deploy-gcp` job — the AWS EC2 backend never auto-deployed (CI stopped at the Docker Hub push; `docker compose pull` over SSM was run by hand), and GCP must not repeat that.
+- **Changed:** `infra/gcp/{wif.tf (new), variables.tf, outputs.tf, README.md}`, `.github/workflows/ci.yml` (`gcp-auth`), `docs/gcp/GCP_ROADMAP.md`, `docs/gcp/adr/0008-…`, `docs/gcp/adr/0017-…`.
+- **Verified:** `terraform fmt -check -recursive` + `validate` on both roots (Terraform 1.15.8, google 8.4.0 — lock files unchanged). Not yet applied: needs the user's `plan`/`apply` from this branch, then the two repo variables, then a green `gcp-auth` run on `main`.
+- **Cost impact:** none — WIF, STS and IAM are free.
+- **Known issues / tech debt:** (1) Order matters: apply + set the variables **before** merging, or the first `gcp-auth` run on `main` fails. (2) Workload identity pool IDs are soft-deleted for 30 days — if `github` is ever destroyed, re-creating it with the same ID fails until the undelete/purge window passes.
+- **Next step:** user applies (`terraform -chdir=infra/gcp plan -out="mm100.tfplan"` → `apply "mm100.tfplan"`), sets the two variables, merges; confirm `gcp-auth` green on `main`. Then MM-101 (Secret Manager).
 
 ### 2026-09-28 — MM-98: Budget alerts + billing kill-switch
 - **Done:** Trial budget `marginmaestro-demo trial kill-switch`: **₹4,200** (≈ $50), one cumulative period 2026-09-28 → 2026-12-27, counts usage **before credits** (`EXCLUDE_ALL_CREDITS`), email alerts at 2/20/50/80/100% (~₹84 / ₹840 / ₹2,100 / ₹3,360 / ₹4,200). Budget notifications → Pub/Sub `billing-alerts` → Cloud Run function `billing-killswitch` (Python 3.12, max 1 instance, internal ingress, retry on failure) → unlinks billing when cost ≥ budget. Deployed in **dry run** (`DRY_RUN=true`). Applied by the user.

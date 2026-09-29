@@ -29,7 +29,7 @@ It is a **portfolio / proof-of-concept** built to production-engineering standar
 - **API:** FastAPI. **Frontend:** Next.js on Vercel.
 - **Tools exposed as MCP servers:** market data, Slack, ServiceNow, RAG retriever. (Jira is this project's own dev-story tracker, not an agent-facing tool — see `docs/adr/0007`; it has no MCP server.)
 - **Notifications:** Slack. **Escalation incidents:** ServiceNow (see `docs/adr/0007` — scoped to the SLA-escalation path only). **Dev-story tracker:** Jira (`MM-#` tickets; unaffected by the ServiceNow decision). **Secrets:** AWS Parameter Store.
-- **CI/CD:** GitHub Actions + Docker Hub. **Quality:** SonarCloud + pytest-cov. **Security scanning:** CodeQL (SAST), Dependabot (dependency CVEs + fix PRs), secret scanning with push protection — see `docs/adr/0018`. **IaC:** Terraform.
+- **CI/CD:** GitHub Actions + Docker Hub (Docker Hub stays the registry on GCP too; CI logs in to GCP keylessly via Workload Identity Federation — MM-100). **Quality:** SonarCloud + pytest-cov. **Security scanning:** CodeQL (SAST), Dependabot (dependency CVEs + fix PRs), secret scanning with push protection — see `docs/adr/0018`. **IaC:** Terraform.
 
 ## Commands (keep these current)
 

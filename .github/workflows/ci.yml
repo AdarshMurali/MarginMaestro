@@ -108,3 +108,24 @@ jobs:
           tags: |
             adarshmurali/marginmaestro:latest
             adarshmurali/marginmaestro:${{ github.sha }}
+
+  # Proves keyless GitHub -> GCP login (Workload Identity Federation, MM-100).
+  # GCP only trusts this repo on main (infra/gcp/wif.tf); minting an access
+  # token for mm-ci-sa fails unless the provider, condition and IAM binding
+  # are all correct. The G5 Cloud Run deploy job (MM-G57) reuses this login.
+  gcp-auth:
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # lets the job request GitHub's OIDC token
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
+          token_format: access_token

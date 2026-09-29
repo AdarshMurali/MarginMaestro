@@ -34,4 +34,16 @@ terraform -chdir=infra/gcp apply
 - `outputs.tf` — project, region, service account emails.
 
 CI (`terraform-gcp` job) runs `fmt -check` and `validate` on both roots with `-backend=false`, so it needs no GCP credentials.
+- `wif.tf` — Workload Identity Federation for GitHub Actions (MM-100): pool `github`, provider `github-actions` trusting only this repo (numeric repo + owner IDs) on `refs/heads/main`, and `workloadIdentityUser` on `mm-ci-sa` for that repo only. `mm-ci-sa` has no project roles yet (deploy roles come in G5, MM-G57).
 - `billing_killswitch.tf` — trial budget (₹12,600 ≈ $150, usage before credits, alerts at ≈ $25/$50/$75/$100/$125), Pub/Sub `billing-alerts`, and the live `billing-killswitch` function (code: `src/ops/billing_killswitch.py`) that unlinks billing at 100%.
+
+## GitHub Actions login (MM-100)
+
+After applying `wif.tf`, copy two outputs into GitHub → repo **Settings → Secrets and variables → Actions → Variables** (plain variables, not secrets — both are public identifiers):
+
+```bash
+terraform -chdir=infra/gcp output -raw github_wif_provider        # -> GCP_WIF_PROVIDER
+terraform -chdir=infra/gcp output -raw github_ci_service_account  # -> GCP_CI_SERVICE_ACCOUNT
+```
+
+The `gcp-auth` CI job (push to `main` only) then mints a short-lived token for `mm-ci-sa`; it goes green only if the provider, condition and IAM binding are all correct. To revoke GitHub's access, delete the provider or the IAM binding — there is no key to rotate.
