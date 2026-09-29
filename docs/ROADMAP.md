@@ -2,7 +2,7 @@
 
 Development proceeds **phase by phase**, one story at a time, each finished to the Definition of Done in `CONTRIBUTING.md` before the next begins. Each **phase = a Jira Epic**; each story below is a Jira story. Story keys use `MM-#`.
 
-> **Numbering note:** Jira assigns keys sequentially as tickets are created, not per the gapped scheme originally sketched here. Phase 0 (MM-1–MM-9) and Phase 1 (MM-10–MM-15) keys below are real, created keys. Keys in later phases are still the original placeholder scheme and will be corrected to match reality as each phase's tickets are actually created in Jira.
+> **Numbering note:** Jira assigns keys sequentially as tickets are created, not per the gapped scheme originally sketched here. Phase 0 (MM-1–MM-9) and Phase 1 (MM-10–MM-15) keys below are real, created keys. Keys in later phases are still the original placeholder scheme and will be corrected to match reality as each phase's tickets are actually created in Jira. **Watch out:** this file's Phase 10 used MM-100 … MM-104 as placeholders; those stories got real keys MM-81 … MM-85. In Jira today MM-98 … MM-102 are the GCP G0 stories (`docs/gcp/GCP_ROADMAP.md`).
 
 **Sequencing principle:** always keep a working system. Build the deterministic core first (data → math), then grounding (RAG), then the event/stream, then orchestration, then the human-facing edges (notify/escalate/UI). Optional streaming-analytics (Flink) comes last, only if justified.
 

@@ -2,18 +2,27 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import chromadb
-from chromadb.api.types import Metadata
 from openai import OpenAI
 
+from adapters.chroma_adapter import ChromaVectorStore
+from adapters.factory import RAG_COLLECTION, get_embedder, get_vector_store
+from adapters.openai_adapter import EMBEDDING_MODEL, OpenAIEmbedder
 from config.settings import Settings, get_settings
+from ports.embedder import Embedder
+from ports.vector_store import VectorStore
 from rag.chunker import chunk_markdown, extract_effective_date
 from rag.s3_upload import iter_corpus_documents
 
-# See ADR-0006: OpenAI embeddings, not local BGE. Ingestion and retrieval
-# (MM-25) must use this exact same model -- mismatched embeddings produce
-# meaningless similarity scores.
-EMBEDDING_MODEL = "text-embedding-3-small"
-COLLECTION_NAME = "csa_documents"
+# EMBEDDING_MODEL (ADR-0006) now lives with the OpenAI adapter; re-exported
+# here for existing callers.
+__all__ = [
+    "COLLECTION_NAME",
+    "EMBEDDING_MODEL",
+    "embed_texts",
+    "get_chroma_client",
+    "run_ingestion",
+]
+COLLECTION_NAME = RAG_COLLECTION
 
 
 def _metadata_from_key(key: str) -> tuple[str, str]:
@@ -31,8 +40,7 @@ def get_chroma_client(settings: Settings | None = None) -> chromadb.ClientAPI:
 
 
 def embed_texts(texts: list[str], client: OpenAI) -> list[Sequence[float]]:
-    response = client.embeddings.create(model=EMBEDDING_MODEL, input=texts)
-    return [item.embedding for item in response.data]
+    return OpenAIEmbedder(client).embed(texts)
 
 
 def run_ingestion(
@@ -40,6 +48,8 @@ def run_ingestion(
     documents: list[tuple[str, str]] | None = None,
     openai_client: OpenAI | None = None,
     chroma_client: chromadb.ClientAPI | None = None,
+    embedder: Embedder | None = None,
+    vector_store: VectorStore | None = None,
 ) -> int:
     """Chunks every document in the corpus, embeds each chunk (OpenAI), and
     upserts into ChromaDB with citation metadata. upsert (not add) keyed by a
@@ -50,13 +60,17 @@ def run_ingestion(
     if not documents:
         return 0
 
-    openai_client = openai_client or OpenAI(api_key=settings.openai_api_key)
-    chroma_client = chroma_client or get_chroma_client(settings)
-    collection = chroma_client.get_or_create_collection(COLLECTION_NAME)
+    embedder = embedder or get_embedder(settings, openai_client)
+    if vector_store is None:
+        vector_store = (
+            ChromaVectorStore(chroma_client, COLLECTION_NAME)
+            if chroma_client is not None
+            else get_vector_store(settings)
+        )
 
     ids: list[str] = []
     texts: list[str] = []
-    metadatas: list[Metadata] = []
+    metadatas: list[dict[str, str]] = []
 
     for key, content in documents:
         doc_type, counterparty_id = _metadata_from_key(key)
@@ -74,8 +88,8 @@ def run_ingestion(
                 }
             )
 
-    embeddings = embed_texts(texts, openai_client)
-    collection.upsert(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
+    embeddings = embedder.embed(texts)
+    vector_store.upsert(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
     return len(texts)
 
 

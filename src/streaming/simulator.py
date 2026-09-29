@@ -2,10 +2,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from adapters.factory import get_event_bus
 from config.settings import Settings, get_settings
 from persistence.models import RatingGrade
+from ports.event_bus import EventBus
 from streaming.market_feed import CompositeMarketFeed, MarketFeed, PriceQuote
-from streaming.producer import EventProducer
 from streaming.schemas import MarketEvent, MarketEventType
 
 
@@ -88,14 +89,14 @@ def _build_downgrade_event() -> MarketEvent:
 
 def run_scenario(
     scenario: MarketEventType,
-    producer: EventProducer | None = None,
+    producer: EventBus | None = None,
     base_feed: MarketFeed | None = None,
     settings: Settings | None = None,
 ) -> None:
     """Publishes a scripted scenario onto market.prices (price_shock/vol_spike) or
     market.events (downgrade). Used by `make simulate SCENARIO=...`."""
     settings = settings or get_settings()
-    producer = producer or EventProducer(settings)
+    producer = producer or get_event_bus(settings)
 
     if scenario is MarketEventType.DOWNGRADE:
         event = _build_downgrade_event()

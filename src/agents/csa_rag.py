@@ -1,8 +1,10 @@
 from openai import OpenAI
 from pydantic import BaseModel
 
+from adapters.factory import get_llm
 from config.settings import Settings, get_settings
 from persistence.models import RatingTrigger
+from ports.llm import LLMClient
 from rag.models import Citation, CSATermsResult
 from rag.retriever import RetrievedChunk, retrieve
 
@@ -57,6 +59,7 @@ def answer_csa_terms(
     top_k: int = DEFAULT_TOP_K,
     openai_client: OpenAI | None = None,
     settings: Settings | None = None,
+    llm: LLMClient | None = None,
 ) -> CSATermsResult:
     """Retrieves that counterparty's CSA chunks (MM-25) and asks the LLM to
     extract structured terms, grounded strictly in the retrieved excerpts.
@@ -73,16 +76,12 @@ def answer_csa_terms(
     if not chunks:
         raise CSATermsUnavailableError(f"No CSA document chunks found for {counterparty_id}")
 
-    openai_client = openai_client or OpenAI(api_key=settings.openai_api_key)
-    completion = openai_client.chat.completions.parse(
-        model=settings.openai_model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"{question}\n\n---\n\n{_build_context(chunks)}"},
-        ],
-        response_format=_CSATermsExtraction,
+    llm = llm or get_llm(settings, openai_client)
+    extraction = llm.parse(
+        SYSTEM_PROMPT,
+        f"{question}\n\n---\n\n{_build_context(chunks)}",
+        _CSATermsExtraction,
     )
-    extraction = completion.choices[0].message.parsed
     if extraction is None:
         raise CSATermsUnavailableError(
             f"LLM could not extract structured CSA terms for {counterparty_id}"

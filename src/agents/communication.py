@@ -10,8 +10,10 @@ from pydantic import BaseModel
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
+from adapters.factory import get_llm
 from calc.models import CSATerms
 from config.settings import Settings, get_settings
+from ports.llm import LLMClient
 
 SYSTEM_PROMPT = (
     "You draft formal, concise client-facing margin call notices for a bank "
@@ -43,9 +45,10 @@ def draft_margin_call_notice(
     csa_terms: CSATerms,
     openai_client: OpenAI | None = None,
     settings: Settings | None = None,
+    llm: LLMClient | None = None,
 ) -> str:
     settings = settings or get_settings()
-    openai_client = openai_client or OpenAI(api_key=settings.openai_api_key)
+    llm = llm or get_llm(settings, openai_client)
 
     prompt = (
         f"Counterparty: {counterparty_id}\n"
@@ -54,14 +57,7 @@ def draft_margin_call_notice(
         f"CSA minimum transfer amount: {csa_terms.mta:,.2f} {csa_terms.currency}\n\n"
         "Draft the margin call notice using exactly these figures."
     )
-    completion = openai_client.chat.completions.create(
-        model=settings.openai_model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-    )
-    text = completion.choices[0].message.content
+    text = llm.complete(SYSTEM_PROMPT, prompt)
     if not text or not text.strip():
         raise NoticeDraftingError(f"LLM returned an empty margin call notice for {counterparty_id}")
     return text.strip()
@@ -73,6 +69,7 @@ def draft_sla_met_notice(
     currency: str,
     openai_client: OpenAI | None = None,
     settings: Settings | None = None,
+    llm: LLMClient | None = None,
 ) -> str:
     """Confirms, in the same Slack channel as the original call notice, that
     the counterparty met its obligation within the SLA window. Before this,
@@ -80,7 +77,7 @@ def draft_sla_met_notice(
     found live by the user, who expected a Slack confirmation and never got
     one."""
     settings = settings or get_settings()
-    openai_client = openai_client or OpenAI(api_key=settings.openai_api_key)
+    llm = llm or get_llm(settings, openai_client)
 
     prompt = (
         f"Counterparty: {counterparty_id}\n"
@@ -89,14 +86,7 @@ def draft_sla_met_notice(
         "obligation within the SLA window, using exactly this figure. This is a "
         "resolution confirmation, not a new call -- do not restate it as a demand."
     )
-    completion = openai_client.chat.completions.create(
-        model=settings.openai_model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-    )
-    text = completion.choices[0].message.content
+    text = llm.complete(SYSTEM_PROMPT, prompt)
     if not text or not text.strip():
         raise NoticeDraftingError(f"LLM returned an empty SLA-met notice for {counterparty_id}")
     return text.strip()

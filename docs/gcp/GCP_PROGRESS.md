@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0 (MM-87) in progress — MM-99 (Terraform foundation), MM-98 (budget + kill-switch) and MM-100 (GitHub Actions WIF) done; MM-101 (Secret Manager source) in review; next MM-102 (adapter interfaces).
+- **Phase:** G0 (MM-87) in progress — MM-99 (Terraform foundation), MM-98 (budget + kill-switch) and MM-100 (GitHub Actions WIF) done; MM-101 (Secret Manager source) done; MM-102 (adapter interfaces) in review — last G0 story.
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -27,7 +27,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 | Phase | Epic | Scope | Status |
 |---|---|---|---|
-| G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | In progress (MM-99, MM-98, MM-100 done; MM-101 in review) |
+| G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | In progress (MM-98…MM-101 done; MM-102 in review) |
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | Not started |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | Not started |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | Not started |
@@ -46,6 +46,15 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-28 | ₹0 (first real budget notification) | — | Kill-switch live at ₹12,600 (≈ $150) |
 
 ## Log
+
+### 2026-09-29 — MM-102: Adapter interfaces + contract tests
+- **Done:** Five interfaces in `src/ports/` — `LLMClient` (`complete`, `parse`), `Embedder`, `VectorStore` (`upsert`, `query` with shared filter semantics: own + shared chunks, exact doc_type, nearest first), `EventBus` (`publish`, `flush`), `Notifier` (`send` → `DeliveryReceipt`). Adapters in `src/adapters/` wrap today's code: `OpenAIChat` / `OpenAIEmbedder`, `ChromaVectorStore` (Chroma `where` builder moved here), `SlackNotifier` (wraps `send_slack_notice`), Kafka = the existing `EventProducer` (already matches `EventBus`), plus `InMemoryVectorStore` / `InMemoryEventBus` test doubles. `adapters/factory.py` picks one per flag — new settings `VECTOR_STORE=chroma`, `EVENT_BUS=kafka`, `CLIENT_NOTIFIER=slack`; unknown values fail loud. Call sites switched: `csa_rag`, `communication`, `reconciliation` (LLM), `rag.ingest` / `rag.retriever` (Embedder + VectorStore), `event_agent` / `simulator` / `live_feed_publisher` (EventBus). Contract suites in `tests/contract/`, one per interface, parametrised over every adapter.
+- **Decisions:** (1) Interfaces only where a real second implementation exists (user push-back): **dropped** `Repository` (SQLAlchemy already is it), `Guardrail`, `Warehouse` (single vendor each — call Model Armor/BigQuery directly in G3/G7). (2) **No behaviour change:** defaults are the pre-GCP stack, and the old `openai_client=` / `chroma_client=` parameters still work, so all 554 existing tests pass unmodified. (3) The orchestrator still calls `send_slack_notice` directly; switching it to `Notifier` waits for G6, when client (WhatsApp) vs internal (Slack) routing is designed — doing it now would only churn ~20 test mocks. (4) `LLM_PROVIDER` is still not consulted — its default `ollama` was never honoured by the agents (always OpenAI); G2 wires `openai|vertex` and fixes that default.
+- **Changed:** `src/ports/` (new), `src/adapters/` (new), `src/agents/{csa_rag,communication,reconciliation}.py`, `src/rag/{ingest,retriever}.py`, `src/streaming/{event_agent,simulator,live_feed_publisher}.py`, `src/config/settings.py`, `tests/contract/` (new), `tests/unit/test_adapter_factory.py` (new), `.env.example`, `CLAUDE.md`, `docs/gcp/GCP_ROADMAP.md` (MM-G05 scope; real Jira key next to each G0 placeholder + a note), `docs/ROADMAP.md` (warning that its Phase 10 MM-100…104 were placeholders).
+- **Verified:** full suite 579 passed (554 existing unchanged + 25 new), coverage 98% (every new module 100%); ruff/black/mypy clean. Chroma and Kafka contract variants are marked `live` and weren't run — Docker Desktop was off; run `pytest -m live tests/contract` with the local stack up.
+- **Cost impact:** none — code only.
+- **Known issues / tech debt:** live contract variants unrun (above).
+- **Next step:** G0 is complete once this merges → close epic MM-87; next phase G1 (Cloud SQL Postgres + pgvector + RLS) — present its plan with specific tools first.
 
 ### 2026-09-29 — MM-101: Secret Manager settings source (SECRETS_SOURCE=env|aws|gcp)
 - **Done:** New `GcpSecretManagerSource` (`src/config/gcp_secret_manager.py`) reads the JSON secret `marginmaestro-<APP_ENV>` (latest version) from the project in `GCP_PROJECT_ID`, via Application Default Credentials. Shared logic moved into `JsonSecretSource` (`src/config/json_secret_source.py`); the AWS `SecretsManagerSource` now subclasses it with identical behaviour. `Settings` picks the store with `SECRETS_SOURCE=env|aws|gcp`; explicit env vars always win over the secret. Terraform `infra/gcp/secrets.tf`: Secret Manager API, empty secret container `marginmaestro-prod` (user-managed replication in us-central1) and `secretAccessor` on that one secret for `mm-api-sa`, `mm-agent-sa`, `mm-mcp-sa`, `mm-events-sa`.
