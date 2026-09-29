@@ -130,7 +130,9 @@ data "archive_file" "killswitch" {
 
   source {
     filename = "main.py"
-    content  = file("${path.module}/../../src/ops/billing_killswitch.py")
+    # Normalise line endings so the zip hash (and the deploy) depends only on
+    # the code, not on whether git checked the file out with CRLF or LF.
+    content = replace(file("${path.module}/../../src/ops/billing_killswitch.py"), "\r\n", "\n")
   }
 
   source {
