@@ -1,10 +1,14 @@
 import json
+import sys
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import boto3
 import pytest
 from moto import mock_aws
 
+from config import gcp_secret_manager
+from config.gcp_secret_manager import GcpSecretManagerSource
 from config.secrets_manager import SecretsManagerSource
 from config.settings import Settings
 
@@ -128,3 +132,111 @@ def test_get_settings_is_cached(monkeypatch) -> None:
     first = get_settings()
     second = get_settings()
     assert first is second
+
+
+# --- MM-101: SECRETS_SOURCE selection + GCP Secret Manager source ----------
+
+
+class _FakeGcpClient:
+    def __init__(self, secrets: dict[str, dict]) -> None:
+        self._secrets = secrets
+        self.requested: list[str] = []
+
+    def access_secret_version(self, *, name: str):
+        self.requested.append(name)
+        body = json.dumps(self._secrets[name]).encode("utf-8")
+        return SimpleNamespace(payload=SimpleNamespace(data=body))
+
+
+_GCP_NAME = "projects/marginmaestro-demo/secrets/marginmaestro-prod/versions/latest"
+
+
+@pytest.fixture
+def fake_gcp(monkeypatch):
+    client = _FakeGcpClient({_GCP_NAME: {"OPENAI_API_KEY": "sk-from-gcp", "API_PORT": "8080"}})
+    monkeypatch.setattr(gcp_secret_manager, "_default_client", lambda: client)
+    monkeypatch.setenv("GCP_PROJECT_ID", "marginmaestro-demo")
+    return client
+
+
+def test_gcp_source_reads_latest_version_of_env_secret(monkeypatch, fake_gcp) -> None:
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("SECRETS_SOURCE", "gcp")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.openai_api_key == "sk-from-gcp"
+    assert settings.api_port == 8080
+    assert fake_gcp.requested == [_GCP_NAME]
+
+
+def test_env_var_wins_over_gcp_secret(monkeypatch, fake_gcp) -> None:
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("SECRETS_SOURCE", "gcp")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+
+    assert Settings(_env_file=None).openai_api_key == "sk-from-env"
+
+
+def test_gcp_source_never_touches_aws(monkeypatch, fake_gcp) -> None:
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("SECRETS_SOURCE", "gcp")
+    with patch("boto3.client") as mock_client:
+        Settings(_env_file=None)
+        mock_client.assert_not_called()
+
+
+def test_gcp_source_requires_project_id(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("SECRETS_SOURCE", "gcp")
+    monkeypatch.delenv("GCP_PROJECT_ID", raising=False)
+
+    with pytest.raises(ValueError, match="GCP_PROJECT_ID"):
+        Settings(_env_file=None)
+
+
+def test_gcp_source_get_field_value(fake_gcp) -> None:
+    source = GcpSecretManagerSource(Settings, "prod", client_factory=lambda: fake_gcp)
+    field = Settings.model_fields["openai_api_key"]
+
+    assert source.get_field_value(field, "openai_api_key") == (
+        "sk-from-gcp",
+        "OPENAI_API_KEY",
+        False,
+    )
+
+
+def test_secrets_source_env_skips_remote_even_when_deployed(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("SECRETS_SOURCE", "env")
+    with patch("boto3.client") as mock_client:
+        Settings(_env_file=None)
+        mock_client.assert_not_called()
+
+
+@mock_aws
+def test_secrets_source_aws_is_explicitly_selectable(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("SECRETS_SOURCE", " AWS ")
+    sm = boto3.client("secretsmanager", region_name="ap-south-1")
+    sm.create_secret(Name="marginmaestro/dev", SecretString=json.dumps({"OPENAI_API_KEY": "sk-a"}))
+
+    assert Settings(_env_file=None).openai_api_key == "sk-a"
+
+
+def test_invalid_secrets_source_fails_loud(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("SECRETS_SOURCE", "vault")
+
+    with pytest.raises(ValueError, match="SECRETS_SOURCE"):
+        Settings(_env_file=None)
+
+
+def test_default_client_builds_secret_manager_client(monkeypatch) -> None:
+    fake_module = SimpleNamespace(SecretManagerServiceClient=lambda: "client")
+    monkeypatch.setitem(sys.modules, "google.cloud.secretmanager", fake_module)
+    import google.cloud
+
+    monkeypatch.setattr(google.cloud, "secretmanager", fake_module, raising=False)
+
+    assert gcp_secret_manager._default_client() == "client"

@@ -24,7 +24,7 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -e ".[dev,data,db,rag,llm,streaming,notify,auth,observability,gcp]"
+        run: pip install -e ".[dev,data,db,rag,llm,streaming,notify,auth,observability,gcp,gcp-ops]"
 
       - name: Lint
         run: |

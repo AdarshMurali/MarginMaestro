@@ -3,6 +3,7 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
+from config.gcp_secret_manager import GcpSecretManagerSource
 from config.secrets_manager import SecretsManagerSource
 
 
@@ -110,15 +111,33 @@ class Settings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         app_env = os.environ.get("APP_ENV", "local")
-        if app_env == "local":
+        secrets_source = _secrets_source(app_env)
+        if secrets_source == "env":
             return init_settings, env_settings, dotenv_settings, file_secret_settings
-        return (
-            init_settings,
-            env_settings,
-            SecretsManagerSource(settings_cls, app_env),
-            dotenv_settings,
-            file_secret_settings,
-        )
+        remote: PydanticBaseSettingsSource
+        if secrets_source == "gcp":
+            remote = GcpSecretManagerSource(settings_cls, app_env)
+        else:
+            remote = SecretsManagerSource(settings_cls, app_env)
+        # Explicit env vars always win over the remote secret.
+        return init_settings, env_settings, remote, dotenv_settings, file_secret_settings
+
+
+_SECRETS_SOURCES = ("env", "aws", "gcp")
+
+
+def _secrets_source(app_env: str) -> str:
+    """MM-101: which store deployed secrets come from. SECRETS_SOURCE picks it
+    explicitly; unset keeps the pre-GCP behaviour (env only when
+    APP_ENV=local, AWS Secrets Manager otherwise), so the AWS deployment
+    needs no config change (ground rule 6, docs/gcp/GCP_ROADMAP.md)."""
+    explicit = os.environ.get("SECRETS_SOURCE")
+    if explicit is None:
+        return "env" if app_env == "local" else "aws"
+    source = explicit.strip().lower()
+    if source not in _SECRETS_SOURCES:
+        raise ValueError(f"SECRETS_SOURCE must be one of {_SECRETS_SOURCES}, got {explicit!r}")
+    return source
 
 
 @lru_cache

@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0 (MM-87) in progress — MM-99 (Terraform foundation), MM-98 (budget + kill-switch) and MM-100 (GitHub Actions WIF) done; next: pin the AWS EC2 image to a SHA (ground rule 6), then MM-101 (Secret Manager).
+- **Phase:** G0 (MM-87) in progress — MM-99 (Terraform foundation), MM-98 (budget + kill-switch) and MM-100 (GitHub Actions WIF) done; MM-101 (Secret Manager source) in review; next MM-102 (adapter interfaces).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -27,7 +27,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 | Phase | Epic | Scope | Status |
 |---|---|---|---|
-| G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | In progress (MM-99, MM-98, MM-100 done) |
+| G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | In progress (MM-99, MM-98, MM-100 done; MM-101 in review) |
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | Not started |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | Not started |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | Not started |
@@ -46,6 +46,15 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-28 | ₹0 (first real budget notification) | — | Kill-switch live at ₹12,600 (≈ $150) |
 
 ## Log
+
+### 2026-09-29 — MM-101: Secret Manager settings source (SECRETS_SOURCE=env|aws|gcp)
+- **Done:** New `GcpSecretManagerSource` (`src/config/gcp_secret_manager.py`) reads the JSON secret `marginmaestro-<APP_ENV>` (latest version) from the project in `GCP_PROJECT_ID`, via Application Default Credentials. Shared logic moved into `JsonSecretSource` (`src/config/json_secret_source.py`); the AWS `SecretsManagerSource` now subclasses it with identical behaviour. `Settings` picks the store with `SECRETS_SOURCE=env|aws|gcp`; explicit env vars always win over the secret. Terraform `infra/gcp/secrets.tf`: Secret Manager API, empty secret container `marginmaestro-prod` (user-managed replication in us-central1) and `secretAccessor` on that one secret for `mm-api-sa`, `mm-agent-sa`, `mm-mcp-sa`, `mm-events-sa`.
+- **Decisions:** (1) **Unset `SECRETS_SOURCE` keeps today's behaviour** — env only when `APP_ENV=local`, AWS otherwise — so the AWS deployment needs no config change (ground rule 6). (2) Unknown values and a missing `GCP_PROJECT_ID` fail loud. (3) GCP client imported lazily, so AWS/local runs never load it. (4) `pyproject.toml` extras split: `gcp` = runtime (`google-cloud-secret-manager`, now baked into the one Docker image) and `gcp-ops` = kill-switch tooling (`google-cloud-billing`, `functions-framework`, CI only). (5) Secret values are added out-of-band (`gcloud secrets versions add`), never through Terraform — same rule as AWS. Populating the secret waits for G5, when something first reads it.
+- **Changed:** `src/config/{json_secret_source.py (new), gcp_secret_manager.py (new), secrets_manager.py, settings.py}`, `tests/unit/test_settings.py` (+9 tests), `infra/gcp/{secrets.tf (new), outputs.tf, README.md}`, `pyproject.toml`, `Dockerfile`, `.github/workflows/ci.yml`, `.env.example`, `CLAUDE.md`, `docs/gcp/GCP_ROADMAP.md`, `docs/AWS_PAUSE_RESUME.md` (new step 0: pin the app image to a known-good SHA before any pull on resume — replaces the separate AWS pin change, since the box's compose file is only written on first boot and AWS is paused).
+- **Verified:** settings tests 19 passed (+9 new); full suite 554 passed, coverage 98%; ruff/black/mypy clean. `terraform plan` → 6 to add, 0 to change, 0 to destroy. Caught during testing: the first version bound the GCP client factory as a default argument, so the test's fake client was ignored and a test **reached real GCP** (stopped only because the API wasn't enabled yet). Fixed by resolving the factory at call time; tests never touch the network now.
+- **Cost impact:** none — an empty secret stores no versions; the free tier covers 6 active versions and 10k accesses/month.
+- **Known issues / tech debt:** the secret is empty until G5 fills it; anything run with `SECRETS_SOURCE=gcp` before then fails loud on the missing version.
+- **Next step:** user applies `mm101.tfplan`; then MM-102 (adapter interfaces + contract tests).
 
 ### 2026-09-29 — MM-100: Workload Identity Federation for GitHub Actions
 - **Done:** `infra/gcp/wif.tf`: pool `github`, OIDC provider `github-actions` (issuer `token.actions.githubusercontent.com`) with condition `repository_id == 1310097546 && repository_owner_id == 137914842 && ref == refs/heads/main`, and `roles/iam.workloadIdentityUser` on `mm-ci-sa` for `principalSet://…/attribute.repository_id/1310097546` only. New CI job `gcp-auth` (push to `main`, after `build-and-push`, job-level `id-token: write`) mints an access token for `mm-ci-sa` via `google-github-actions/auth@v3.0.0` — the proof that the login works. Outputs `github_wif_provider` / `github_ci_service_account` feed the GitHub Actions variables `GCP_WIF_PROVIDER` / `GCP_CI_SERVICE_ACCOUNT`.
