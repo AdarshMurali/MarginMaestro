@@ -1,3 +1,4 @@
+from typing import Any
 from urllib.parse import quote_plus
 
 from sqlalchemy import Engine, create_engine
@@ -6,6 +7,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from config.settings import Settings, get_settings
 
 ODBC_DRIVER = "ODBC Driver 18 for SQL Server"
+
+# MM-104 (ground rule 6): SQL Server stays the default so the AWS deployment
+# (Azure SQL) is unchanged; Postgres is opted into for local GCP work, CI and
+# Cloud SQL.
+DIALECTS = ("mssql", "postgres")
 
 # The deployed database (finsight-sql-server, GP_S_Gen5 Serverless) auto-
 # pauses after an hour of no activity to keep cost near-zero when nobody's
@@ -20,18 +26,39 @@ ODBC_DRIVER = "ODBC Driver 18 for SQL Server"
 # retry loop needed, one longer wait comfortably covers the resume window.
 AZURE_SERVERLESS_RESUME_TIMEOUT_SECONDS = 60
 
+POSTGRES_CONNECT_TIMEOUT_SECONDS = 10
 
-def build_connection_url(settings: Settings) -> str:
+
+def db_dialect(settings: Settings) -> str:
+    dialect = settings.db_dialect.strip().lower()
+    if dialect not in DIALECTS:
+        raise ValueError(f"DB_DIALECT must be one of {DIALECTS}, got {settings.db_dialect!r}")
+    return dialect
+
+
+def build_connection_url(settings: Settings, database: str | None = None) -> str:
     user = quote_plus(settings.db_user or "")
     password = quote_plus(settings.db_password or "")
+    name = database or settings.db_name
+    if db_dialect(settings) == "postgres":
+        return (
+            f"postgresql+psycopg://{user}:{password}@{settings.db_host}:{settings.db_port}/{name}"
+        )
     driver = quote_plus(ODBC_DRIVER)
     return (
         f"mssql+pyodbc://{user}:{password}@{settings.db_host}:{settings.db_port}"
-        f"/{settings.db_name}?driver={driver}&TrustServerCertificate=yes"
+        f"/{name}?driver={driver}&TrustServerCertificate=yes"
     )
 
 
+def connect_args(settings: Settings) -> dict[str, Any]:
+    if db_dialect(settings) == "postgres":
+        return {"connect_timeout": POSTGRES_CONNECT_TIMEOUT_SECONDS}
+    return {"timeout": AZURE_SERVERLESS_RESUME_TIMEOUT_SECONDS}
+
+
 def get_engine(settings: Settings | None = None) -> Engine:
+    settings = settings or get_settings()
     # pool_pre_ping: without it, a connection Azure SQL has silently dropped
     # (idle timeout, network blip) sits in the pool looking valid until the
     # next checkout, then fails on the caller's first query with a raw TCP
@@ -40,9 +67,9 @@ def get_engine(settings: Settings | None = None) -> Engine:
     # dev container sat idle) and again running MM-102's first deployed
     # queries against Azure SQL for real.
     return create_engine(
-        build_connection_url(settings or get_settings()),
+        build_connection_url(settings),
         pool_pre_ping=True,
-        connect_args={"timeout": AZURE_SERVERLESS_RESUME_TIMEOUT_SECONDS},
+        connect_args=connect_args(settings),
     )
 
 

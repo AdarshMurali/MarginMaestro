@@ -41,6 +41,78 @@ jobs:
           name: coverage-xml
           path: coverage.xml
 
+  # MM-104 (ground rule 6): the one migration chain must stay valid on both
+  # SQL Server (AWS / Azure SQL) and Postgres (GCP / Cloud SQL). Runs
+  # upgrade -> downgrade -> upgrade against a real server for each dialect.
+  migrations:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dialect: postgres
+            image: pgvector/pgvector:pg17
+            port: 5432
+            user: marginmaestro
+          - dialect: mssql
+            image: mcr.microsoft.com/mssql/server:2022-latest
+            port: 1433
+            user: sa
+    services:
+      db:
+        image: ${{ matrix.image }}
+        env:
+          POSTGRES_USER: marginmaestro
+          POSTGRES_PASSWORD: CiOnly!Passw0rd
+          POSTGRES_DB: marginmaestro
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: CiOnly!Passw0rd
+        ports:
+          - ${{ matrix.port }}:${{ matrix.port }}
+    env:
+      APP_ENV: local
+      DB_DIALECT: ${{ matrix.dialect }}
+      DB_HOST: localhost
+      DB_PORT: ${{ matrix.port }}
+      DB_NAME: marginmaestro
+      DB_USER: ${{ matrix.user }}
+      DB_PASSWORD: CiOnly!Passw0rd # throwaway CI container, not a secret
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install ODBC Driver 18 (SQL Server only)
+        if: matrix.dialect == 'mssql'
+        run: |
+          if ! odbcinst -q -d | grep -q "ODBC Driver 18 for SQL Server"; then
+            curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc >/dev/null
+            curl -fsSL "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list" | sudo tee /etc/apt/sources.list.d/mssql-release.list >/dev/null
+            sudo apt-get update -q
+            sudo ACCEPT_EULA=Y apt-get install -y -q msodbcsql18
+          fi
+
+      - name: Install dependencies
+        run: pip install -e ".[db]"
+
+      - name: Wait for the database and create it
+        run: |
+          for i in $(seq 1 30); do
+            python -c "from config.settings import get_settings; from persistence.db.bootstrap import ensure_database_exists; ensure_database_exists(get_settings())" && exit 0
+            echo "waiting for ${DB_DIALECT} ($i)"; sleep 5
+          done
+          exit 1
+
+      - name: Upgrade, downgrade, upgrade
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+          alembic current
+
   terraform-gcp:
     runs-on: ubuntu-latest
     steps:

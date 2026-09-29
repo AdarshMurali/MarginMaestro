@@ -26,6 +26,20 @@ services:
     volumes:
       - sqlserver_data:/var/opt/mssql
 
+  # MM-104: Postgres + pgvector for the GCP track (Cloud SQL in G1). Runs
+  # alongside SQL Server; the app picks one with DB_DIALECT. Local-only
+  # credentials (not secrets) -- see .env.example.
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: ${PG_USER:-marginmaestro}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-marginmaestro-local}
+      POSTGRES_DB: ${DB_NAME:-marginmaestro}
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:v26.1.14
     command:
@@ -90,6 +104,7 @@ services:
 volumes:
   redpanda_data:
   sqlserver_data:
+  postgres_data:
   chroma_data:
   prometheus_data:
   grafana_data:

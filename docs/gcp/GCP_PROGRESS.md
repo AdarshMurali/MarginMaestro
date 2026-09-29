@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0 (MM-87) in progress — MM-99 (Terraform foundation), MM-98 (budget + kill-switch) and MM-100 (GitHub Actions WIF) done; MM-101 (Secret Manager source) done; MM-102 (adapter interfaces) in review — last G0 story.
+- **Phase:** G0 (MM-87) **done**. G1 (MM-88) in progress — MM-104 (Postgres + dual-dialect migrations) in review; next MM-105 (Postgres checkpoints).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -27,8 +27,8 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 | Phase | Epic | Scope | Status |
 |---|---|---|---|
-| G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | In progress (MM-98…MM-101 done; MM-102 in review) |
-| G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | Not started |
+| G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | **Done** |
+| G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | In progress (MM-104 in review) |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | Not started |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | Not started |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | Not started |
@@ -46,6 +46,18 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-28 | ₹0 (first real budget notification) | — | Kill-switch live at ₹12,600 (≈ $150) |
 
 ## Log
+
+### 2026-09-29 — MM-104: Postgres locally + dual-dialect migrations
+- **Done:** New setting `DB_DIALECT=mssql|postgres` (default `mssql`, so AWS/Azure SQL is unchanged). `persistence/db/engine.py` builds a `postgresql+psycopg://` URL and Postgres connect args when `postgres`; `bootstrap.ensure_database_exists` checks `pg_database` via the `postgres` admin DB and quotes the identifier with the dialect's own preparer. New migration `a1c4e7f90b21` enables the `vector` extension on Postgres only (no-op on SQL Server). `docker-compose.yml` gains a `postgres` service (`pgvector/pgvector:pg17`, local-only credentials) alongside SQL Server. New CI job `migrations` runs `upgrade → downgrade → upgrade` against real **Postgres 17 (pgvector)** and **SQL Server 2022** service containers on every PR.
+- **Decisions:** Both databases run side by side locally; nothing SQL Server-side is removed until G9. The pgvector `VectorStore` adapter waits for G2 (it depends on the switch to 768-dim Gemini embeddings); G1 only enables the extension. CI uses SQL Server 2022 (closer to Azure SQL than the deprecated SQL Edge image used locally).
+- **Changed:** `src/config/settings.py` (`db_dialect`), `src/persistence/db/{engine,bootstrap}.py`, `migrations/env.py`, `migrations/versions/a1c4e7f90b21_postgres_vector_extension.py` (new), `docker-compose.yml`, `.env.example`, `pyproject.toml` (`psycopg[binary]` in `db`), `.github/workflows/ci.yml` (`migrations` job), `tests/unit/test_db_engine.py` (+10 tests).
+- **Verified:** full suite 589 passed, coverage 98% (`engine.py`, `bootstrap.py` 100%); ruff/black/mypy clean; `docker compose config` valid. Real-database proof is the new CI `migrations` job (both dialects) — Docker Desktop was off locally.
+- **Cost impact:** none — local containers and CI only.
+- **Known issues / tech debt:** `orchestrator_checkpoints*` tables (for the SQL Server `AzureSQLSaver`) are also created on Postgres; MM-105 decides whether the official Postgres saver replaces them there.
+- **Next step:** MM-105 — LangGraph checkpoints on Postgres (official `PostgresSaver`).
+
+### 2026-09-29 — G0 (MM-87) closed
+- All five G0 stories done: MM-98 (budget + live kill-switch), MM-99 (Terraform foundation), MM-100 (GitHub Actions WIF), MM-101 (Secret Manager source), MM-102 (adapter interfaces). Epic MM-87 → Done. G1 (MM-88) started: stories MM-104 (G11), MM-105 (G12), MM-106 (G13), MM-107 (G14), MM-108 (G15).
 
 ### 2026-09-29 — MM-102: Adapter interfaces + contract tests
 - **Done:** Five interfaces in `src/ports/` — `LLMClient` (`complete`, `parse`), `Embedder`, `VectorStore` (`upsert`, `query` with shared filter semantics: own + shared chunks, exact doc_type, nearest first), `EventBus` (`publish`, `flush`), `Notifier` (`send` → `DeliveryReceipt`). Adapters in `src/adapters/` wrap today's code: `OpenAIChat` / `OpenAIEmbedder`, `ChromaVectorStore` (Chroma `where` builder moved here), `SlackNotifier` (wraps `send_slack_notice`), Kafka = the existing `EventProducer` (already matches `EventBus`), plus `InMemoryVectorStore` / `InMemoryEventBus` test doubles. `adapters/factory.py` picks one per flag — new settings `VECTOR_STORE=chroma`, `EVENT_BUS=kafka`, `CLIENT_NOTIFIER=slack`; unknown values fail loud. Call sites switched: `csa_rag`, `communication`, `reconciliation` (LLM), `rag.ingest` / `rag.retriever` (Embedder + VectorStore), `event_agent` / `simulator` / `live_feed_publisher` (EventBus). Contract suites in `tests/contract/`, one per interface, parametrised over every adapter.

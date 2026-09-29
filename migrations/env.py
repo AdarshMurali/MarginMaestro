@@ -6,7 +6,7 @@ from sqlalchemy.engine import create_engine
 
 from config.settings import get_settings
 from persistence.db.bootstrap import ensure_database_exists
-from persistence.db.engine import AZURE_SERVERLESS_RESUME_TIMEOUT_SECONDS, build_connection_url
+from persistence.db.engine import build_connection_url, connect_args
 from persistence.db.models import Base
 
 # this is the Alembic Config object, which provides
@@ -57,7 +57,7 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    # Only local dev's own fresh Azure SQL Edge container needs its database
+    # Only local dev's own fresh container (SQL Edge or Postgres) needs its database
     # created -- deployed envs reuse an already-existing database (see
     # docs/ROADMAP.md Phase 10) via a contained DB user with no `master`
     # access at all, so this would fail with a genuine "Login failed" (not
@@ -68,7 +68,7 @@ def run_migrations_online() -> None:
     connectable = create_engine(
         _connection_url,
         poolclass=pool.NullPool,
-        connect_args={"timeout": AZURE_SERVERLESS_RESUME_TIMEOUT_SECONDS},
+        connect_args=connect_args(_settings),
     )
 
     with connectable.connect() as connection:
