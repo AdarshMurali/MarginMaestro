@@ -54,6 +54,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 - **Verified:** `terraform fmt -check -recursive` + `validate` on both roots (Terraform 1.15.8, google 8.4.0 — lock files unchanged). Not yet applied: needs the user's `plan`/`apply` from this branch, then the two repo variables, then a green `gcp-auth` run on `main`.
 - **Cost impact:** none — WIF, STS and IAM are free.
 - **Known issues / tech debt:** (1) Order matters: apply + set the variables **before** merging, or the first `gcp-auth` run on `main` fails. (2) Workload identity pool IDs are soft-deleted for 30 days — if `github` is ever destroyed, re-creating it with the same ID fails until the undelete/purge window passes.
+- **Follow-up (same day, user decision):** roadmap ground rule 6 added — one image for AWS and GCP, AWS-compatible defaults, old adapters kept, contract tests on both adapters, migrations valid on SQL Server and Postgres, AWS pinned to an image SHA (MM-G11 updated to match). Pinning EC2's compose file to a SHA is still to do — needs its own AWS change (`infra/compute.tf`), before any GCP-era code merges.
 - **Next step:** user applies (`terraform -chdir=infra/gcp plan -out="mm100.tfplan"` → `apply "mm100.tfplan"`), sets the two variables, merges; confirm `gcp-auth` green on `main`. Then MM-101 (Secret Manager).
 
 ### 2026-09-28 — MM-98: Budget alerts + billing kill-switch

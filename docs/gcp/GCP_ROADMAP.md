@@ -12,6 +12,12 @@
 3. **Every external dependency sits behind an interface + env flag**, so a single piece can be swapped without touching the rest (ADR-0017).
 4. **Golden rules are unchanged:** LLM never does math (ADR-0005), human approval before any client-facing message, idempotent event processing, tests + ≥ 80% coverage per story.
 5. Same working loop as `docs/ROADMAP.md`: one story at a time, Jira ticket per story, handoff entry in **`docs/gcp/GCP_PROGRESS.md`** (not the main `docs/PROGRESS.md`). Epic keys are real Jira keys (MM-87 … MM-97); story keys below are placeholders (`MM-G#`) until each phase's stories are created in Jira when the phase starts.
+6. **One image, AWS stays intact until G9.** The same `adarshmurali/marginmaestro:<sha>` image runs on AWS (EC2) and GCP (Cloud Run); env flags pick the adapter (`EVENT_BUS`, `SECRETS_SOURCE`, `LLM_PROVIDER`, …). Until the G9 cut-over:
+   - **Defaults stay AWS-compatible.** A GCP adapter runs only when its flag is set explicitly, so an AWS box pulling a new image behaves exactly as before.
+   - **Old adapters are kept** (Kafka, OpenAI, AWS Secrets Manager, Azure SQL); removing them is G9 work, with explicit user approval.
+   - **Contract tests cover both adapters** of every interface in CI, so a change that breaks the AWS path turns CI red.
+   - **Database migrations must work on both** SQL Server (Azure SQL) and Postgres — every Alembic migration from G1 on is validated against both dialects.
+   - **AWS runs a pinned image** (`:<sha>`, not `:latest`), bumped deliberately, so a routine `docker compose pull` can't ship untested GCP-era code to EC2.
 
 ---
 
@@ -67,7 +73,7 @@ ADRs: 0008, 0017
 ### Phase G1 — Cloud SQL Postgres, pgvector and row-level security (Epic: MM-88)
 ADR: 0011
 
-- **MM-G11** Local dev: `pgvector/pgvector` Postgres container replaces SQL Server + Chroma in Docker Compose; `psycopg` driver; Alembic migrations ported and re-validated.
+- **MM-G11** Local dev: `pgvector/pgvector` Postgres container replaces SQL Server + Chroma in Docker Compose; `psycopg` driver; Alembic migrations ported and re-validated **on both Postgres and SQL Server** (ground rule 6; Azure SQL stays live until G9).
 - **MM-G12** LangGraph checkpointing moves to the official Postgres checkpointer (replaces `persistence/db/checkpoint_saver.py`); approval pauses survive restarts.
 - **MM-G13** **Row-level security:** policies on all counterparty-scoped tables; app connects as a non-owner role with `FORCE ROW LEVEL SECURITY`; request-scoped `SET LOCAL app.user_role / app.counterparty_scope` from the JWT; `auditor` read-only role.
 - **MM-G14** RLS tests: a user cannot read or update another counterparty's rows, including via crafted queries and via RAG retrieval.
