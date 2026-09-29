@@ -12,6 +12,12 @@
 3. **Every external dependency sits behind an interface + env flag**, so a single piece can be swapped without touching the rest (ADR-0017).
 4. **Golden rules are unchanged:** LLM never does math (ADR-0005), human approval before any client-facing message, idempotent event processing, tests + ≥ 80% coverage per story.
 5. Same working loop as `docs/ROADMAP.md`: one story at a time, Jira ticket per story, handoff entry in **`docs/gcp/GCP_PROGRESS.md`** (not the main `docs/PROGRESS.md`). Epic keys are real Jira keys (MM-87 … MM-97); story keys below are placeholders (`MM-G#`) until each phase's stories are created in Jira when the phase starts.
+6. **One image, AWS stays intact until G9.** The same `adarshmurali/marginmaestro:<sha>` image runs on AWS (EC2) and GCP (Cloud Run); env flags pick the adapter (`EVENT_BUS`, `SECRETS_SOURCE`, `LLM_PROVIDER`, …). Until the G9 cut-over:
+   - **Defaults stay AWS-compatible.** A GCP adapter runs only when its flag is set explicitly, so an AWS box pulling a new image behaves exactly as before.
+   - **Old adapters are kept** (Kafka, OpenAI, AWS Secrets Manager, Azure SQL); removing them is G9 work, with explicit user approval.
+   - **Contract tests cover both adapters** of every interface in CI, so a change that breaks the AWS path turns CI red.
+   - **Database migrations must work on both** SQL Server (Azure SQL) and Postgres — every Alembic migration from G1 on is validated against both dialects.
+   - **AWS runs a pinned image** (`:<sha>`, not `:latest`), bumped deliberately, so a routine `docker compose pull` can't ship untested GCP-era code to EC2.
 
 ---
 
@@ -41,10 +47,10 @@
 | 17 | **BigQuery policy tags** | Column-level classification + dynamic masking of confidential fields | — (new) | G7, G8 | Free |
 | 18 | **Cloud Storage** | RAG source documents (CSA, policy, escalation), with a retention policy | S3 bucket | G2 | Low (5 GB free) |
 | 19 | **Secret Manager** | All secrets as one JSON secret per env (`marginmaestro-<app_env>`) | AWS Secrets Manager | G0 | Low |
-| 20 | **Artifact Registry** | Container images | Docker Hub (kept as mirror) | G0 | Low (0.5 GB free) |
+| 20 | ~~Artifact Registry~~ | **Not used for app images** — Docker Hub stays the image registry (2026-09-29, ADR-0017): images outlive the trial and a kill-switch billing unlink, and Cloud Run pulls public Docker Hub images directly. Google-managed repos (Cloud Functions / Agent Engine builds) only | — | — | — |
 | 21 | **Cloud Logging / Trace / Monitoring** | Structured JSON logs, OTel traces (one span per lifecycle step), metrics + alerts | Jaeger / Prometheus / Grafana (deployed env) | G5 | Low (free quotas) |
 | 22 | **Cloud Audit Logs** | Admin + data-access logs on Cloud SQL, BigQuery, GCS, Secret Manager | — (new) | G8 | Low |
-| 23 | **IAM + Workload Identity Federation** | Least-privilege service account per service; keyless GitHub Actions deploys | AWS IAM | G0 | Free |
+| 23 | **IAM + Workload Identity Federation** | Least-privilege service account per service; keyless GitHub Actions login (this repo, `main` only) for automated Cloud Run deploys | AWS IAM | G0, G5 | Free |
 | 24 | **Cloud Billing budgets + kill-switch function** | $150 (₹12,600) cumulative trial budget (usage before credits), alerts at ≈ $25/$50/$75/$100/$125, automatic billing detach at $150 | — (new) | G0 | Free |
 | — | *Non-GCP:* WhatsApp Business Cloud API | Client-facing margin-call notices + replies | Slack (client side only) | G6 | $0 (test number, ≤ 5 recipients) |
 | — | *Non-GCP, unchanged:* Slack, ServiceNow PDI, GitHub Actions, SonarCloud, Terraform | Internal ops alerts, SLA escalation incidents, CI, quality, IaC | — | — | Free |
@@ -58,7 +64,7 @@ ADRs: 0008, 0017
 
 - **MM-G01** (MM-98) GCP billing budget — **$150 (₹12,600) cumulative for the trial, counting usage before credits**, alerts at ≈ $25/$50/$75/$100/$125 — and a live **billing kill-switch** at $150 (budget → Pub/Sub → function that detaches billing). Verified with a test notification in dry-run mode first.
 - **MM-G02** Terraform `infra/gcp/`: enabled APIs, one service account per service, least-privilege IAM, a module per provider with `enable_*` toggles.
-- **MM-G03** Workload Identity Federation for GitHub Actions; CI pushes images to **Artifact Registry**.
+- **MM-G03** (MM-100) **Workload Identity Federation** for GitHub Actions: pool + OIDC provider trusting only this repo (numeric repo/owner IDs) on `main`; CI job `gcp-auth` proves the keyless login as `mm-ci-sa`. Images stay on **Docker Hub** (no Artifact Registry repo — ADR-0017).
 - **MM-G04** **Secret Manager** source in `src/config/` (replaces `secrets_manager.py`'s AWS source behind the same `Settings` interface; `SECRETS_SOURCE=gcp|aws|env`).
 - **MM-G05** Adapter interfaces scaffolded: `LLMClient`, `Embedder`, `VectorStore`, `Repository`, `EventBus`, `Notifier`, `Guardrail`, `Warehouse`, plus a shared contract-test harness. The existing implementations become the first adapters (no behavior change).
 
@@ -67,7 +73,7 @@ ADRs: 0008, 0017
 ### Phase G1 — Cloud SQL Postgres, pgvector and row-level security (Epic: MM-88)
 ADR: 0011
 
-- **MM-G11** Local dev: `pgvector/pgvector` Postgres container replaces SQL Server + Chroma in Docker Compose; `psycopg` driver; Alembic migrations ported and re-validated.
+- **MM-G11** Local dev: `pgvector/pgvector` Postgres container replaces SQL Server + Chroma in Docker Compose; `psycopg` driver; Alembic migrations ported and re-validated **on both Postgres and SQL Server** (ground rule 6; Azure SQL stays live until G9).
 - **MM-G12** LangGraph checkpointing moves to the official Postgres checkpointer (replaces `persistence/db/checkpoint_saver.py`); approval pauses survive restarts.
 - **MM-G13** **Row-level security:** policies on all counterparty-scoped tables; app connects as a non-owner role with `FORCE ROW LEVEL SECURITY`; request-scoped `SET LOCAL app.user_role / app.counterparty_scope` from the JWT; `auditor` read-only role.
 - **MM-G14** RLS tests: a user cannot read or update another counterparty's rows, including via crafted queries and via RAG retrieval.
@@ -117,6 +123,7 @@ ADRs: 0008, 0010
 - **MM-G53** Frontend on **Cloud Run** (HTTPS by default, which removes the mixed-content rewrite workaround); Vercel kept as fallback.
 - **MM-G54** OTel → **Cloud Trace**, JSON logs → **Cloud Logging**, metrics + alerts in **Cloud Monitoring** (SLA breaches, guardrail blocks, error rate).
 - **MM-G55** **Gen AI evaluation** run on the golden scenario set from CI (on demand).
+- **MM-G57** **Automated CD:** `deploy-gcp` job in `ci.yml` after `build-and-push` — WIF login (MM-100), then `google-github-actions/deploy-cloudrun` with `docker.io/adarshmurali/marginmaestro:<sha>` for each Cloud Run service; `mm-ci-sa` gets `roles/run.developer` + `iam.serviceAccountUser` on the runtime accounts only. Every merge to `main` goes live with no manual step (the AWS EC2 deploy needed a manual `docker compose pull` over SSM).
 
 **Exit:** the full lifecycle runs end to end on GCP from the public Cloud Run URL, with one trace per run in Cloud Trace.
 
