@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
 
+    # MM-102: which adapter backs each port (adapters/factory.py). Defaults are
+    # the pre-GCP stack; each GCP phase adds its value (pgvector, pubsub, whatsapp).
+    vector_store: str = "chroma"
+    event_bus: str = "kafka"
+    client_notifier: str = "slack"
+
     chroma_host: str = "localhost"
     chroma_port: int = 8100
 

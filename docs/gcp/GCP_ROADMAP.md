@@ -21,6 +21,8 @@
 
 ---
 
+> **Story keys:** `MM-G##` are roadmap placeholders. The real Jira key is written next to each one once the story is created, e.g. "MM-G05 (MM-102)". Jira (https://adarsh588.atlassian.net/browse/MM-102) is the source of truth.
+
 ## GCP services and what each is used for
 
 | # | Service | What we use it for | Replaces | Phase | Post-trial cost risk → fallback |
@@ -63,10 +65,10 @@
 ADRs: 0008, 0017
 
 - **MM-G01** (MM-98) GCP billing budget — **$150 (₹12,600) cumulative for the trial, counting usage before credits**, alerts at ≈ $25/$50/$75/$100/$125 — and a live **billing kill-switch** at $150 (budget → Pub/Sub → function that detaches billing). Verified with a test notification in dry-run mode first.
-- **MM-G02** Terraform `infra/gcp/`: enabled APIs, one service account per service, least-privilege IAM, a module per provider with `enable_*` toggles.
+- **MM-G02** (MM-99) Terraform `infra/gcp/`: enabled APIs, one service account per service, least-privilege IAM, a module per provider with `enable_*` toggles.
 - **MM-G03** (MM-100) **Workload Identity Federation** for GitHub Actions: pool + OIDC provider trusting only this repo (numeric repo/owner IDs) on `main`; CI job `gcp-auth` proves the keyless login as `mm-ci-sa`. Images stay on **Docker Hub** (no Artifact Registry repo — ADR-0017).
 - **MM-G04** (MM-101) **Secret Manager** source in `src/config/`, alongside (not replacing) the AWS source behind the same `Settings` interface; `SECRETS_SOURCE=env|aws|gcp`, unset keeps today's AWS behaviour.
-- **MM-G05** Adapter interfaces scaffolded: `LLMClient`, `Embedder`, `VectorStore`, `Repository`, `EventBus`, `Notifier`, `Guardrail`, `Warehouse`, plus a shared contract-test harness. The existing implementations become the first adapters (no behavior change).
+- **MM-G05** (MM-102) Adapter interfaces in `src/ports/` for the dependencies that have a real second implementation: `LLMClient`, `Embedder`, `VectorStore`, `EventBus`, `Notifier`. Today's code wrapped as the first adapters in `src/adapters/` (OpenAI, Chroma, Kafka, Slack; in-memory vector store/event bus as test doubles), `adapters/factory.py` picks one per env flag (`VECTOR_STORE`, `EVENT_BUS`, `CLIENT_NOTIFIER`), contract tests in `tests/contract/`. **Dropped:** `Repository` (SQLAlchemy already is that abstraction), `Guardrail` and `Warehouse` (one implementation each — Model Armor, BigQuery — so their APIs are called directly when G3/G7 need them).
 
 **Exit:** empty GCP project fully governed by Terraform; spend cannot exceed the threshold; all existing tests still pass through the new interfaces.
 

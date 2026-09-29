@@ -1,11 +1,12 @@
+from adapters.factory import get_event_bus
 from config.settings import Settings, get_settings
+from ports.event_bus import EventBus
 from streaming.market_feed import MarketFeed, get_market_feed
-from streaming.producer import EventProducer
 
 
 def publish_live_prices(
     tickers: list[str],
-    producer: EventProducer | None = None,
+    producer: EventBus | None = None,
     feed: MarketFeed | None = None,
     settings: Settings | None = None,
 ) -> int:
@@ -14,7 +15,7 @@ def publish_live_prices(
     classification logic needs no live-specific branch. Respects
     MARKET_FEED_MODE via get_market_feed() unless a feed is injected."""
     settings = settings or get_settings()
-    producer = producer or EventProducer(settings)
+    producer = producer or get_event_bus(settings)
     feed = feed or get_market_feed(settings)
 
     quotes = feed.get_prices(tickers)

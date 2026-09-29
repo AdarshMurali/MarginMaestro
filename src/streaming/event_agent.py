@@ -7,6 +7,7 @@ from confluent_kafka import Message
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from adapters.factory import get_event_bus
 from config.settings import Settings, get_settings
 from persistence.db.engine import get_session_factory
 from persistence.db.models import (
@@ -17,9 +18,9 @@ from persistence.db.models import (
     ProcessedEventORM,
     RatingORM,
 )
+from ports.event_bus import EventBus
 from streaming.consumer import EventConsumer, decode
 from streaming.market_feed import PriceQuote
-from streaming.producer import EventProducer
 from streaming.schemas import DeadLetterEvent, ImpactSet, MarketEvent, MarketEventType
 
 logger = structlog.get_logger()
@@ -129,7 +130,7 @@ def affected_counterparties(session: Session, ticker: str) -> list[str]:
 
 
 def handle_price_message(
-    session: Session, quote: PriceQuote, producer: EventProducer, settings: Settings
+    session: Session, quote: PriceQuote, producer: EventBus, settings: Settings
 ) -> ImpactSet | None:
     upsert_latest_price(session, quote)
 
@@ -162,7 +163,7 @@ def handle_price_message(
 
 
 def handle_market_event_message(
-    session: Session, event: MarketEvent, producer: EventProducer, settings: Settings
+    session: Session, event: MarketEvent, producer: EventBus, settings: Settings
 ) -> ImpactSet | None:
     if event.event_type is MarketEventType.DOWNGRADE:
         upsert_rating_downgrade(session, event)
@@ -186,7 +187,7 @@ def handle_market_event_message(
 def handle_message(
     session: Session,
     msg: Message,
-    producer: EventProducer,
+    producer: EventBus,
     settings: Settings,
 ) -> ImpactSet | None:
     if msg.topic() == settings.kafka_topic_prices:
@@ -217,7 +218,7 @@ def _dead_letter_event(msg: Message, error: Exception, attempts: int) -> DeadLet
 
 
 def _publish_dead_letter(
-    msg: Message, error: Exception, attempts: int, producer: EventProducer, settings: Settings
+    msg: Message, error: Exception, attempts: int, producer: EventBus, settings: Settings
 ) -> None:
     """Deliberately doesn't catch its own failure -- if Redpanda itself is
     unreachable, publish()/flush() raising and propagating out of
@@ -243,7 +244,7 @@ def _publish_dead_letter(
 
 def _handle_with_retry(
     msg: Message,
-    producer: EventProducer,
+    producer: EventBus,
     settings: Settings,
     session_factory: sessionmaker[Session],
     max_attempts: int = EVENT_AGENT_MAX_ATTEMPTS,
@@ -280,7 +281,7 @@ def _handle_with_retry(
 def run(settings: Settings | None = None) -> None:
     settings = settings or get_settings()
     session_factory = get_session_factory(settings)
-    producer = EventProducer(settings)
+    producer = get_event_bus(settings)
 
     with EventConsumer(
         topics=[settings.kafka_topic_prices, settings.kafka_topic_events],

@@ -9,9 +9,11 @@ graph (confirmed with the user before MM-46 started)."""
 from openai import OpenAI
 from pydantic import BaseModel
 
+from adapters.factory import get_llm
 from calc.trade_diff import BreakItem, reconcile
 from config.settings import Settings, get_settings
 from persistence.models import Position
+from ports.llm import LLMClient
 from rag.models import Citation
 from rag.retriever import RetrievedChunk, retrieve
 
@@ -51,6 +53,7 @@ def draft_resolution(
     top_k: int = DEFAULT_TOP_K,
     openai_client: OpenAI | None = None,
     settings: Settings | None = None,
+    llm: LLMClient | None = None,
 ) -> tuple[str, list[Citation]]:
     settings = settings or get_settings()
     break_summary = _build_break_summary(break_items)
@@ -60,18 +63,10 @@ def draft_resolution(
         query, doc_type="disputes", top_k=top_k, settings=settings
     )
 
-    openai_client = openai_client or OpenAI(api_key=settings.openai_api_key)
-    completion = openai_client.chat.completions.create(
-        model=settings.openai_model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"Breaks:\n{break_summary}\n\n---\n\n{_build_context(chunks)}",
-            },
-        ],
+    llm = llm or get_llm(settings, openai_client)
+    text = llm.complete(
+        SYSTEM_PROMPT, f"Breaks:\n{break_summary}\n\n---\n\n{_build_context(chunks)}"
     )
-    text = completion.choices[0].message.content
     resolution = text.strip() if text else "No resolution could be drafted; manual review required."
     citations = [Citation(source_file=c.source_file, section=c.section) for c in chunks]
     return resolution, citations
@@ -85,6 +80,7 @@ def reconcile_call(
     tolerance: float,
     openai_client: OpenAI | None = None,
     settings: Settings | None = None,
+    llm: LLMClient | None = None,
 ) -> ReconciliationAgentResult:
     """Full Reconciliation Agent flow: MM-46's deterministic gate first: if
     within tolerance, no LLM call is made at all -- there's nothing to
@@ -98,7 +94,7 @@ def reconcile_call(
         )
 
     resolution, citations = draft_resolution(
-        diff_result.break_items, openai_client=openai_client, settings=settings
+        diff_result.break_items, openai_client=openai_client, settings=settings, llm=llm
     )
     return ReconciliationAgentResult(
         agreed=False,
