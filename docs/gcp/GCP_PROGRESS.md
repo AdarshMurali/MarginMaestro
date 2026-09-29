@@ -53,7 +53,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 - **Changed:** `src/config/settings.py` (`db_dialect`), `src/persistence/db/{engine,bootstrap}.py`, `migrations/env.py`, `migrations/versions/a1c4e7f90b21_postgres_vector_extension.py` (new), `docker-compose.yml`, `.env.example`, `pyproject.toml` (`psycopg[binary]` in `db`), `.github/workflows/ci.yml` (`migrations` job), `tests/unit/test_db_engine.py` (+10 tests).
 - **Verified:** full suite 589 passed, coverage 98% (`engine.py`, `bootstrap.py` 100%); ruff/black/mypy clean; `docker compose config` valid. Real-database proof is the new CI `migrations` job (both dialects) — Docker Desktop was off locally.
 - **Cost impact:** none — local containers and CI only.
-- **Known issues / tech debt:** `orchestrator_checkpoints*` tables (for the SQL Server `AzureSQLSaver`) are also created on Postgres; MM-105 decides whether the official Postgres saver replaces them there.
+- **Known issues / tech debt:** (0) The new CI job caught a **pre-existing bug**: migration `68237454ede4` (counterparty tier) could never be downgraded on SQL Server — SQL Server won't drop a column while its auto-named default constraint exists; upgrades were fine, so it went unnoticed. Fixed with `mssql_drop_default=True` (ignored on Postgres). (1) `orchestrator_checkpoints*` tables (for the SQL Server `AzureSQLSaver`) are also created on Postgres; MM-105 decides whether the official Postgres saver replaces them there.
 - **Next step:** MM-105 — LangGraph checkpoints on Postgres (official `PostgresSaver`).
 
 ### 2026-09-29 — G0 (MM-87) closed
