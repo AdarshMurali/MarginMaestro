@@ -20,3 +20,8 @@ output "github_ci_service_account" {
   description = "Service account CI impersonates -- set as the GitHub Actions variable GCP_CI_SERVICE_ACCOUNT"
   value       = google_service_account.component["ci"].email
 }
+
+output "app_secret_id" {
+  description = "Secret Manager secret holding the app's JSON config (values added out-of-band)"
+  value       = google_secret_manager_secret.app.id
+}

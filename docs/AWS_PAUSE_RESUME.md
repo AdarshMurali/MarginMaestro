@@ -21,6 +21,7 @@ Still billing while paused: EBS volumes of the stopped instances, the Secrets Ma
 ## Resume checklist
 
 ### 1. MarginMaestro backend (`marginmaestro-prod-app`)
+0. **Pin the app image before anything pulls it** (GCP ground rule 6, `docs/gcp/GCP_ROADMAP.md`). The compose file on the box still says `adarshmurali/marginmaestro:latest`, and `:latest` now carries GCP-era code. After the instance starts, before any `docker compose pull`, open an SSM session and set the tag to a known-good commit SHA, e.g. `72a27bdc7d7e…` (full SHA, on Docker Hub; last build before GCP-era app code) or a later SHA already verified against AWS. Starting the stopped box alone doesn't pull a new image — the risk is the next manual pull/redeploy. Editing `infra/compute.tf` doesn't help the existing box: the compose file is written by `user_data` only on first boot.
 1. `cd infra && terraform plan`: it should show `aws_eip.app` being **created** (the old one was released outside Terraform). Review, then `terraform apply` (run it yourself; it needs explicit approval).
    - Alternative without Terraform: start the instance and allocate/associate a new EIP by hand. Terraform state will then drift and must be reconciled with `terraform import` or `terraform state rm`.
 2. Note the new IP: `terraform output` (see `infra/outputs.tf`).

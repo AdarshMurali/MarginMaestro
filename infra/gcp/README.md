@@ -31,7 +31,8 @@ terraform -chdir=infra/gcp apply
 - `variables.tf` — `project_id`, `region`, `environment`.
 - `apis.tf` — APIs the foundation needs. Later phases enable their own APIs in the story that first uses them.
 - `service_accounts.tf` — one service account per component (`mm-api-sa`, `mm-agent-sa`, `mm-mcp-sa`, `mm-events-sa`, `mm-ci-sa`, `mm-killswitch-sa`). Runtime accounts get only telemetry roles here; every other role is granted with the resource it applies to.
-- `outputs.tf` — project, region, service account emails.
+- `secrets.tf` — Secret Manager secret `marginmaestro-<environment>` (empty container; values added out-of-band with `gcloud secrets versions add`, never via Terraform) + `secretAccessor` on that one secret for the runtime accounts (MM-101).
+- `outputs.tf` — project, region, service account emails, WIF provider, app secret id.
 
 CI (`terraform-gcp` job) runs `fmt -check` and `validate` on both roots with `-backend=false`, so it needs no GCP credentials.
 - `wif.tf` — Workload Identity Federation for GitHub Actions (MM-100): pool `github`, provider `github-actions` trusting only this repo (numeric repo + owner IDs) on `refs/heads/main`, and `workloadIdentityUser` on `mm-ci-sa` for that repo only. `mm-ci-sa` has no project roles yet (deploy roles come in G5, MM-G57).

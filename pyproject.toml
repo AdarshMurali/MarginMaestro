@@ -36,7 +36,10 @@ db = ["sqlalchemy", "pyodbc", "alembic"]
 aws = ["boto3"]
 notify = ["slack-sdk"]
 auth = ["bcrypt", "pyjwt"]
-gcp = ["google-cloud-billing", "functions-framework"]
+# gcp: runtime deps baked into the one app image (AWS + GCP, ground rule 6).
+# gcp-ops: tooling outside the app (billing kill-switch function), CI only.
+gcp = ["google-cloud-secret-manager"]
+gcp-ops = ["google-cloud-billing", "functions-framework"]
 observability = [
     "opentelemetry-api",
     "opentelemetry-sdk",

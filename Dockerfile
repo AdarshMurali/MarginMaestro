@@ -36,7 +36,7 @@ COPY src ./src
 # Dockerfile would ModuleNotFoundError on startup without them, never
 # caught until an actual deploy attempt since nothing runs this container
 # image directly in CI/tests today.
-RUN pip install --no-cache-dir ".[db,llm,streaming,rag,aws,data,notify,auth,observability]"
+RUN pip install --no-cache-dir ".[db,llm,streaming,rag,aws,gcp,data,notify,auth,observability]"
 
 
 FROM python:3.11-slim-bookworm
