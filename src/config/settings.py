@@ -20,7 +20,19 @@ class Settings(BaseSettings):
     def cors_allowed_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
-    llm_provider: str = "ollama"
+    # MM-109: openai (default -- the pre-GCP stack, AWS unchanged) or vertex
+    # (Gemini on Vertex AI). The old "ollama" default was never honoured by
+    # the agents, which always used OpenAI.
+    llm_provider: str = "openai"
+    # Pinned model version, never an alias (ADR-0009). Gemini 3.x is served
+    # only from the `global` endpoint (probed 2026-09-30: us-central1 tops out
+    # at gemini-2.5-flash), so the model location is separate from
+    # gcp_location. For strict US residency: gemini-2.5-flash + us-central1.
+    gemini_model: str = "gemini-3.8-flash"
+    gemini_location: str = "global"
+    # Shared by Vertex AI and (as GCP_PROJECT_ID) the Secret Manager source.
+    gcp_project_id: str | None = None
+    gcp_location: str = "us-central1"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1"
     openai_api_key: str | None = None

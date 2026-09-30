@@ -38,7 +38,7 @@ notify = ["slack-sdk"]
 auth = ["bcrypt", "pyjwt"]
 # gcp: runtime deps baked into the one app image (AWS + GCP, ground rule 6).
 # gcp-ops: tooling outside the app (billing kill-switch function), CI only.
-gcp = ["google-cloud-secret-manager"]
+gcp = ["google-cloud-secret-manager", "google-genai"]
 gcp-ops = ["google-cloud-billing", "functions-framework"]
 observability = [
     "opentelemetry-api",
@@ -94,7 +94,7 @@ module = "confluent_kafka.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["functions_framework.*", "cloudevents.*", "google.cloud.*"]
+module = ["functions_framework.*", "cloudevents.*", "google.cloud.*", "google.genai.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

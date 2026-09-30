@@ -1,7 +1,9 @@
 """Picks one adapter per port from Settings (MM-102). Defaults reproduce the
 pre-GCP stack exactly (OpenAI, Chroma, Kafka, Slack), so the AWS deployment
 needs no config change (ground rule 6). GCP adapters are added here as each
-phase lands: pgvector (G1), Gemini (G2), Pub/Sub (G4), WhatsApp (G6)."""
+phase lands: Gemini (G2, MM-109), pgvector (G2), Pub/Sub (G4), WhatsApp (G6)."""
+
+from typing import Any
 
 from openai import OpenAI
 
@@ -25,11 +27,22 @@ def _choice(name: str, value: str, allowed: tuple[str, ...]) -> str:
 
 
 def get_llm(settings: Settings, openai_client: OpenAI | None = None) -> LLMClient:
-    # Only OpenAI exists today. LLM_PROVIDER isn't consulted yet: its default
-    # ("ollama") was never honoured by the agents, which always used OpenAI --
-    # G2 wires LLM_PROVIDER=openai|vertex here and fixes that default.
+    provider = _choice("LLM_PROVIDER", settings.llm_provider, ("openai", "vertex"))
+    if provider == "vertex":
+        from adapters.gemini_adapter import GeminiChat
+
+        return GeminiChat(_genai_client(settings), model=settings.gemini_model)
     client = openai_client or OpenAI(api_key=settings.openai_api_key)
     return OpenAIChat(client, model=settings.openai_model)
+
+
+def _genai_client(settings: Settings) -> Any:
+    if not settings.gcp_project_id:
+        raise ValueError("LLM_PROVIDER=vertex requires GCP_PROJECT_ID")
+    # Imported lazily: only needed when a Vertex adapter is selected.
+    from google.genai import Client
+
+    return Client(vertexai=True, project=settings.gcp_project_id, location=settings.gemini_location)
 
 
 def get_embedder(settings: Settings, openai_client: OpenAI | None = None) -> Embedder:

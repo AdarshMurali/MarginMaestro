@@ -11,6 +11,7 @@ ADR-0006 moved to OpenAI (`gpt-4o-mini` + `text-embedding-3-small`) because Olla
 ## Decision
 
 - **Reasoning / drafting:** Gemini **Flash** tier on **Vertex AI**, exact model version pinned in `Settings` (`GEMINI_MODEL`) — never an unversioned alias.
+  - *As built (MM-109, 2026-09-30):* **`gemini-3.8-flash`** on the **`global`** Vertex AI endpoint via the `google-genai` SDK (`GeminiChat` adapter; `LLM_PROVIDER=vertex`, `GEMINI_MODEL`, `GEMINI_LOCATION`). Probing showed Gemini 3.5–3.8 are served only from `global`; `us-central1` tops out at `gemini-2.5-flash`. `global` means Google may process a request in any region — acceptable for this synthetic-data demo; for strict US residency set `GEMINI_MODEL=gemini-2.5-flash`, `GEMINI_LOCATION=us-central1` (config only). Structured extraction runs at temperature 0. Default `LLM_PROVIDER` is now `openai` (AWS unchanged); the old `ollama` default was never honoured.
 - **Embeddings:** Vertex AI **`gemini-embedding-001`** with `output_dimensionality=768`, so vectors fit pgvector's HNSW index limit (2,000 dims) — see ADR-0011.
 - New `LLM_PROVIDER=vertex` branch in `Settings`, alongside the existing `openai` / `ollama` branches (kept as fallbacks, ADR-0017).
 - Auth via the Cloud Run service account (ADC) — no API key stored.

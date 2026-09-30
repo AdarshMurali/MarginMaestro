@@ -53,3 +53,31 @@ def test_unknown_adapter_choice_fails_loud(getter, flag):
 
 def test_adapter_choice_is_case_and_space_insensitive():
     assert isinstance(factory.get_notifier(_settings(client_notifier=" Slack ")), SlackNotifier)
+
+
+# --- MM-109: LLM_PROVIDER=openai|vertex -----------------------------------------
+
+
+def test_default_llm_provider_is_openai():
+    assert Settings(_env_file=None).llm_provider == "openai"
+
+
+def test_vertex_provider_builds_gemini_on_vertex_ai():
+    from adapters.gemini_adapter import GeminiChat
+
+    settings = _settings(llm_provider="vertex", gcp_project_id="proj-x", gemini_model="gemini-x")
+    with patch("google.genai.Client") as client_cls:
+        llm = factory.get_llm(settings)
+
+    assert isinstance(llm, GeminiChat)
+    client_cls.assert_called_once_with(vertexai=True, project="proj-x", location="global")
+
+
+def test_vertex_provider_requires_a_project():
+    with pytest.raises(ValueError, match="GCP_PROJECT_ID"):
+        factory.get_llm(_settings(llm_provider="vertex"))
+
+
+def test_unknown_llm_provider_fails_loud():
+    with pytest.raises(ValueError, match="LLM_PROVIDER"):
+        factory.get_llm(_settings(llm_provider="ollama"))
