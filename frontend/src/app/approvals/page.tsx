@@ -98,7 +98,7 @@ function ApprovalCard({
       </p>
 
       {error && <p className="text-red-600">{error}</p>}
-      {!canAct && <p className="text-xs text-neutral-400">Viewer role -- read-only.</p>}
+      {!canAct && <p className="text-xs text-neutral-400">Read-only access.</p>}
 
       {canAct && (
         <>
@@ -246,7 +246,7 @@ function SlaCard({
       )}
 
       {error && <p className="text-red-600">{error}</p>}
-      {!canAct && <p className="text-xs text-neutral-400">Viewer role -- read-only.</p>}
+      {!canAct && <p className="text-xs text-neutral-400">Read-only access.</p>}
 
       {canAct && (
         <div className="flex flex-wrap items-center gap-2">

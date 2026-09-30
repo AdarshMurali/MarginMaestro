@@ -4,6 +4,7 @@ from urllib.parse import quote_plus
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+import persistence.db.rls  # noqa: F401  -- registers the RLS session listener (MM-106)
 from config.settings import Settings, get_settings
 
 ODBC_DRIVER = "ODBC Driver 18 for SQL Server"

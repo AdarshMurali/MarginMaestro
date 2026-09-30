@@ -16,13 +16,17 @@
 | **App** | **https://marginmaestro.vercel.app** |
 | **API** | http://13.202.222.57:8000 ([`/health`](http://13.202.222.57:8000/health), [`/docs`](http://13.202.222.57:8000/docs) for the OpenAPI schema) |
 
-Sign in at [`/login`](https://marginmaestro.vercel.app/login) with one of the seeded demo accounts (also the default values of `demo_approver_password` / `demo_viewer_password` / `demo_manager_password` in [`src/config/settings.py`](src/config/settings.py) — nothing sensitive, these exist purely to gate the demo dashboard):
+Sign in at [`/login`](https://marginmaestro.vercel.app/login) with one of the seeded demo accounts (also the default values of `demo_approver_password` / `demo_manager_password` / `demo_analyst_password` / `demo_auditor_password` in [`src/config/settings.py`](src/config/settings.py) — nothing sensitive, these exist purely to gate the demo dashboard):
 
 | Username | Password | Role | Can do |
 |---|---|---|---|
 | `approver` | `MarginMaestro!Approver1` | Approver | Approve / reject / adjust a margin call; respond to its SLA |
 | `manager` | `MarginMaestro!Manager1` | Manager | Everything `approver` can, plus the required **second sign-off** on elite-tier counterparties |
-| `viewer` | `MarginMaestro!Viewer1` | Viewer | Read-only — browse every page, trigger nothing |
+| `analyst1` | `MarginMaestro!Analyst1` | Margin analyst (viewer) | Read-only, **own book only: CP-1 … CP-4** |
+| `analyst2` | `MarginMaestro!Analyst1` | Margin analyst (viewer) | Read-only, **own book only: CP-5 … CP-8** |
+| `auditor` | `MarginMaestro!Auditor1` | Auditor | Read-only, every counterparty incl. system-level audit rows |
+
+Every page except the public landing page needs a login, and the backend scopes every read to the caller: on Postgres, **row-level security** in the database itself hides other analysts' counterparties (MM-106). The `approver`, `manager` and `auditor` see all counterparties.
 
 > This is a portfolio demo running on the project owner's own AWS/OpenAI/Slack accounts — please don't script/load-test it. A handful of clicks is exactly what it's for.
 

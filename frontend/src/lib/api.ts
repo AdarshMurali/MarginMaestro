@@ -1,3 +1,5 @@
+import { getSession } from "next-auth/react";
+
 import { API_BASE_URL } from "@/lib/env";
 
 export interface HealthResponse {
@@ -111,8 +113,30 @@ export interface MarginCallTraceResponse {
   steps: TraceStep[];
 }
 
-async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`);
+// MM-106: every read endpoint requires the same short-lived backend JWT the
+// mutating calls already use, so the backend (and Postgres row-level
+// security) can scope rows to the logged-in user. The token lives 15 min
+// (lib/auth.ts); re-read the session every 5 min rather than on every call.
+const TOKEN_REUSE_MS = 5 * 60 * 1000;
+let cachedToken: { value: string; fetchedAt: number } | null = null;
+
+async function backendToken(): Promise<string | undefined> {
+  if (cachedToken && Date.now() - cachedToken.fetchedAt < TOKEN_REUSE_MS) {
+    return cachedToken.value;
+  }
+  const session = await getSession();
+  const token = session?.backendAccessToken;
+  cachedToken = token ? { value: token, fetchedAt: Date.now() } : null;
+  return token;
+}
+
+async function getJson<T>(path: string, { auth = true }: { auth?: boolean } = {}): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (auth) {
+    const token = await backendToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+  }
+  const res = await fetch(`${API_BASE_URL}${path}`, { headers });
   if (!res.ok) {
     throw new Error(`GET ${path} failed: ${res.status} ${res.statusText}`);
   }
@@ -146,11 +170,23 @@ async function postJson<T>(path: string, token: string, body?: unknown): Promise
 }
 
 export function getHealth(): Promise<HealthResponse> {
-  return getJson<HealthResponse>("/health");
+  return getJson<HealthResponse>("/health", { auth: false });
 }
 
 export function getReady(): Promise<HealthResponse> {
-  return getJson<HealthResponse>("/ready");
+  return getJson<HealthResponse>("/ready", { auth: false });
+}
+
+// Public, unauthenticated totals for the landing page (MM-106) -- no
+// counterparty-level data.
+export interface PublicStatsResponse {
+  counterparties: number;
+  runs_evaluated: number;
+  calls_raised: number;
+}
+
+export function getPublicStats(): Promise<PublicStatsResponse> {
+  return getJson<PublicStatsResponse>("/public/stats", { auth: false });
 }
 
 export function getExposureBoard(): Promise<ExposureBoardResponse> {

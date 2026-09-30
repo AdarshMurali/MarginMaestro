@@ -77,7 +77,7 @@ ADR: 0011
 
 - **MM-G11** (MM-104) Local dev: `pgvector/pgvector:pg17` Postgres container **alongside** SQL Server (Chroma stays until G2); `DB_DIALECT=mssql|postgres` (default `mssql`); psycopg driver; Alembic migrations valid on both Postgres and SQL Server, proven by the CI `migrations` job (ground rule 6; Azure SQL stays live until G9).
 - **MM-G12** (MM-105) LangGraph checkpoints on Postgres: our own database-neutral `SqlCheckpointSaver` (renamed from `AzureSQLSaver`) serves both SQL Server and Postgres — the official Postgres checkpointer was dropped (user decision, 2026-09-30). Its persistence test runs in CI against both databases; approval pauses survive restarts.
-- **MM-G13** (MM-106) **Row-level security:** policies on all counterparty-scoped tables; app connects as a non-owner role with `FORCE ROW LEVEL SECURITY`; request-scoped `SET LOCAL app.user_role / app.counterparty_scope` from the JWT; `auditor` read-only role.
+- **MM-G13** (MM-106) **Row-level security:** Postgres policies on every counterparty-scoped table; each transaction runs as the non-owner `mm_app` role with `FORCE ROW LEVEL SECURITY` and a `SET LOCAL app.scope` from the caller's JWT; read endpoints now require a login (frontend sends the token on reads; landing page uses public counts only). Users: margin analysts `analyst1` (CP-1…CP-4) and `analyst2` (CP-5…CP-8) see only their book; `approver`, `manager` and read-only `auditor` see everything.
 - **MM-G14** (MM-107) RLS tests: a user cannot read or update another counterparty's rows, including via crafted queries and via RAG retrieval.
 - **MM-G15** (MM-108) Provision **Cloud SQL** (smallest shared-core, no HA) via Terraform; IAM DB auth via the Cloud SQL Python Connector; seed via `batch_loader` / `seed_users`.
 

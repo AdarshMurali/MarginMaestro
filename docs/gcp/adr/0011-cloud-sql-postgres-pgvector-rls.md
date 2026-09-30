@@ -20,6 +20,16 @@ Three mandatory requirements meet here: a GCP-hosted relational store, a GCP-hos
 - **Connectivity:** Cloud Run → Cloud SQL via the Cloud SQL Python Connector with IAM database auth; no public IP allow-listing.
 - **Driver:** `psycopg` (v3) for Postgres alongside `pyodbc` for SQL Server, chosen by `DB_DIALECT` (MM-104). LangGraph checkpoints keep using our own SQLAlchemy-based `SqlCheckpointSaver` on both databases (MM-105) — not the official Postgres checkpointer.
 
+### As built (MM-106, 2026-09-30)
+
+- **Scope values:** `app.scope` = `*` (approver, manager, auditor, internal jobs), a comma list of counterparty ids (a margin analyst's book, from table `user_counterparty_access`), or empty (sees nothing).
+- **Role:** every Postgres transaction runs `SET LOCAL ROLE mm_app` (non-owner, no BYPASSRLS; tables have `FORCE ROW LEVEL SECURITY`), so even a superuser login is subject to the policies. The login user only needs membership in `mm_app` — in Cloud SQL the IAM app user is granted it in MM-108.
+- **Where the scope comes from:** API read endpoints require a JWT (`require_user`) and open a session tagged with the caller's scope; a SQLAlchemy `after_begin` listener applies it. Sessions without a scope are internal jobs (orchestrator, event agent, loaders) and run firm-wide.
+- **Policies:** `counterparties`, `portfolios`, `positions` (via its portfolio), `ratings`, `collateral_items`, `tickets`, `audit_log` (rows with no counterparty are firm-wide only), `orchestrator_checkpoints*` (counterparty = suffix of `thread_id`). Market data, reference rates, processed events and users are global. `rag_chunks` gets its policy with the pgvector store in G2.
+- **Reads outside a session** (`/trace`, `/audit-log` fetch one run from the orchestrator) check the same rule in code and return **404** (not 403) when out of scope, so a run's existence isn't revealed.
+- **Public:** `/public/stats` returns only totals (counts) for the landing page.
+- **SQL Server** gets the access table but no row filtering — it's retired in G9.
+
 ## Rationale
 
 - One store gives relational data, vectors and RLS together, and RLS then applies to RAG retrieval too.

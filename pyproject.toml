@@ -54,6 +54,11 @@ where = ["src"]
 target-version = "py311"
 line-length = 100
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom (`x: T = Depends(dep)`) is safe: Depends
+# returns an immutable marker, not a shared mutable default.
+extend-immutable-calls = ["fastapi.Depends"]
+
 [tool.black]
 line-length = 100
 target-version = ["py311"]

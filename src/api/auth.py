@@ -1,4 +1,6 @@
-"""MM-57: login verification + role gating for mutating endpoints.
+"""MM-57: login verification + role gating for mutating endpoints; MM-106:
+every read endpoint also requires a valid token (require_user) so rows can be
+scoped to the caller.
 
 Two pieces, deliberately separate:
 1. verify_credentials() -- called once, by POST /auth/verify, when NextAuth's
@@ -16,6 +18,7 @@ Two pieces, deliberately separate:
 import bcrypt
 import jwt
 from fastapi import Header, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from config.settings import get_settings
@@ -35,10 +38,15 @@ def verify_credentials(username: str, password: str, session: Session) -> str | 
     return user.role
 
 
-def _require_role(role: str, authorization: str | None) -> str:
-    """Shared by require_approver/require_manager: decodes the bearer JWT
-    and enforces the given role. Returns the authenticated username on
-    success; raises 401/403 otherwise."""
+class Identity(BaseModel):
+    """The authenticated caller (MM-106): who they are and their role."""
+
+    username: str
+    role: str
+
+
+def _decode(authorization: str | None) -> Identity:
+    """Decodes and verifies the bearer JWT; raises 401 otherwise."""
     settings = get_settings()
     if not settings.auth_backend_secret:
         raise HTTPException(status_code=500, detail="AUTH_BACKEND_SECRET is not configured")
@@ -52,13 +60,26 @@ def _require_role(role: str, authorization: str | None) -> str:
     except jwt.InvalidTokenError as exc:
         raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
 
-    if claims.get("role") != role:
-        raise HTTPException(status_code=403, detail=f"{role.capitalize()} role required")
-
     username = claims.get("sub")
     if not username:
         raise HTTPException(status_code=401, detail="Token missing subject")
-    return username
+    return Identity(username=username, role=str(claims.get("role", "")))
+
+
+def _require_role(role: str, authorization: str | None) -> str:
+    """Shared by require_approver/require_manager: decodes the bearer JWT
+    and enforces the given role. Returns the authenticated username on
+    success; raises 401/403 otherwise."""
+    identity = _decode(authorization)
+    if identity.role != role:
+        raise HTTPException(status_code=403, detail=f"{role.capitalize()} role required")
+    return identity.username
+
+
+def require_user(authorization: str | None = Header(default=None)) -> Identity:
+    """Any authenticated role (MM-106). Read endpoints use this so the
+    database can scope rows to the caller (row-level security)."""
+    return _decode(authorization)
 
 
 def require_approver(authorization: str | None = Header(default=None)) -> str:

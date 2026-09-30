@@ -243,6 +243,15 @@ class MarketUniverseResponse(BaseModel):
     tickers: list[str]
 
 
+class PublicStatsResponse(BaseModel):
+    """Aggregate totals for the public landing page (MM-106) -- no
+    counterparty-level data."""
+
+    counterparties: int
+    runs_evaluated: int
+    calls_raised: int
+
+
 class AuthVerifyRequest(BaseModel):
     username: str
     password: str
