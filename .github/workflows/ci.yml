@@ -96,7 +96,8 @@ jobs:
           fi
 
       - name: Install dependencies
-        run: pip install -e ".[dev,db,llm]"
+        # Full set: the RLS suite also drives the API (auth, observability, ...).
+        run: pip install -e ".[dev,data,db,rag,llm,streaming,notify,auth,observability,gcp]"
 
       - name: Wait for the database and create it
         run: |
