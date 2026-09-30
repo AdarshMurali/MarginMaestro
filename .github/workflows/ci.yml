@@ -96,7 +96,8 @@ jobs:
           fi
 
       - name: Install dependencies
-        run: pip install -e ".[dev,db,llm]"
+        # Full set: the RLS suite also drives the API (auth, observability, ...).
+        run: pip install -e ".[dev,data,db,rag,llm,streaming,notify,auth,observability,gcp]"
 
       - name: Wait for the database and create it
         run: |
@@ -119,6 +120,13 @@ jobs:
         env:
           REQUIRE_DB: "1"
         run: pytest tests/integration/test_checkpoint_saver_live.py -p no:cacheprovider -v
+
+      # MM-107: row-level security isolation (Postgres-only feature).
+      - name: Row-level security isolation tests
+        if: matrix.dialect == 'postgres'
+        env:
+          REQUIRE_DB: "1"
+        run: pytest tests/integration/test_rls_live.py -p no:cacheprovider -v
 
   terraform-gcp:
     runs-on: ubuntu-latest
