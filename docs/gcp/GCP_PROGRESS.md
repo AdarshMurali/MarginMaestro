@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0 (MM-87) **done**. G1 (MM-88) in progress — MM-104 done; MM-105 (Postgres checkpoints) in review; next MM-106 (row-level security).
+- **Phase:** G0 (MM-87) **done**. G1 (MM-88) in progress — MM-104, MM-105 done; MM-106 (row-level security) in review; next MM-107 (RLS tests in CI).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -28,7 +28,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | Phase | Epic | Scope | Status |
 |---|---|---|---|
 | G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | **Done** |
-| G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | In progress (MM-104 done; MM-105 in review) |
+| G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | In progress (MM-104, MM-105 done; MM-106 in review) |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | Not started |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | Not started |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | Not started |
@@ -46,6 +46,15 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-28 | ₹0 (first real budget notification) | — | Kill-switch live at ₹12,600 (≈ $150) |
 
 ## Log
+
+### 2026-09-30 — MM-106: Row-level security (+ authenticated reads, frontend)
+- **Done:** Migration `b7d2f4a8c613`: table `user_counterparty_access` (both dialects); on Postgres only — role `mm_app` (non-owner, no BYPASSRLS), function `app_can_see(counterparty)` over the transaction setting `app.scope`, and a read+write policy with `FORCE ROW LEVEL SECURITY` on `counterparties`, `portfolios`, `positions`, `ratings`, `collateral_items`, `tickets`, `audit_log`, `orchestrator_checkpoints`, `orchestrator_checkpoint_writes`. `persistence/db/rls.py`: SQLAlchemy `after_begin` listener runs `SET LOCAL ROLE mm_app` + `set_config('app.scope', …, true)` per transaction (Postgres only); `scope_for(role, user)` resolves `*` for approver/manager/auditor, the access rows otherwise. API: new `require_user` dependency — **every read endpoint now needs a login** (except `/health`, `/ready`, `/metrics`, `/market-universe` and the new `/public/stats`, which returns counts only) and reads through a session tagged with the caller's scope; `/trace` and `/audit-log` check the scope in code and 404 when out of scope. Users: `viewer` replaced by margin analysts `analyst1` (CP-1…CP-4) and `analyst2` (CP-5…CP-8), plus a read-only firm-wide `auditor`. Frontend: `getJson` attaches the backend token on every read (session re-read at most every 5 min), landing pages use `/public/stats`, "Viewer role" label → "Read-only access".
+- **Decisions (user):** multiple scoped read-only users, named after the real job (margin/collateral analysts own a book; approver = desk lead, manager = head of collateral management see all); read-auth + frontend change in this story. Internal sessions without a scope run firm-wide (they're workers, never external callers); a unit test fails if any new GET endpoint skips `require_user`. SQL Server gets the access table but no row filtering (retired in G9).
+- **Changed:** `migrations/versions/b7d2f4a8c613_row_level_security.py` (new), `src/persistence/db/{rls.py (new), models.py, engine.py}`, `src/persistence/seed_users.py`, `src/config/settings.py`, `src/api/{auth,main,schemas}.py`, `tests/unit/{conftest.py (new), test_rls.py (new), test_seed_users.py}`, `pyproject.toml` (ruff: `fastapi.Depends` is an immutable call), `frontend/src/lib/api.ts`, `frontend/src/app/{page,landing/page,landing-v3/page,approvals/page,simulate/page}.tsx`, `README.md`, `CLAUDE.md`, `docs/gcp/adr/0011-*.md`, `docs/gcp/GCP_ROADMAP.md`.
+- **Verified:** unit suite 616 passed (20 new; 4 seed tests rewritten); ruff/black/mypy clean; frontend `tsc` + eslint clean. **Local Postgres:** migration up/down/up; as `mm_app` a `CP-1..4` scope sees 4 counterparties / 37 of 81 positions / 4 collateral items, `*` sees 8 / 81, no scope sees 0, and an UPDATE on another book's rows touches 0 rows. **Through the API:** analyst1 → CP-1…4 and 404 on `/exposure/CP-6`; analyst2 → CP-5…8; approver/auditor → all 8; logged-in user with no book → `[]`; no token → 401; `/public/stats` → counts only. **Through the frontend:** NextAuth credentials login as analyst1 → session's backend token → `/exposure` returns CP-1…4 only (browser automation profile was locked by another session, so the login was driven over HTTP exactly as the browser does).
+- **Cost impact:** none.
+- **Known issues / tech debt:** (1) Untracked landing-page experiments (`landing-apple`, `landing-aurum`, `landing-mono`, `landing-v4`) still call the now-authenticated feeds for their counters; they fail silently (caught) — switch them to `getPublicStats()` if they're kept. (2) Databases seeded before MM-106 still have the old `viewer` user row; harmless (sees nothing on Postgres). (3) Exhaustive policy tests (crafted SQL, every table, writes) are MM-107.
+- **Next step:** MM-107 — RLS isolation tests against real Postgres in CI.
 
 ### 2026-09-30 — MM-105: LangGraph checkpoints on Postgres
 - **Done:** Found that the existing checkpoint store (`persistence/db/checkpoint_saver.py`) uses only SQLAlchemy ORM queries, so it already works on Postgres — its persistence test (pause a run at approval, rebuild the store as a restart would, resume) passed against the local `pgvector/pgvector:pg17` container unchanged. Renamed `AzureSQLSaver` → **`SqlCheckpointSaver`** (old name kept as an alias) and recorded the decision in its docstring. CI's `migrations` job now also runs that persistence test against **both** Postgres and SQL Server, with `REQUIRE_DB=1` so an unreachable database fails the job instead of silently skipping.

@@ -221,3 +221,15 @@ class UserORM(Base):
     username: Mapped[str] = mapped_column(String(50), primary_key=True)
     password_hash: Mapped[str] = mapped_column(String(100))
     role: Mapped[str] = mapped_column(String(20))
+
+
+class UserCounterpartyAccessORM(Base):
+    """MM-106: which counterparties a scoped user (the `viewer` role, e.g.
+    margin analysts covering one book) may see. Roles with firm-wide access
+    (approver, manager, auditor) have no rows here -- see persistence.db.rls.
+    On Postgres, row-level security policies enforce this in the database."""
+
+    __tablename__ = "user_counterparty_access"
+
+    username: Mapped[str] = mapped_column(ForeignKey("users.username"), primary_key=True)
+    counterparty_id: Mapped[str] = mapped_column(ForeignKey("counterparties.id"), primary_key=True)

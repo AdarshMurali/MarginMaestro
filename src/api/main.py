@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from agents.orchestrator import build_orchestrator_graph, resume_run
 from api.audit_log import get_margin_call_audit_log
-from api.auth import require_approver, require_manager, verify_credentials
+from api.auth import Identity, require_approver, require_manager, require_user, verify_credentials
 from api.exposure import (
     build_exposure_board,
     get_counterparty_exposure,
@@ -45,6 +45,7 @@ from api.schemas import (
     MarginCallTraceResponse,
     MarketUniverseResponse,
     PriceHistoryResponse,
+    PublicStatsResponse,
     SimulateEventRequest,
     SimulateEventResponse,
     SlaResponse,
@@ -53,6 +54,7 @@ from api.simulate import trigger_simulation
 from config.settings import get_settings
 from observability.tracing import configure_tracing
 from persistence.db.engine import get_session_factory
+from persistence.db.rls import RLS_SCOPE_KEY, can_see, scope_for
 from streaming.market_feed import MarketDataUnavailableError
 from streaming.schemas import MarketEventType
 
@@ -94,6 +96,27 @@ def get_orchestrator_graph() -> CompiledStateGraph:
 @lru_cache
 def get_db_session_factory() -> sessionmaker[Session]:
     return get_session_factory()
+
+
+def user_session(identity: Identity) -> Session:
+    """A DB session scoped to the caller (MM-106): on Postgres, row-level
+    security then returns only the counterparties this user may see. The
+    scope lookup itself runs firm-wide (the default for internal sessions)."""
+    session_factory = get_db_session_factory()
+    with session_factory() as lookup:
+        scope = scope_for(identity.role, identity.username, lookup)
+    return session_factory(info={RLS_SCOPE_KEY: scope})
+
+
+def _require_thread_visible(identity: Identity, thread_id: str) -> None:
+    """For reads that fetch one run straight from the orchestrator (not via a
+    scoped session): 404 -- not 403 -- when the run's counterparty is outside
+    the caller's scope, so the run's existence isn't revealed."""
+    session_factory = get_db_session_factory()
+    with session_factory() as lookup:
+        scope = scope_for(identity.role, identity.username, lookup)
+    if not can_see(scope, thread_id.rsplit(":", 1)[-1]):
+        raise HTTPException(status_code=404, detail=f"No run found for thread_id {thread_id!r}")
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -257,45 +280,64 @@ async def respond_to_margin_call(
 
 
 @app.get("/margin-calls", response_model=MarginCallFeedResponse)
-async def margin_call_feed() -> MarginCallFeedResponse:
-    session_factory = get_db_session_factory()
+async def margin_call_feed(identity: Identity = Depends(require_user)) -> MarginCallFeedResponse:
     graph = get_orchestrator_graph()
-    with session_factory() as session:
+    with user_session(identity) as session:
         return list_margin_calls(graph, session)
 
 
 @app.get("/margin-calls/buckets", response_model=MarginCallBucketFeedResponse)
-async def margin_call_buckets() -> MarginCallBucketFeedResponse:
-    session_factory = get_db_session_factory()
+async def margin_call_buckets(
+    identity: Identity = Depends(require_user),
+) -> MarginCallBucketFeedResponse:
     graph = get_orchestrator_graph()
-    with session_factory() as session:
+    with user_session(identity) as session:
         return list_margin_call_buckets(graph, session)
 
 
 @app.get("/margin-calls/counterparty/{counterparty_id}", response_model=MarginCallFeedResponse)
-async def margin_calls_for_counterparty(counterparty_id: str) -> MarginCallFeedResponse:
-    session_factory = get_db_session_factory()
+async def margin_calls_for_counterparty(
+    counterparty_id: str, identity: Identity = Depends(require_user)
+) -> MarginCallFeedResponse:
     graph = get_orchestrator_graph()
-    with session_factory() as session:
+    with user_session(identity) as session:
         return list_margin_calls_for_counterparty(graph, session, counterparty_id)
 
 
 @app.get("/counterparties/{counterparty_id}/history", response_model=CounterpartyHistoryResponse)
 async def counterparty_history_endpoint(
-    counterparty_id: str, days: int | None = None
+    counterparty_id: str,
+    days: int | None = None,
+    identity: Identity = Depends(require_user),
 ) -> CounterpartyHistoryResponse:
     """Business-facing rollup (Phase 9 scope addition) -- how many margin
     calls, breach rate, average size, over the trailing `days` (omit for
     all-time). Distinct from /margin-calls/counterparty/{id}'s raw list."""
-    session_factory = get_db_session_factory()
     graph = get_orchestrator_graph()
-    with session_factory() as session:
+    with user_session(identity) as session:
         result = counterparty_history(graph, session, counterparty_id, days=days)
     if result is None:
         raise HTTPException(
             status_code=404, detail=f"No counterparty found for {counterparty_id!r}"
         )
     return result
+
+
+@app.get("/public/stats", response_model=PublicStatsResponse)
+async def public_stats() -> PublicStatsResponse:
+    """Unauthenticated aggregate counts for the public landing page (MM-106):
+    no counterparty names, ids or amounts -- just totals. Every other read
+    endpoint requires a login."""
+    session_factory = get_db_session_factory()
+    graph = get_orchestrator_graph()
+    with session_factory() as session:
+        counterparty_count = len(list_counterparty_summaries(session).counterparties)
+        calls = list_margin_calls(graph, session).margin_calls
+    return PublicStatsResponse(
+        counterparties=counterparty_count,
+        runs_evaluated=len(calls),
+        calls_raised=sum(1 for c in calls if c.call_amount is not None and c.call_amount > 0),
+    )
 
 
 @app.get("/market-universe", response_model=MarketUniverseResponse)
@@ -325,7 +367,10 @@ async def simulate_event(
 
 
 @app.get("/margin-calls/{thread_id}/trace", response_model=MarginCallTraceResponse)
-async def margin_call_trace(thread_id: str) -> MarginCallTraceResponse:
+async def margin_call_trace(
+    thread_id: str, identity: Identity = Depends(require_user)
+) -> MarginCallTraceResponse:
+    _require_thread_visible(identity, thread_id)
     graph = get_orchestrator_graph()
     trace = get_margin_call_trace(graph, thread_id)
     if trace is None:
@@ -334,12 +379,14 @@ async def margin_call_trace(thread_id: str) -> MarginCallTraceResponse:
 
 
 @app.get("/margin-calls/{thread_id}/audit-log", response_model=AuditLogResponse)
-async def margin_call_audit_log(thread_id: str) -> AuditLogResponse:
+async def margin_call_audit_log(
+    thread_id: str, identity: Identity = Depends(require_user)
+) -> AuditLogResponse:
     """Immutable audit trail (MM-91) -- a plain SQL table, distinct from
     /trace's checkpoint-derived view above."""
-    session_factory = get_db_session_factory()
+    _require_thread_visible(identity, thread_id)
     graph = get_orchestrator_graph()
-    with session_factory() as session:
+    with user_session(identity) as session:
         audit_log = get_margin_call_audit_log(graph, session, thread_id)
     if audit_log is None:
         raise HTTPException(status_code=404, detail=f"No run found for thread_id {thread_id!r}")
@@ -347,23 +394,22 @@ async def margin_call_audit_log(thread_id: str) -> AuditLogResponse:
 
 
 @app.get("/counterparties", response_model=CounterpartyListResponse)
-async def counterparties() -> CounterpartyListResponse:
-    session_factory = get_db_session_factory()
-    with session_factory() as session:
+async def counterparties(identity: Identity = Depends(require_user)) -> CounterpartyListResponse:
+    with user_session(identity) as session:
         return list_counterparty_summaries(session)
 
 
 @app.get("/exposure", response_model=ExposureBoardResponse)
-async def exposure_board() -> ExposureBoardResponse:
-    session_factory = get_db_session_factory()
-    with session_factory() as session:
+async def exposure_board(identity: Identity = Depends(require_user)) -> ExposureBoardResponse:
+    with user_session(identity) as session:
         return build_exposure_board(session)
 
 
 @app.get("/exposure/{counterparty_id}", response_model=CounterpartyExposure)
-async def counterparty_exposure(counterparty_id: str) -> CounterpartyExposure:
-    session_factory = get_db_session_factory()
-    with session_factory() as session:
+async def counterparty_exposure(
+    counterparty_id: str, identity: Identity = Depends(require_user)
+) -> CounterpartyExposure:
+    with user_session(identity) as session:
         result = get_counterparty_exposure(session, counterparty_id)
     if result is None:
         raise HTTPException(
@@ -373,7 +419,11 @@ async def counterparty_exposure(counterparty_id: str) -> CounterpartyExposure:
 
 
 @app.get("/prices/{ticker}/history", response_model=PriceHistoryResponse)
-async def price_history(ticker: str, days: int = 30) -> PriceHistoryResponse:
+async def price_history(
+    ticker: str, days: int = 30, _identity: Identity = Depends(require_user)
+) -> PriceHistoryResponse:
+    # Market data is global (no counterparty rows), but the app is
+    # login-only, so reads still require a valid token (MM-106).
     session_factory = get_db_session_factory()
     try:
         with session_factory() as session:

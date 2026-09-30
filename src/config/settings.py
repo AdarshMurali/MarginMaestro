@@ -107,7 +107,10 @@ class Settings(BaseSettings):
     # invalidate already-seeded accounts. Documented local-dev defaults, not
     # real secrets; change before any non-demo deployment.
     demo_approver_password: str = "MarginMaestro!Approver1"
-    demo_viewer_password: str = "MarginMaestro!Viewer1"
+    # MM-106: margin analysts (read-only, own book only) and the auditor
+    # (read-only, firm-wide) replace the single `viewer` account.
+    demo_analyst_password: str = "MarginMaestro!Analyst1"
+    demo_auditor_password: str = "MarginMaestro!Auditor1"
     demo_manager_password: str = "MarginMaestro!Manager1"
 
     @classmethod

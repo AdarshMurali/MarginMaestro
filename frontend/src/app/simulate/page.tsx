@@ -130,7 +130,7 @@ export default function SimulatePage() {
           >
             {busy ? "Simulating..." : "Trigger simulation"}
           </button>
-          {!canAct && <p className="text-xs text-neutral-400">Viewer role -- read-only.</p>}
+          {!canAct && <p className="text-xs text-neutral-400">Read-only access.</p>}
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
 

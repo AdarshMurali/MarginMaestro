@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { getExposureBoard, getMarginCallFeed } from "@/lib/api";
+import { getPublicStats } from "@/lib/api";
 import { LogoMarkV2 } from "@/components/logo-v2";
 
 const STACK = ["LangGraph", "OpenAI", "ChromaDB", "Kafka", "Azure SQL", "FastAPI"];
@@ -25,18 +25,12 @@ export default function LandingPageV3() {
 
   useEffect(() => {
     let cancelled = false;
-    getExposureBoard()
-      .then((board) => {
-        if (!cancelled) setCounterparties(board.counterparties.length);
-      })
-      .catch(() => {});
-    getMarginCallFeed()
-      .then((feed) => {
+    getPublicStats()
+      .then((stats) => {
         if (cancelled) return;
-        setRunsEvaluated(feed.margin_calls.length);
-        setBreachesCaught(
-          feed.margin_calls.filter((m) => m.call_amount !== null && m.call_amount > 0).length,
-        );
+        setCounterparties(stats.counterparties);
+        setRunsEvaluated(stats.runs_evaluated);
+        setBreachesCaught(stats.calls_raised);
       })
       .catch(() => {});
     return () => {
