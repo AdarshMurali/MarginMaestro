@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     otel_exporter_otlp_endpoint: str = "http://localhost:4318"
     otel_service_name: str = "marginmaestro-api"
 
+    # MM-104: mssql (Azure SQL / local SQL Edge, the AWS default) or postgres
+    # (local pgvector container, CI, Cloud SQL). DB_PORT must match: 1433 / 5432.
+    db_dialect: str = "mssql"
     db_host: str | None = None
     db_port: int = 1433
     db_name: str = "marginmaestro"
