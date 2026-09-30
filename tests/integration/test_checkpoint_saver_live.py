@@ -1,8 +1,11 @@
 """Live-DB checkpoint persistence tests (MM-38). Skipped automatically if no
 database is reachable (e.g. CI, which has no SQL Server or ODBC driver
-available) -- run these locally with `docker compose up -d sqlserver` first.
+available) -- run these locally with `docker compose up -d sqlserver` (or
+`postgres` with DB_DIALECT=postgres) first. CI's `migrations` job runs them
+against both databases with REQUIRE_DB=1 (MM-105).
 """
 
+import os
 from typing import Literal
 
 import pytest
@@ -13,7 +16,7 @@ from sqlalchemy.exc import DBAPIError
 
 from config.settings import get_settings
 from persistence.db.bootstrap import ensure_database_exists
-from persistence.db.checkpoint_saver import AzureSQLSaver
+from persistence.db.checkpoint_saver import SqlCheckpointSaver
 from persistence.db.engine import get_engine, get_session_factory
 from persistence.db.models import Base
 
@@ -27,6 +30,10 @@ def db_session_factory():
         Base.metadata.create_all(engine)
         engine.dispose()
     except DBAPIError as exc:
+        # CI's `migrations` job sets REQUIRE_DB=1: there the database must be
+        # reachable, so a connection problem fails the job instead of skipping.
+        if os.environ.get("REQUIRE_DB") == "1":
+            raise
         pytest.skip(f"No reachable database for integration tests: {exc}")
     yield get_session_factory(settings)
 
@@ -52,20 +59,20 @@ def test_a_paused_run_survives_a_fresh_saver_against_the_real_database(
     db_session_factory,
 ) -> None:
     """The whole point of MM-38: not just that put/get round-trip against a
-    real SQL Server, but that a brand new AzureSQLSaver/graph instance --
+    real SQL Server, but that a brand new SqlCheckpointSaver/graph instance --
     standing in for a restarted process -- can resume a run it never itself
     paused, reading nothing but what's on disk in the real database."""
     thread_id = "mm38-live-restart-test"
     cfg = {"configurable": {"thread_id": thread_id}}
 
-    graph1 = _interrupt_graph().compile(checkpointer=AzureSQLSaver(db_session_factory))
+    graph1 = _interrupt_graph().compile(checkpointer=SqlCheckpointSaver(db_session_factory))
     try:
         paused = graph1.invoke(_State(a="live"), config=cfg)
         assert "__interrupt__" in paused
 
-        graph2 = _interrupt_graph().compile(checkpointer=AzureSQLSaver(db_session_factory))
+        graph2 = _interrupt_graph().compile(checkpointer=SqlCheckpointSaver(db_session_factory))
         resumed = graph2.invoke(Command(resume={"decision": "approved"}), config=cfg)
 
         assert resumed == {"a": "live", "decision": "approved"}
     finally:
-        AzureSQLSaver(db_session_factory).delete_thread(thread_id)
+        SqlCheckpointSaver(db_session_factory).delete_thread(thread_id)

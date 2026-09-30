@@ -5,7 +5,7 @@ checkpointer's own list() directly (via graph.checkpointer) rather than
 LangGraph's graph.get_state_history() convenience wrapper: get_state_history
 was found, empirically, to silently truncate history to only the last couple
 of steps once a thread has been resumed more than once (reproduced against
-this project's own AzureSQLSaver -- calling saver.list() directly for the
+this project's own SqlCheckpointSaver -- calling saver.list() directly for the
 same thread_id returns the full, correct history every time). Each
 checkpoint's raw channel_values carries a `branch:to:<node>` marker for
 whichever node is queued to run next -- the same signal get_state_history is
