@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0 (MM-87) **done**. G1 (MM-88) **done** (MM-104…MM-108; full lifecycle on Postgres verified in G2). Next: G2 (MM-89) — Gemini + RAG on pgvector.
+- **Phase:** G0, G1 **done**. G2 (MM-89) in progress — MM-109 (Gemini) in review; next MM-110 (pgvector RAG + embeddings). Cloud SQL **stopped** until G5.
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -29,7 +29,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 |---|---|---|---|
 | G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | **Done** |
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | **Done** (full lifecycle on Postgres verified in G2) |
-| G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | Not started |
+| G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | In progress (MM-109 in review) |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | Not started |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | Not started |
 | G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | Not started |
@@ -45,8 +45,18 @@ At the end of each story, prepend an entry to **Log** using this template:
 |---|---|---|---|
 | 2026-09-28 | ₹0 (first real budget notification) | — | Kill-switch live at ₹12,600 (≈ $150) |
 | 2026-09-30 | — | Cloud SQL `marginmaestro-pg` created (~$9–10/month) | First paid resource; stop with `cloudsql_activation_policy = "NEVER"` when idle |
+| 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-09-30 — MM-109: Gemini on Vertex AI as the LLM
+- **Done:** `adapters/gemini_adapter.py` — `GeminiChat` implements `LLMClient` over the `google-genai` SDK on Vertex AI: `complete()` with a system instruction; `parse()` asks for JSON matching the Pydantic schema at temperature 0, uses the SDK's parsed object, falls back to validating the JSON text, and returns `None` for anything that doesn't fit (same contract as OpenAI). Factory: `LLM_PROVIDER=openai|vertex` (unknown values fail loud; `vertex` requires `GCP_PROJECT_ID`). New settings `gemini_model`, `gemini_location`, `gcp_project_id`, `gcp_location`. Terraform `vertex_ai.tf`: Vertex AI API + `roles/aiplatform.user` for `mm-api-sa`, `mm-agent-sa`, `mm-mcp-sa`. Applied by the user together with **stopping Cloud SQL** (`cloudsql_activation_policy = "NEVER"` in local tfvars; instance now `STOPPED`, storage-only billing).
+- **Decisions:** **`gemini-3.8-flash` on the `global` endpoint** — probed every recent Flash version: 3.5–3.8 answer only on `global`, `us-central1` tops out at 2.5. `global` has no regional residency — fine for synthetic data, recorded in ADR-0009; switching to US-only is two env vars. Default `LLM_PROVIDER` changed `ollama` → `openai` (the agents never honoured `ollama`; the user's `.env` already says `openai`, so no behaviour change). `google-genai` joins the `gcp` extra (in the image, imported lazily).
+- **Changed:** `src/adapters/{gemini_adapter.py (new), factory.py}`, `src/config/settings.py`, `tests/contract/test_llm_contract.py` (Gemini joins the LLM contract + 4 Gemini-specific tests), `tests/unit/test_adapter_factory.py` (+4), `infra/gcp/vertex_ai.tf` (new), `pyproject.toml`, `.env.example`, `docs/gcp/adr/0009-*.md`.
+- **Verified:** live call through the adapter: Gemini extracted CP-1's CSA terms from the real document exactly (threshold 340,000, MTA 11,000, haircuts 0 / 0.08 / 0.02, rating trigger below B → 0) in 10.7 s; suite 633 passed; ruff/black/mypy clean; `terraform plan` → no changes.
+- **Cost impact:** Vertex AI per-token only (fractions of a cent per call so far). Cloud SQL stopped — saves ~$0.25/day until G5.
+- **Known issues / tech debt:** Gemini calls are slower than gpt-4o-mini (~10 s for a CSA extraction); revisit if it hurts the demo.
+- **Next step:** MM-110 — pgvector RAG store + Gemini embeddings, with row-level security on RAG.
 
 ### 2026-09-30 — MM-108: Cloud SQL Postgres provisioned, migrated, seeded, RLS verified
 - **Done:** `infra/gcp/cloud_sql.tf` — instance `marginmaestro-pg` (Postgres 17, Enterprise, `db-f1-micro`, us-central1 zonal, 10 GB SSD no autoresize, 7 daily backups, PITR off, deletion protection in Terraform and API, `cloudsql.iam_authentication=on`), public IP **34.71.5.81 with no authorized networks** + `ENCRYPTED_ONLY`; database `marginmaestro`; IAM database users `mm-{api,agent,events,mcp}-sa@marginmaestro-demo.iam` with `cloudsql.client` + `cloudsql.instanceUser`; Cloud SQL Admin API. Applied by the user (15 added; instance creation ~8 min). New `persistence/db/grant_app_role.py` (grants `mm_app` to IAM DB users) and `scripts/cloudsql_bootstrap.ps1`: prompts for the `postgres` password (kept in-process only), starts the **Cloud SQL Auth Proxy v2.26.0** on 127.0.0.1:5433, runs `alembic upgrade head`, `batch_loader` (real prices + FRED), `seed_users`, grants `mm_app` to the 4 runtime users, then runs the RLS isolation suite + checkpoint persistence test against Cloud SQL. The user ran it: **bootstrap complete** (every step is fail-fast, so all tests passed against Cloud SQL).
