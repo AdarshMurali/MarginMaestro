@@ -255,11 +255,14 @@ def test_only_the_rls_module_sets_scope_or_role():
     from pathlib import Path
 
     src = Path(__file__).resolve().parents[2] / "src"
+    # rls.py sets scope + role; grant_app_role.py is the admin tool that grants
+    # role membership (MM-108) -- it never sets a transaction's scope.
+    ALLOWED = {"rls.py", "grant_app_role.py"}
     pattern = re.compile(r"set_config|SET\s+(LOCAL\s+)?ROLE|RESET\s+ROLE|app\.scope", re.IGNORECASE)
     offenders = [
         str(path.relative_to(src))
         for path in src.rglob("*.py")
-        if path.name != "rls.py" and pattern.search(path.read_text(encoding="utf-8"))
+        if path.name not in ALLOWED and pattern.search(path.read_text(encoding="utf-8"))
     ]
 
     assert offenders == []

@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0 (MM-87) **done**. G1 (MM-88) in progress — MM-104…MM-106 done; MM-107 (RLS tests in CI) in review; next MM-108 (Cloud SQL).
+- **Phase:** G0 (MM-87) **done**. G1 (MM-88) **done** (MM-104…MM-108; full lifecycle on Postgres verified in G2). Next: G2 (MM-89) — Gemini + RAG on pgvector.
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -28,7 +28,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | Phase | Epic | Scope | Status |
 |---|---|---|---|
 | G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | **Done** |
-| G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | In progress (MM-104…MM-106 done; MM-107 in review) |
+| G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | **Done** (full lifecycle on Postgres verified in G2) |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | Not started |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | Not started |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | Not started |
@@ -44,8 +44,18 @@ At the end of each story, prepend an entry to **Log** using this template:
 | Date | Credits used | Biggest spenders | Action |
 |---|---|---|---|
 | 2026-09-28 | ₹0 (first real budget notification) | — | Kill-switch live at ₹12,600 (≈ $150) |
+| 2026-09-30 | — | Cloud SQL `marginmaestro-pg` created (~$9–10/month) | First paid resource; stop with `cloudsql_activation_policy = "NEVER"` when idle |
 
 ## Log
+
+### 2026-09-30 — MM-108: Cloud SQL Postgres provisioned, migrated, seeded, RLS verified
+- **Done:** `infra/gcp/cloud_sql.tf` — instance `marginmaestro-pg` (Postgres 17, Enterprise, `db-f1-micro`, us-central1 zonal, 10 GB SSD no autoresize, 7 daily backups, PITR off, deletion protection in Terraform and API, `cloudsql.iam_authentication=on`), public IP **34.71.5.81 with no authorized networks** + `ENCRYPTED_ONLY`; database `marginmaestro`; IAM database users `mm-{api,agent,events,mcp}-sa@marginmaestro-demo.iam` with `cloudsql.client` + `cloudsql.instanceUser`; Cloud SQL Admin API. Applied by the user (15 added; instance creation ~8 min). New `persistence/db/grant_app_role.py` (grants `mm_app` to IAM DB users) and `scripts/cloudsql_bootstrap.ps1`: prompts for the `postgres` password (kept in-process only), starts the **Cloud SQL Auth Proxy v2.26.0** on 127.0.0.1:5433, runs `alembic upgrade head`, `batch_loader` (real prices + FRED), `seed_users`, grants `mm_app` to the 4 runtime users, then runs the RLS isolation suite + checkpoint persistence test against Cloud SQL. The user ran it: **bootstrap complete** (every step is fail-fast, so all tests passed against Cloud SQL).
+- **Decisions:** (1) **Cloud SQL Auth Proxy** for laptop access instead of the Python Connector the roadmap named (user-approved): the connector doesn't support `psycopg`, the proxy needs no code change. How Cloud Run connects (built-in socket + IAM token, or connector) is decided in G5. (2) Migrations/seed run as the built-in `postgres` user; its password is set out-of-band with `gcloud sql users set-password --prompt-for-password` and never touches Terraform state, files or chat. (3) Runtime users are IAM-only (no passwords) and act through `mm_app`, so RLS applies to them. (4) No private IP / VPC connector (extra cost, not needed for a demo).
+- **Changed:** `infra/gcp/{cloud_sql.tf (new), variables.tf (cloudsql_activation_policy), outputs.tf, README.md}`, `src/persistence/db/grant_app_role.py` (new), `tests/unit/test_grant_app_role.py` (new), `tests/unit/test_rls.py` (guard allow-list), `scripts/cloudsql_bootstrap.ps1` (new), `docs/gcp/GCP_ROADMAP.md` (MM-G15 as built; G1 status note).
+- **Verified:** instance `RUNNABLE`, settings checked with `gcloud sql instances describe` (no authorized networks, encrypted only, backups + deletion protection on, Enterprise); users listed (4 IAM + `postgres`); `terraform plan` → no changes; bootstrap run green against Cloud SQL; unit suite green.
+- **Cost impact:** **first paid resource** — ~$9–10/month (db-f1-micro ~$7.7 + 10 GB SSD ~$1.7 + backups), paid from credits; ≈ $28 for the rest of the trial, so the $25 budget alert will likely fire near the end (expected). Stop with `cloudsql_activation_policy = "NEVER"` to pay storage only. Post-trial swap to Neon/Supabase at the G10 review (ADR-0017).
+- **Known issues / tech debt:** (1) First bootstrap attempt failed before touching the database: `%USERPROFILE%\bin` is on Git Bash's PATH but not PowerShell's — script now falls back to that path. (2) G1 exit criterion "full lifecycle on Postgres" is verified in G2 (RAG on pgvector); see the roadmap note.
+- **Next step:** close G1 (MM-88); start G2 (MM-89) — Gemini on Vertex AI + RAG on pgvector; present its plan with specific tools first.
 
 ### 2026-09-30 — MM-107: RLS isolation tests against real Postgres in CI
 - **Done:** `tests/integration/test_rls_live.py` (47 tests) against real Postgres, seeding its own counterparties `RLS-A` / `RLS-B` (with portfolio, position, rating, collateral, ticket, audit rows, checkpoints) and removing them afterwards. Covers, for **all 9 protected tables**: own book only / firm-wide sees both / empty scope sees nothing; system-level audit rows firm-wide only; no prefix matching. Writes: insert into another book → rejected by the policy; update / delete another book's rows → 0 rows; moving an own row to another book → rejected; own rows updatable. Crafted SQL: `OR 1=1`, joins through a global table, `IN` subqueries, `UNION`, positions of another book by id. Through the API with a real JWT: the counterparty list comes back scoped by the database, and path injection (`RLS-B' OR '1'='1`, …) returns 404. New CI step runs the suite in the `migrations` job's Postgres leg with `REQUIRE_DB=1`. Unit guard test: only `persistence/db/rls.py` may set `app.scope` or the DB role.
