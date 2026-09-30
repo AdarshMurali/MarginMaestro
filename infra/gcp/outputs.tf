@@ -25,3 +25,13 @@ output "app_secret_id" {
   description = "Secret Manager secret holding the app's JSON config (values added out-of-band)"
   value       = google_secret_manager_secret.app.id
 }
+
+output "cloudsql_connection_name" {
+  description = "Instance connection name for the Cloud SQL Auth Proxy / Connector"
+  value       = google_sql_database_instance.main.connection_name
+}
+
+output "cloudsql_runtime_db_users" {
+  description = "IAM database users for the runtime service accounts"
+  value       = [for u in google_sql_user.runtime : u.name]
+}

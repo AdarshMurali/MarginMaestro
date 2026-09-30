@@ -75,3 +75,14 @@ variable "github_deploy_ref" {
   type        = string
   default     = "refs/heads/main"
 }
+
+variable "cloudsql_activation_policy" {
+  description = "ALWAYS = running (billed per hour), NEVER = stopped (only storage billed). Flip to NEVER when the demo isn't in use."
+  type        = string
+  default     = "ALWAYS"
+
+  validation {
+    condition     = contains(["ALWAYS", "NEVER"], var.cloudsql_activation_policy)
+    error_message = "cloudsql_activation_policy must be ALWAYS or NEVER."
+  }
+}

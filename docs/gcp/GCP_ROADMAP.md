@@ -79,9 +79,11 @@ ADR: 0011
 - **MM-G12** (MM-105) LangGraph checkpoints on Postgres: our own database-neutral `SqlCheckpointSaver` (renamed from `AzureSQLSaver`) serves both SQL Server and Postgres — the official Postgres checkpointer was dropped (user decision, 2026-09-30). Its persistence test runs in CI against both databases; approval pauses survive restarts.
 - **MM-G13** (MM-106) **Row-level security:** Postgres policies on every counterparty-scoped table; each transaction runs as the non-owner `mm_app` role with `FORCE ROW LEVEL SECURITY` and a `SET LOCAL app.scope` from the caller's JWT; read endpoints now require a login (frontend sends the token on reads; landing page uses public counts only). Users: margin analysts `analyst1` (CP-1…CP-4) and `analyst2` (CP-5…CP-8) see only their book; `approver`, `manager` and read-only `auditor` see everything.
 - **MM-G14** (MM-107) RLS tests: a user cannot read or update another counterparty's rows, including via crafted queries and via RAG retrieval.
-- **MM-G15** (MM-108) Provision **Cloud SQL** (smallest shared-core, no HA) via Terraform; IAM DB auth via the Cloud SQL Python Connector; seed via `batch_loader` / `seed_users`.
+- **MM-G15** (MM-108) **Cloud SQL** via Terraform: `marginmaestro-pg`, Postgres 17, Enterprise `db-f1-micro`, zonal, 10 GB SSD, 7 daily backups, deletion protection, public IP with **no authorized networks** (only the Cloud SQL Auth Proxy / Connector with an IAM check gets in), IAM database users for the runtime service accounts (no passwords). Laptop access uses the **Cloud SQL Auth Proxy** (the Python Connector doesn't support our `psycopg` driver; the proxy needs no code change). Migrations + seed + `mm_app` grants run once via `scripts/cloudsql_bootstrap.ps1` as the built-in `postgres` user (password set out-of-band, never in Terraform).
 
 **Exit:** full lifecycle runs on Postgres locally and on Cloud SQL; RLS isolation proven by tests.
+
+> **G1 status (2026-09-30):** schema, data, checkpoints and RLS are proven on local Postgres **and Cloud SQL** (47 isolation tests + checkpoint persistence test ran against Cloud SQL). A full margin-call run (`/simulate` → approve → notify) on Postgres is verified in **G2**, when RAG moves off Chroma onto pgvector in the same database — until then that path still needs Chroma + OpenAI + Slack locally.
 
 ### Phase G2 — Gemini on Vertex AI + RAG on pgvector (Epic: MM-89)
 ADR: 0009
