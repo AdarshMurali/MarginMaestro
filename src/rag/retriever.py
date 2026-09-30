@@ -49,7 +49,7 @@ def retrieve(
             else get_vector_store(settings)
         )
 
-    query_embedding = embedder.embed([query])[0]
+    query_embedding = embedder.embed([query], kind="query")[0]
     hits = vector_store.query(
         query_embedding, top_k, counterparty_id=counterparty_id, doc_type=doc_type
     )

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import BaseModel
 
-from adapters.gemini_adapter import GeminiChat
+from adapters.gemini_adapter import GeminiChat, GeminiEmbedder
 from adapters.openai_adapter import EMBEDDING_MODEL, OpenAIChat, OpenAIEmbedder
 
 
@@ -97,7 +97,21 @@ def _openai_embedder():
     return OpenAIEmbedder(client), client
 
 
-@pytest.mark.parametrize("make", [pytest.param(_openai_embedder, id="openai")])
+def _gemini_embedder():
+    def embed_content(model, contents, config):
+        return SimpleNamespace(
+            embeddings=[SimpleNamespace(values=[float(len(t)), 1.0]) for t in contents]
+        )
+
+    client = MagicMock()
+    client.models.embed_content.side_effect = embed_content
+    return GeminiEmbedder(client, model="gemini-embedding-test", dimensions=768), client
+
+
+@pytest.mark.parametrize(
+    "make",
+    [pytest.param(_openai_embedder, id="openai"), pytest.param(_gemini_embedder, id="gemini")],
+)
 def test_embedder_returns_one_vector_per_text_in_order(make):
     embedder, _ = make()
 
@@ -158,3 +172,51 @@ def test_gemini_complete_sends_the_system_instruction():
     config = client.models.generate_content.call_args.kwargs["config"]
     assert config.system_instruction == "formal tone"
     assert getattr(config, "response_schema", None) is None
+
+
+@pytest.mark.parametrize(
+    ("kind", "task"), [("document", "RETRIEVAL_DOCUMENT"), ("query", "RETRIEVAL_QUERY")]
+)
+def test_gemini_embedder_uses_retrieval_task_types_and_768_dims(kind, task):
+    embedder, client = _gemini_embedder()
+
+    embedder.embed(["a"], kind=kind)
+
+    config = client.models.embed_content.call_args.kwargs["config"]
+    assert config.task_type == task
+    assert config.output_dimensionality == 768
+
+
+def test_gemini_embedder_batches_large_inputs_in_order():
+    embedder, client = _gemini_embedder()
+    texts = ["x" * (i % 7 + 1) for i in range(120)]
+
+    vectors = embedder.embed(texts)
+
+    assert client.models.embed_content.call_count == 3  # 50 + 50 + 20
+    assert [v[0] for v in vectors] == [float(len(t)) for t in texts]
+
+
+def test_gemini_embedder_fails_loud_on_a_short_response():
+    embedder, client = _gemini_embedder()
+    client.models.embed_content.side_effect = None
+    client.models.embed_content.return_value = SimpleNamespace(embeddings=[])
+
+    with pytest.raises(RuntimeError, match="0 embeddings for 1 texts"):
+        embedder.embed(["a"])
+
+
+def test_gemini_thinking_level_is_applied_when_set():
+    client = MagicMock()
+    client.models.generate_content.return_value = SimpleNamespace(text="ok", parsed=None)
+    GeminiChat(client, model="m", thinking_level="low").complete("s", "u")
+
+    config = client.models.generate_content.call_args.kwargs["config"]
+    assert config.thinking_config.thinking_level.value.lower() == "low"
+
+
+def test_gemini_thinking_level_defaults_to_the_model():
+    llm, client = _gemini_chat(content="ok")
+    llm.complete("s", "u")
+
+    assert client.models.generate_content.call_args.kwargs["config"].thinking_config is None

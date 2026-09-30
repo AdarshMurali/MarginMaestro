@@ -81,3 +81,35 @@ def test_vertex_provider_requires_a_project():
 def test_unknown_llm_provider_fails_loud():
     with pytest.raises(ValueError, match="LLM_PROVIDER"):
         factory.get_llm(_settings(llm_provider="ollama"))
+
+
+# --- MM-110: embeddings + pgvector ---------------------------------------------
+
+
+def test_vertex_embedder_is_regional_gemini_embedding_at_768_dims():
+    from adapters.gemini_adapter import GeminiEmbedder
+
+    settings = _settings(embedding_provider="vertex", gcp_project_id="proj-x")
+    with patch("google.genai.Client") as client_cls:
+        embedder = factory.get_embedder(settings)
+
+    assert isinstance(embedder, GeminiEmbedder)
+    client_cls.assert_called_once_with(vertexai=True, project="proj-x", location="us-central1")
+
+
+def test_unknown_embedding_provider_fails_loud():
+    with pytest.raises(ValueError, match="EMBEDDING_PROVIDER"):
+        factory.get_embedder(_settings(embedding_provider="bge"))
+
+
+def test_pgvector_requires_postgres():
+    with pytest.raises(ValueError, match="DB_DIALECT=postgres"):
+        factory.get_vector_store(_settings(vector_store="pgvector"))
+
+
+def test_pgvector_store_on_postgres():
+    from adapters.pgvector_adapter import PgVectorStore
+
+    settings = _settings(vector_store="pgvector", db_dialect="postgres")
+    with patch("persistence.db.engine.get_session_factory", return_value=MagicMock()):
+        assert isinstance(factory.get_vector_store(settings), PgVectorStore)

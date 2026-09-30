@@ -128,6 +128,14 @@ jobs:
           REQUIRE_DB: "1"
         run: pytest tests/integration/test_rls_live.py -p no:cacheprovider -v
 
+      # MM-110: the pgvector RAG store must meet the same VectorStore contract
+      # as Chroma / in-memory, against the migrated rag_chunks table shape.
+      - name: pgvector VectorStore contract
+        if: matrix.dialect == 'postgres'
+        env:
+          REQUIRE_DB: "1"
+        run: pytest tests/contract/test_vector_store_contract.py -k pgvector -p no:cacheprovider -v
+
   terraform-gcp:
     runs-on: ubuntu-latest
     steps:
