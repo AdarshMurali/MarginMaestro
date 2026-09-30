@@ -29,6 +29,11 @@ Three mandatory requirements meet here: a GCP-hosted relational store, a GCP-hos
 - **Reads outside a session** (`/trace`, `/audit-log` fetch one run from the orchestrator) check the same rule in code and return **404** (not 403) when out of scope, so a run's existence isn't revealed.
 - **Public:** `/public/stats` returns only totals (counts) for the landing page.
 - **SQL Server** gets the access table but no row filtering — it's retired in G9.
+- **Tested (MM-107):** `tests/integration/test_rls_live.py` runs in CI against real Postgres — every protected table for reads (own book / firm-wide / empty scope), writes (insert into, update, delete and re-assign another book's rows), crafted SQL (`OR 1=1`, joins via global tables, unions, subqueries) and injection through API path parameters.
+
+### Limits
+
+The policies trust the transaction setting `app.scope` and the `mm_app` role. SQL that can run arbitrary statements on the connection could call `set_config('app.scope', '*', true)` or `RESET ROLE` and widen its own access. So row-level security here is **defence in depth against application bugs and parameter injection** (a forgotten filter, a crafted id) — not against an attacker who already executes raw SQL. Mitigations: all queries use bound parameters (SQLAlchemy); only `persistence/db/rls.py` may set the scope or role, enforced by a unit test; in Cloud SQL the app's IAM login user will be a non-superuser (MM-108), so `RESET ROLE` falls back to a role that is still subject to `FORCE ROW LEVEL SECURITY`.
 
 ## Rationale
 

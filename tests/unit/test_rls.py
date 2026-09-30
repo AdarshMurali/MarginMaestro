@@ -241,3 +241,25 @@ def test_public_stats_needs_no_token_and_returns_only_counts(real_auth):
 
     assert response.status_code == 200
     assert response.json() == {"counterparties": 3, "runs_evaluated": 3, "calls_raised": 1}
+
+
+# --- scope can only be set in one place ----------------------------------------
+
+
+def test_only_the_rls_module_sets_scope_or_role():
+    """The database policies trust `app.scope` and the `mm_app` role. Any SQL
+    that can set them could widen its own scope, so only
+    persistence/db/rls.py may -- a guard against a future shortcut elsewhere
+    (MM-107; see ADR-0011 "Limits")."""
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[2] / "src"
+    pattern = re.compile(r"set_config|SET\s+(LOCAL\s+)?ROLE|RESET\s+ROLE|app\.scope", re.IGNORECASE)
+    offenders = [
+        str(path.relative_to(src))
+        for path in src.rglob("*.py")
+        if path.name != "rls.py" and pattern.search(path.read_text(encoding="utf-8"))
+    ]
+
+    assert offenders == []

@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0 (MM-87) **done**. G1 (MM-88) in progress — MM-104, MM-105 done; MM-106 (row-level security) in review; next MM-107 (RLS tests in CI).
+- **Phase:** G0 (MM-87) **done**. G1 (MM-88) in progress — MM-104…MM-106 done; MM-107 (RLS tests in CI) in review; next MM-108 (Cloud SQL).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -28,7 +28,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | Phase | Epic | Scope | Status |
 |---|---|---|---|
 | G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | **Done** |
-| G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | In progress (MM-104, MM-105 done; MM-106 in review) |
+| G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | In progress (MM-104…MM-106 done; MM-107 in review) |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | Not started |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | Not started |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | Not started |
@@ -46,6 +46,15 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-28 | ₹0 (first real budget notification) | — | Kill-switch live at ₹12,600 (≈ $150) |
 
 ## Log
+
+### 2026-09-30 — MM-107: RLS isolation tests against real Postgres in CI
+- **Done:** `tests/integration/test_rls_live.py` (47 tests) against real Postgres, seeding its own counterparties `RLS-A` / `RLS-B` (with portfolio, position, rating, collateral, ticket, audit rows, checkpoints) and removing them afterwards. Covers, for **all 9 protected tables**: own book only / firm-wide sees both / empty scope sees nothing; system-level audit rows firm-wide only; no prefix matching. Writes: insert into another book → rejected by the policy; update / delete another book's rows → 0 rows; moving an own row to another book → rejected; own rows updatable. Crafted SQL: `OR 1=1`, joins through a global table, `IN` subqueries, `UNION`, positions of another book by id. Through the API with a real JWT: the counterparty list comes back scoped by the database, and path injection (`RLS-B' OR '1'='1`, …) returns 404. New CI step runs the suite in the `migrations` job's Postgres leg with `REQUIRE_DB=1`. Unit guard test: only `persistence/db/rls.py` may set `app.scope` or the DB role.
+- **Decisions:** Documented the model's limit in ADR-0011 ("Limits"): `app.scope` is a transaction setting, so code that can run arbitrary SQL could widen its own scope — RLS here is defence in depth against application bugs and parameter injection, not against raw-SQL execution. `rag_chunks` isolation lands with the pgvector store in G2.
+- **Changed:** `tests/integration/test_rls_live.py` (new), `tests/unit/test_rls.py` (+1 guard test), `.github/workflows/ci.yml`, `docs/gcp/adr/0011-*.md`.
+- **Verified:** 47 passed locally against Postgres 17; test data cleaned up; demo data (8 counterparties) untouched.
+- **Cost impact:** none.
+- **Known issues / tech debt:** none new.
+- **Next step:** MM-108 — provision Cloud SQL (first paid resource; needs the user's `terraform apply`).
 
 ### 2026-09-30 — MM-106: Row-level security (+ authenticated reads, frontend)
 - **Done:** Migration `b7d2f4a8c613`: table `user_counterparty_access` (both dialects); on Postgres only — role `mm_app` (non-owner, no BYPASSRLS), function `app_can_see(counterparty)` over the transaction setting `app.scope`, and a read+write policy with `FORCE ROW LEVEL SECURITY` on `counterparties`, `portfolios`, `positions`, `ratings`, `collateral_items`, `tickets`, `audit_log`, `orchestrator_checkpoints`, `orchestrator_checkpoint_writes`. `persistence/db/rls.py`: SQLAlchemy `after_begin` listener runs `SET LOCAL ROLE mm_app` + `set_config('app.scope', …, true)` per transaction (Postgres only); `scope_for(role, user)` resolves `*` for approver/manager/auditor, the access rows otherwise. API: new `require_user` dependency — **every read endpoint now needs a login** (except `/health`, `/ready`, `/metrics`, `/market-universe` and the new `/public/stats`, which returns counts only) and reads through a session tagged with the caller's scope; `/trace` and `/audit-log` check the scope in code and 404 when out of scope. Users: `viewer` replaced by margin analysts `analyst1` (CP-1…CP-4) and `analyst2` (CP-5…CP-8), plus a read-only firm-wide `auditor`. Frontend: `getJson` attaches the backend token on every read (session re-read at most every 5 min), landing pages use `/public/stats`, "Viewer role" label → "Read-only access".
