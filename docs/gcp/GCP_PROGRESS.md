@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0, G1 **done**. G2 (MM-89) in progress — MM-109 (Gemini) in review; next MM-110 (pgvector RAG + embeddings). Cloud SQL **stopped** until G5.
+- **Phase:** G0, G1 **done**. G2 (MM-89) in progress — MM-109 done; MM-110 (pgvector RAG + embeddings) in review; next MM-111 (documents in Cloud Storage). Cloud SQL **stopped** until G5.
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -29,7 +29,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 |---|---|---|---|
 | G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | **Done** |
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | **Done** (full lifecycle on Postgres verified in G2) |
-| G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | In progress (MM-109 in review) |
+| G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | In progress (MM-109 done; MM-110 in review) |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | Not started |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | Not started |
 | G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | Not started |
@@ -48,6 +48,15 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-09-30 — MM-110: pgvector RAG store + Gemini embeddings, RLS on RAG
+- **Done:** `adapters/pgvector_adapter.py` — `PgVectorStore` (Core table outside the ORM metadata since it's Postgres-only; `INSERT … ON CONFLICT` upserts; cosine-distance search with the shared filter semantics). Migration `d4e1b9c2a7f5`: `rag_chunks` (`vector(768)`, HNSW `vector_cosine_ops`, scope index, jsonb metadata) with a row-level-security policy (`counterparty_id = '' OR app_can_see(counterparty_id)`). `GeminiEmbedder` (`gemini-embedding-001`, 768 dims, `RETRIEVAL_DOCUMENT`/`RETRIEVAL_QUERY`, batches of 50, fails loud on a short response); the `Embedder` port gained `kind="document"|"query"` (OpenAI ignores it; the retriever passes `query`). Factory: `EMBEDDING_PROVIDER=openai|vertex`, `VECTOR_STORE=chroma|pgvector` (pgvector requires `DB_DIALECT=postgres`). Gemini chat now runs with `GEMINI_THINKING_LEVEL=low`. CI: the pgvector contract runs in the `migrations` job's Postgres leg.
+- **Decisions:** Embeddings on `us-central1` (regional — probed; `gemini-embedding-2` is global-only and single-input). Thinking level `low` after a probe showed identical CP-6 extraction in 2.1 s vs 6.8 s (`minimal` isn't supported on 3.8-flash). pgvector contract tests clone `rag_chunks` with `CREATE TABLE … (LIKE rag_chunks INCLUDING ALL)` via a plain engine connection — ORM sessions run as `mm_app`, which (correctly) can't create tables.
+- **Changed:** `src/adapters/{pgvector_adapter.py (new), gemini_adapter.py, openai_adapter.py, factory.py}`, `src/ports/embedder.py`, `src/rag/retriever.py`, `src/config/settings.py`, `migrations/versions/d4e1b9c2a7f5_rag_chunks_pgvector.py` (new), `tests/contract/{test_vector_store_contract,test_llm_contract}.py`, `tests/unit/test_adapter_factory.py`, `.github/workflows/ci.yml`, `pyproject.toml` (`pgvector` in `db`), `.env.example`, `docs/gcp/adr/{0009,0011}-*.md`.
+- **Verified (local Postgres + real Vertex AI):** migration up/down/up; pgvector contract 6/6 (same semantics as Chroma / in-memory); RLS suite still 47/47; real corpus **74 chunks from 15 documents** embedded + stored in 11.9 s (csa 40, disputes 16, policy/escalation/exceptions 6 each); retrieval for "CP-6 threshold and MTA" returns CP-6's MTA + Threshold sections; **RLS on RAG**: `analyst1` can't retrieve CP-6's CSA, `analyst2` can, both see shared policy; `answer_csa_terms` end to end on Gemini + pgvector → CP-6 threshold 220,000 / MTA 24,000 / haircuts / trigger, CP-3 90,000 / 19,000 — all matching the source documents, with correct citations. Warm latencies: embed 0.5 s, pgvector 0.05 s, Gemini 1.6–4 s.
+- **Cost impact:** Vertex AI per-token only (embedding the whole corpus is a fraction of a cent).
+- **Known issues / tech debt:** occasional long Gemini calls (one CSA extraction took 43 s) — looks like queueing/retries on the `global` endpoint, not our code; MM-112 measures it across all counterparties. Chroma is still the default (`VECTOR_STORE=chroma`) until the deploy switches the GCP config.
+- **Next step:** MM-111 — RAG documents in Cloud Storage + re-ingestion (local + Cloud SQL).
 
 ### 2026-09-30 — MM-109: Gemini on Vertex AI as the LLM
 - **Done:** `adapters/gemini_adapter.py` — `GeminiChat` implements `LLMClient` over the `google-genai` SDK on Vertex AI: `complete()` with a system instruction; `parse()` asks for JSON matching the Pydantic schema at temperature 0, uses the SDK's parsed object, falls back to validating the JSON text, and returns `None` for anything that doesn't fit (same contract as OpenAI). Factory: `LLM_PROVIDER=openai|vertex` (unknown values fail loud; `vertex` requires `GCP_PROJECT_ID`). New settings `gemini_model`, `gemini_location`, `gcp_project_id`, `gcp_location`. Terraform `vertex_ai.tf`: Vertex AI API + `roles/aiplatform.user` for `mm-api-sa`, `mm-agent-sa`, `mm-mcp-sa`. Applied by the user together with **stopping Cloud SQL** (`cloudsql_activation_policy = "NEVER"` in local tfvars; instance now `STOPPED`, storage-only billing).

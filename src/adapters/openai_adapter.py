@@ -4,6 +4,8 @@ from typing import TypeVar
 from openai import OpenAI
 from pydantic import BaseModel
 
+from ports.embedder import EmbeddingKind
+
 T = TypeVar("T", bound=BaseModel)
 
 # See ADR-0006: ingestion and retrieval must use this exact same model --
@@ -48,6 +50,7 @@ class OpenAIEmbedder:
         self._client = client
         self._model = model
 
-    def embed(self, texts: list[str]) -> list[Sequence[float]]:
+    def embed(self, texts: list[str], kind: EmbeddingKind = "document") -> list[Sequence[float]]:
+        # OpenAI embeds documents and queries the same way; `kind` is unused.
         response = self._client.embeddings.create(model=self._model, input=texts)
         return [item.embedding for item in response.data]

@@ -31,6 +31,8 @@ Three mandatory requirements meet here: a GCP-hosted relational store, a GCP-hos
 - **SQL Server** gets the access table but no row filtering — it's retired in G9.
 - **Tested (MM-107):** `tests/integration/test_rls_live.py` runs in CI against real Postgres — every protected table for reads (own book / firm-wide / empty scope), writes (insert into, update, delete and re-assign another book's rows), crafted SQL (`OR 1=1`, joins via global tables, unions, subqueries) and injection through API path parameters.
 
+- **RAG (MM-110):** `rag_chunks` (migration `d4e1b9c2a7f5`, Postgres only): `vector(768)` + HNSW cosine index, `counterparty_id` / `doc_type` columns for filtering, full metadata in `jsonb`. Policy: `counterparty_id = '' OR app_can_see(counterparty_id)` — shared documents (policy, exceptions, escalation, disputes) stay visible to every user; a counterparty's CSA only to its book. Verified: `analyst1` can't retrieve CP-6's CSA, `analyst2` can, both see shared policy.
+
 ### Limits
 
 The policies trust the transaction setting `app.scope` and the `mm_app` role. SQL that can run arbitrary statements on the connection could call `set_config('app.scope', '*', true)` or `RESET ROLE` and widen its own access. So row-level security here is **defence in depth against application bugs and parameter injection** (a forgotten filter, a crafted id) — not against an attacker who already executes raw SQL. Mitigations: all queries use bound parameters (SQLAlchemy); only `persistence/db/rls.py` may set the scope or role, enforced by a unit test; in Cloud SQL the app's IAM login user will be a non-superuser (MM-108), so `RESET ROLE` falls back to a role that is still subject to `FORCE ROW LEVEL SECURITY`.

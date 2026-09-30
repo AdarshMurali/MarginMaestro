@@ -31,26 +31,52 @@ def get_llm(settings: Settings, openai_client: OpenAI | None = None) -> LLMClien
     if provider == "vertex":
         from adapters.gemini_adapter import GeminiChat
 
-        return GeminiChat(_genai_client(settings), model=settings.gemini_model)
+        return GeminiChat(
+            _genai_client(settings),
+            model=settings.gemini_model,
+            thinking_level=settings.gemini_thinking_level or None,
+        )
     client = openai_client or OpenAI(api_key=settings.openai_api_key)
     return OpenAIChat(client, model=settings.openai_model)
 
 
-def _genai_client(settings: Settings) -> Any:
+def _genai_client(settings: Settings, location: str | None = None) -> Any:
     if not settings.gcp_project_id:
-        raise ValueError("LLM_PROVIDER=vertex requires GCP_PROJECT_ID")
+        raise ValueError(
+            "Vertex AI (LLM_PROVIDER / EMBEDDING_PROVIDER=vertex) requires GCP_PROJECT_ID"
+        )
     # Imported lazily: only needed when a Vertex adapter is selected.
     from google.genai import Client
 
-    return Client(vertexai=True, project=settings.gcp_project_id, location=settings.gemini_location)
+    return Client(
+        vertexai=True,
+        project=settings.gcp_project_id,
+        location=location or settings.gemini_location,
+    )
 
 
 def get_embedder(settings: Settings, openai_client: OpenAI | None = None) -> Embedder:
+    provider = _choice("EMBEDDING_PROVIDER", settings.embedding_provider, ("openai", "vertex"))
+    if provider == "vertex":
+        from adapters.gemini_adapter import GeminiEmbedder
+
+        return GeminiEmbedder(
+            _genai_client(settings, location=settings.gemini_embedding_location),
+            model=settings.gemini_embedding_model,
+            dimensions=settings.embedding_dimensions,
+        )
     return OpenAIEmbedder(openai_client or OpenAI(api_key=settings.openai_api_key))
 
 
 def get_vector_store(settings: Settings) -> VectorStore:
-    _choice("VECTOR_STORE", settings.vector_store, ("chroma",))
+    store = _choice("VECTOR_STORE", settings.vector_store, ("chroma", "pgvector"))
+    if store == "pgvector":
+        from adapters.pgvector_adapter import PgVectorStore
+        from persistence.db.engine import db_dialect, get_session_factory
+
+        if db_dialect(settings) != "postgres":
+            raise ValueError("VECTOR_STORE=pgvector requires DB_DIALECT=postgres")
+        return PgVectorStore(get_session_factory(settings))
     from rag.ingest import get_chroma_client
 
     return ChromaVectorStore(get_chroma_client(settings), RAG_COLLECTION)

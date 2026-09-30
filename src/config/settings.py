@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     # gcp_location. For strict US residency: gemini-2.5-flash + us-central1.
     gemini_model: str = "gemini-3.8-flash"
     gemini_location: str = "global"
+    # low | high | "" (model default). low = same extraction, ~3x faster (MM-110).
+    gemini_thinking_level: str = "low"
     # Shared by Vertex AI and (as GCP_PROJECT_ID) the Secret Manager source.
     gcp_project_id: str | None = None
     gcp_location: str = "us-central1"
@@ -40,7 +42,15 @@ class Settings(BaseSettings):
 
     # MM-102: which adapter backs each port (adapters/factory.py). Defaults are
     # the pre-GCP stack; each GCP phase adds its value (pgvector, pubsub, whatsapp).
-    vector_store: str = "chroma"
+    vector_store: str = "chroma"  # chroma | pgvector (MM-110, needs DB_DIALECT=postgres)
+    # MM-110: openai (text-embedding-3-small, with Chroma) or vertex
+    # (gemini-embedding-001 at 768 dims, required by pgvector's vector(768)).
+    embedding_provider: str = "openai"
+    gemini_embedding_model: str = "gemini-embedding-001"
+    # Embeddings are served in us-central1, so the corpus stays in-region
+    # (unlike Gemini 3.x chat, which is global-only).
+    gemini_embedding_location: str = "us-central1"
+    embedding_dimensions: int = 768
     event_bus: str = "kafka"
     client_notifier: str = "slack"
 
