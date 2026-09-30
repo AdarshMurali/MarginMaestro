@@ -2,6 +2,7 @@
 against real Postgres is covered by the pgvector VectorStore contract in
 CI's migrations job)."""
 
+import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -90,14 +91,16 @@ def test_query_orders_by_cosine_distance_with_shared_docs_and_doc_type_filters()
     hits = store.query([0.2] * 768, top_k=3, counterparty_id="CP-6", doc_type="csa")
 
     sql = _sql(session.execute.call_args.args[0])
+    # Patterns, not exact strings: newer SQLAlchemy adds casts like ::VARCHAR.
     assert "embedding <=>" in sql  # pgvector cosine distance
-    assert (
-        "rag_chunks.counterparty_id = %(counterparty_id_1)s OR rag_chunks.counterparty_id = %(counterparty_id_2)s"
-        in sql
+    assert re.search(
+        r"rag_chunks\.counterparty_id = %\(counterparty_id_1\)s(::\w+)?\)? OR "
+        r"\(?rag_chunks\.counterparty_id = %\(counterparty_id_2\)s",
+        sql,
     )
-    assert "rag_chunks.doc_type = %(doc_type_1)s" in sql
+    assert re.search(r"rag_chunks\.doc_type = %\(doc_type_1\)s", sql)
     assert "ORDER BY distance" in sql
-    assert "LIMIT %(param_1)s" in sql
+    assert re.search(r"LIMIT %\(param_1\)s", sql)
     assert hits[0].text == "CP-6 threshold"
     assert hits[0].metadata == {"source_file": "csa/CP-6.md"}
     assert hits[0].distance == 0.12
