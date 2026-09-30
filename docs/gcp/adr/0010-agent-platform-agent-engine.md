@@ -12,7 +12,7 @@ Google's Agent Platform offers a managed runtime (Vertex AI **Agent Engine**), t
 
 - **Keep LangGraph** (ADR-0002). Agent Engine supports LangGraph agents natively, so the existing state graph, `interrupt()` approval gates and tests carry over.
 - **Deploy the orchestrator graph to Agent Engine** as the managed agent runtime. The FastAPI API on Cloud Run calls it for `/simulate`, approvals and resumes.
-- **Checkpointing** moves from the custom SQL Server saver (`persistence/db/checkpoint_saver.py`) to LangGraph's official Postgres checkpointer on Cloud SQL (ADR-0011), so human-approval pauses survive restarts.
+- **Checkpointing** stays on this project's own database-neutral saver (`persistence/db/checkpoint_saver.py`, `SqlCheckpointSaver`), which runs unchanged on SQL Server and on Cloud SQL Postgres (ADR-0011), so human-approval pauses survive restarts. *Amended 2026-09-30 (MM-105, user decision):* LangGraph's official Postgres checkpointer was the original plan, but ours already works on Postgres — keeping it means one code path, Alembic-managed tables and the existing audit-write lock.
 - **Evaluation:** use Vertex AI **Gen AI evaluation** for the golden scenario set (tool-call trajectory + grounding/citation checks), in CI on demand.
 - **MCP servers** (market data, RAG retriever, Slack, WhatsApp, ServiceNow) run on Cloud Run and are called as tools by the agent.
 - **Governance layer (amendment):** the agent runs with its own **Agent Identity** (not a shared service account), and every outbound call — MCP tools and Gemini — goes through **Agent Gateway**:

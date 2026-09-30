@@ -4,7 +4,7 @@ lifecycle step in agents/orchestrator.py -- rather than reconstructing
 history from LangGraph's own checkpoints the way api/margin_call_trace.py
 (MM-54) does. Deliberately a separate, parallel view: the checkpoint-based
 trace is unaffected by this story and stays exactly as it was. This one is
-the reliable record when it matters, since AzureSQLSaver can silently drop
+the reliable record when it matters, since SqlCheckpointSaver can silently drop
 a checkpoint row under concurrent writes (see docs/PROGRESS.md's tech-debt
 notes) but audit_log has no such failure mode -- it's a normal table."""
 

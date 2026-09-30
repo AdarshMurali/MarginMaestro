@@ -2,7 +2,7 @@
 (cross-cutting)"): every real lifecycle step of a margin-call run gets one
 insert-only row here -- never updated, never deleted. Deliberately
 independent of LangGraph's own checkpoint history (api/margin_call_trace.py,
-MM-54): AzureSQLSaver can silently drop a checkpoint row under concurrent
+MM-54): SqlCheckpointSaver can silently drop a checkpoint row under concurrent
 writes (see docs/PROGRESS.md's tech-debt notes), so a genuinely reliable
 audit record needs its own plain-SQL, non-LangGraph-managed write path.
 

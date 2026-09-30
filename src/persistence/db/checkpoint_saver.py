@@ -4,6 +4,14 @@ await_approval survives a process restart -- no official LangGraph
 checkpoint backend exists for SQL Server (only Postgres/SQLite/MongoDB), so
 this implements the BaseCheckpointSaver contract directly.
 
+Database-neutral: it only uses SQLAlchemy ORM queries, so the same code runs
+on SQL Server (AWS / Azure SQL) and Postgres (GCP / Cloud SQL). MM-105
+(2026-09-30, user decision) kept it for both instead of adding LangGraph's
+official PostgresSaver: one code path, tables managed by our own Alembic
+migrations, and the shared audit-write lock (MM-91) keeps working. CI runs
+its persistence test against both databases. Renamed from AzureSQLSaver
+(alias kept below).
+
 Stores the full Checkpoint dict (including channel_values) as one row per
 step rather than LangGraph's own Postgres/SQLite savers' per-channel
 blob-dedup scheme -- this orchestrator's graph is small/linear (a handful of
@@ -44,7 +52,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from persistence.db.models import CheckpointORM, CheckpointWriteORM
 
 
-class AzureSQLSaver(BaseCheckpointSaver[int]):
+class SqlCheckpointSaver(BaseCheckpointSaver[int]):
     def __init__(
         self, session_factory: sessionmaker[Session], lock: "threading.Lock | None" = None
     ) -> None:
@@ -256,3 +264,7 @@ class AzureSQLSaver(BaseCheckpointSaver[int]):
             )
             session.execute(delete(CheckpointORM).where(CheckpointORM.thread_id == thread_id))
             session.commit()
+
+
+# Pre-MM-105 name, kept so older imports keep working.
+AzureSQLSaver = SqlCheckpointSaver

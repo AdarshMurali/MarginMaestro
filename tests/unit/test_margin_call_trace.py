@@ -2,7 +2,7 @@
 
 Deliberately does NOT drive a real orchestrator graph through SQLite for the
 step-sequence assertions: doing so hit a real, already-documented race in
-AzureSQLSaver (see its own docstring -- "roughly 1-in-5 to 1-in-8 runs" a
+SqlCheckpointSaver (see its own docstring -- "roughly 1-in-5 to 1-in-8 runs" a
 concurrent put()/put_writes() pair can silently lose a checkpoint row).
 That race doesn't affect anything else in this codebase today, because every
 other consumer only reads the LATEST checkpoint (get_state()), which
@@ -317,7 +317,7 @@ def _breach_market_feed() -> MagicMock:
 
 class TestGetMarginCallTraceAgainstARealGraph:
     """Real-graph integration smoke test. Deliberately asserts nothing about
-    *which* node ends up first/last: the known AzureSQLSaver checkpoint race
+    *which* node ends up first/last: the known SqlCheckpointSaver checkpoint race
     (see module docstring) was confirmed in CI to be able to drop ANY single
     checkpoint, including the very first one -- an earlier version of this
     test asserted steps[0].node == "Event received" and failed in CI when

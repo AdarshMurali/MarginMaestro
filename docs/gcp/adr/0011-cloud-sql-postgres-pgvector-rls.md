@@ -18,7 +18,7 @@ Three mandatory requirements meet here: a GCP-hosted relational store, a GCP-hos
   - Roles: `viewer` / `approver` / `manager` see only their assigned counterparties; an `auditor` role gets read-only access to everything.
   - RLS on `rag_chunks` means retrieval can never surface another counterparty's CSA.
 - **Connectivity:** Cloud Run → Cloud SQL via the Cloud SQL Python Connector with IAM database auth; no public IP allow-listing.
-- **Driver:** `psycopg` (v3) replaces `pyodbc`; LangGraph checkpoints use the official Postgres checkpointer.
+- **Driver:** `psycopg` (v3) for Postgres alongside `pyodbc` for SQL Server, chosen by `DB_DIALECT` (MM-104). LangGraph checkpoints keep using our own SQLAlchemy-based `SqlCheckpointSaver` on both databases (MM-105) — not the official Postgres checkpointer.
 
 ## Rationale
 

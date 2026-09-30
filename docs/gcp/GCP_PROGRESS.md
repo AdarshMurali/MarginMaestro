@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0 (MM-87) **done**. G1 (MM-88) in progress — MM-104 (Postgres + dual-dialect migrations) in review; next MM-105 (Postgres checkpoints).
+- **Phase:** G0 (MM-87) **done**. G1 (MM-88) in progress — MM-104 done; MM-105 (Postgres checkpoints) in review; next MM-106 (row-level security).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -28,7 +28,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | Phase | Epic | Scope | Status |
 |---|---|---|---|
 | G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | **Done** |
-| G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | In progress (MM-104 in review) |
+| G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | In progress (MM-104 done; MM-105 in review) |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | Not started |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | Not started |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | Not started |
@@ -46,6 +46,15 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-28 | ₹0 (first real budget notification) | — | Kill-switch live at ₹12,600 (≈ $150) |
 
 ## Log
+
+### 2026-09-30 — MM-105: LangGraph checkpoints on Postgres
+- **Done:** Found that the existing checkpoint store (`persistence/db/checkpoint_saver.py`) uses only SQLAlchemy ORM queries, so it already works on Postgres — its persistence test (pause a run at approval, rebuild the store as a restart would, resume) passed against the local `pgvector/pgvector:pg17` container unchanged. Renamed `AzureSQLSaver` → **`SqlCheckpointSaver`** (old name kept as an alias) and recorded the decision in its docstring. CI's `migrations` job now also runs that persistence test against **both** Postgres and SQL Server, with `REQUIRE_DB=1` so an unreachable database fails the job instead of silently skipping.
+- **Decisions:** **Option A (user decision):** keep our own saver for both databases instead of adding LangGraph's official `PostgresSaver` — one code path, tables stay under our Alembic migrations, the MM-91 audit-write lock keeps working, no extra dependency or connection pool. Each environment still has its own database (AWS → Azure SQL, GCP → Cloud SQL); nothing is shared. ADR-0010 and ADR-0011 amended; roadmap MM-G12 updated.
+- **Changed:** `src/persistence/db/checkpoint_saver.py`, `src/agents/orchestrator.py`, `src/api/{audit_log,margin_call_trace}.py`, `src/persistence/audit.py` (rename), `tests/integration/test_checkpoint_saver_live.py` (`REQUIRE_DB`), `tests/unit/{test_checkpoint_saver,test_margin_call_trace}.py` (rename), `.github/workflows/ci.yml`, `docs/gcp/adr/{0010,0011}-*.md`, `docs/gcp/GCP_ROADMAP.md` (real Jira keys next to MM-G11…G15; MM-G11 text fixed: Postgres runs *alongside* SQL Server, Chroma stays until G2).
+- **Verified:** persistence test passed locally against Postgres 17 **and** SQL Server (SQL Edge); full suite 594 passed (the 5 normally-skipped DB tests ran because both local databases were up); ruff/black/mypy clean.
+- **Cost impact:** none.
+- **Known issues / tech debt:** none new.
+- **Next step:** MM-106 — row-level security policies.
 
 ### 2026-09-29 — MM-104: Postgres locally + dual-dialect migrations
 - **Done:** New setting `DB_DIALECT=mssql|postgres` (default `mssql`, so AWS/Azure SQL is unchanged). `persistence/db/engine.py` builds a `postgresql+psycopg://` URL and Postgres connect args when `postgres`; `bootstrap.ensure_database_exists` checks `pg_database` via the `postgres` admin DB and quotes the identifier with the dialect's own preparer. New migration `a1c4e7f90b21` enables the `vector` extension on Postgres only (no-op on SQL Server). `docker-compose.yml` gains a `postgres` service (`pgvector/pgvector:pg17`, local-only credentials) alongside SQL Server. New CI job `migrations` runs `upgrade → downgrade → upgrade` against real **Postgres 17 (pgvector)** and **SQL Server 2022** service containers on every PR.

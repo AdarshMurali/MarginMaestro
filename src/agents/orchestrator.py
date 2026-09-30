@@ -45,7 +45,7 @@ from observability.metrics import (
     observe_step,
 )
 from persistence.audit import record_audit_event
-from persistence.db.checkpoint_saver import AzureSQLSaver
+from persistence.db.checkpoint_saver import SqlCheckpointSaver
 from persistence.db.engine import get_session_factory
 from persistence.db.models import (
     CollateralItemORM,
@@ -520,12 +520,12 @@ def build_orchestrator_graph(
     the whole run -- await_approval can pause for a long time (up to
     MARGIN_CALL_SLA_MINUTES), and a session shouldn't sit open through that.
 
-    checkpointer defaults to AzureSQLSaver (MM-38) -- persisted to this
+    checkpointer defaults to SqlCheckpointSaver (MM-38) -- persisted to this
     project's own SQL database, so a paused run survives a process restart.
     Still overridable (e.g. InMemorySaver in tests that don't care about
     restart survival).
 
-    `_db_write_lock` is shared between the default AzureSQLSaver and every
+    `_db_write_lock` is shared between the default SqlCheckpointSaver and every
     node's audit-log write (MM-91) below -- LangGraph's Pregel runtime
     genuinely executes node functions concurrently via an internal
     ThreadPoolExecutor even for this simple sequential graph (see
@@ -544,7 +544,7 @@ def build_orchestrator_graph(
     session_factory = session_factory or get_session_factory(settings)
     market_feed = market_feed or get_market_feed(settings)
     _db_write_lock = threading.Lock()
-    checkpointer = checkpointer or AzureSQLSaver(session_factory, lock=_db_write_lock)
+    checkpointer = checkpointer or SqlCheckpointSaver(session_factory, lock=_db_write_lock)
 
     def _audit(session: Session, state: MarginCallState, event_type: str, payload: dict) -> None:
         with _db_write_lock:
