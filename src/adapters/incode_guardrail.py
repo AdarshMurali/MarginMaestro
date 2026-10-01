@@ -15,7 +15,9 @@ from ports.guardrail import Stage, Verdict
 INJECTION_PATTERNS: dict[str, re.Pattern[str]] = {
     name: re.compile(pattern, re.IGNORECASE)
     for name, pattern in {
-        "ignore_instructions": r"\b(ignore|disregard|forget)\b.{0,30}\b(previous|prior|above|earlier|all)\b.{0,20}\b(instructions?|rules|prompts?)\b",
+        "ignore_instructions": r"\b(ignore|disregard|forget)\b.{0,30}\b(previous|prior|above|earlier|all|your)\b.{0,20}\b(instructions?|rules|prompts?|guidance|guidelines|directions?)\b",
+        # Asking the model to assert facts the source doesn't contain.
+        "fabricate_source": r"\bpretend (that )?the (csa|document|agreement|contract|policy)\b",
         # Not "act as ...": "act as calculation agent" is standard ISDA wording.
         "role_override": r"\byou are now\b",
         "reveal_system_prompt": r"\b(reveal|print|show|repeat)\b.{0,30}\b(system prompt|your instructions|hidden instructions)\b",

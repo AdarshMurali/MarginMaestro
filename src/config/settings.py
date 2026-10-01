@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # MM-113: screens every LLM call. incode (default: conservative, no
     # network, post-trial fallback) | modelarmor (MM-114) | none (local only).
     guardrail_provider: str = "incode"
+    # MM-114: Model Armor template (regional) used when GUARDRAIL_PROVIDER=modelarmor.
+    model_armor_template_id: str = "marginmaestro-llm-traffic"
+    model_armor_location: str = "us-central1"
     # Pinned model version, never an alias (ADR-0009). Gemini 3.x is served
     # only from the `global` endpoint (probed 2026-09-30: us-central1 tops out
     # at gemini-2.5-flash), so the model location is separate from
