@@ -3,7 +3,15 @@ margin-call notice via the LLM, then -- only after human approval -- sends it
 through Slack. Never sends before the approval gate. Message content is
 drafted by the LLM; the send itself is deterministic code (CLAUDE.md golden
 rule 1 -- the LLM never computes or alters a figure, only phrases the notice
-around numbers it's given)."""
+around numbers it's given).
+
+MM-116: the model never sees the figures at all. It drafts with placeholders
+({CALL_AMOUNT}, ...); code checks the draft (required placeholders present,
+no unknown ones, no digits anywhere) and only then fills in the values from
+the calculation. A wrong amount can't be sent because the model can't write
+one."""
+
+import re
 
 from openai import OpenAI
 from pydantic import BaseModel
@@ -17,11 +25,52 @@ from ports.llm import LLMClient
 
 SYSTEM_PROMPT = (
     "You draft formal, concise client-facing margin call notices for a bank "
-    "operations team. Use only the figures given in the request -- never "
-    "invent, estimate, or recompute any number. 1-2 short professional "
-    "paragraphs, no markdown, no subject line (this is posted directly to a "
-    "chat channel, not emailed)."
+    "operations team. You are never given figures: write the placeholders you "
+    "are given (for example {CALL_AMOUNT}) exactly as written wherever that "
+    "value belongs, and they will be filled in afterwards. Never write any "
+    "digits yourself -- write durations and counts in words. Don't mention "
+    "attachments or documents you weren't given. 1-2 short "
+    "professional paragraphs, no markdown, no subject line (this is posted "
+    "directly to a chat channel, not emailed)."
 )
+
+_PLACEHOLDER = re.compile(r"\{([A-Z_]+)\}")
+
+
+def _validate_draft(draft: str, allowed: set[str], required: set[str]) -> str | None:
+    """The reason the draft is unusable, or None if it's safe to fill in."""
+    used = set(_PLACEHOLDER.findall(draft))
+    if unknown := used - allowed:
+        return f"unknown placeholders {sorted(unknown)}"
+    if missing := required - used:
+        return f"missing placeholders {sorted(missing)}"
+    if re.search(r"\d", _PLACEHOLDER.sub("", draft)):
+        return "the draft contains figures that did not come from the calculation"
+    return None
+
+
+def _draft_with_placeholders(
+    llm: LLMClient,
+    request: str,
+    values: dict[str, str],
+    required: set[str],
+    what: str,
+) -> str:
+    """Ask for a draft, validate it (one retry naming the problem), then fill
+    in the placeholders. Fails loud -- an unusable draft is never sent."""
+    prompt = request
+    problem: str | None = "empty draft"
+    for _ in range(2):
+        text = (llm.complete(SYSTEM_PROMPT, prompt) or "").strip()
+        problem = _validate_draft(text, set(values), required) if text else "empty draft"
+        if problem is None:
+            return _PLACEHOLDER.sub(lambda m: values[m.group(1)], text)
+        prompt = f"{request}\n\nYour previous draft was rejected: {problem}. Try again."
+    raise NoticeDraftingError(f"Unusable {what}: {problem}")
+
+
+def _money(amount: float, currency: str) -> str:
+    return f"{currency} {amount:,.2f}"
 
 
 class NoticeDraftingError(Exception):
@@ -50,17 +99,25 @@ def draft_margin_call_notice(
     settings = settings or get_settings()
     llm = llm or get_llm(settings, openai_client)
 
-    prompt = (
-        f"Counterparty: {counterparty_id}\n"
-        f"Margin call amount: {call_amount:,.2f} {currency}\n"
-        f"CSA threshold: {csa_terms.threshold:,.2f} {csa_terms.currency}\n"
-        f"CSA minimum transfer amount: {csa_terms.mta:,.2f} {csa_terms.currency}\n\n"
-        "Draft the margin call notice using exactly these figures."
+    request = (
+        "Draft a margin call notice. Placeholders: {COUNTERPARTY} (the counterparty), "
+        "{CALL_AMOUNT} (the margin call amount, with currency), {THRESHOLD} (the CSA "
+        "threshold) and {MTA} (the CSA minimum transfer amount). {COUNTERPARTY} and "
+        "{CALL_AMOUNT} must appear."
     )
-    text = llm.complete(SYSTEM_PROMPT, prompt)
-    if not text or not text.strip():
-        raise NoticeDraftingError(f"LLM returned an empty margin call notice for {counterparty_id}")
-    return text.strip()
+    values = {
+        "COUNTERPARTY": counterparty_id,
+        "CALL_AMOUNT": _money(call_amount, currency),
+        "THRESHOLD": _money(csa_terms.threshold, csa_terms.currency),
+        "MTA": _money(csa_terms.mta, csa_terms.currency),
+    }
+    return _draft_with_placeholders(
+        llm,
+        request,
+        values,
+        {"COUNTERPARTY", "CALL_AMOUNT"},
+        f"margin call notice for {counterparty_id}",
+    )
 
 
 def draft_sla_met_notice(
@@ -79,17 +136,16 @@ def draft_sla_met_notice(
     settings = settings or get_settings()
     llm = llm or get_llm(settings, openai_client)
 
-    prompt = (
-        f"Counterparty: {counterparty_id}\n"
-        f"Margin call amount: {call_amount:,.2f} {currency}\n\n"
-        "Draft a short confirmation notice that this counterparty met its margin call "
-        "obligation within the SLA window, using exactly this figure. This is a "
-        "resolution confirmation, not a new call -- do not restate it as a demand."
+    request = (
+        "Draft a short confirmation that {COUNTERPARTY} met its margin call obligation "
+        "of {CALL_AMOUNT} within the SLA window. This is a resolution confirmation, not "
+        "a new call -- do not restate it as a demand. {COUNTERPARTY} and {CALL_AMOUNT} "
+        "must appear."
     )
-    text = llm.complete(SYSTEM_PROMPT, prompt)
-    if not text or not text.strip():
-        raise NoticeDraftingError(f"LLM returned an empty SLA-met notice for {counterparty_id}")
-    return text.strip()
+    values = {"COUNTERPARTY": counterparty_id, "CALL_AMOUNT": _money(call_amount, currency)}
+    return _draft_with_placeholders(
+        llm, request, values, set(values), f"SLA-met notice for {counterparty_id}"
+    )
 
 
 def send_slack_notice(

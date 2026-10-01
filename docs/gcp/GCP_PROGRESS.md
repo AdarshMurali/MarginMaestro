@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0, G1, G2 **done**. G3 (MM-90) in progress — MM-113, MM-114 done; MM-115 (SDP masking) in review; next MM-116 (placeholder drafting). Cloud SQL **stopped** until G5.
+- **Phase:** G0, G1, G2 **done**. G3 (MM-90) in progress — MM-113…MM-115 done; MM-116 (placeholder drafting) in review; next MM-117 (limits + end-to-end guardrail tests). Cloud SQL **stopped** until G5.
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -30,7 +30,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | **Done** |
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | **Done** (full lifecycle on Postgres verified in G2) |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | **Done** |
-| G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | In progress (MM-113, MM-114 done; MM-115 in review) |
+| G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | In progress (MM-113…MM-115 done; MM-116 in review) |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | Not started |
 | G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | Not started |
 | G6 | MM-93 | WhatsApp client notifications | Not started |
@@ -48,6 +48,15 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-01 — MM-116: Amounts the model can't touch + grounding rules
+- **Done:** `agents/communication.py` — margin-call and SLA-met notices are drafted with **placeholders only** (`{COUNTERPARTY}`, `{CALL_AMOUNT}`, `{THRESHOLD}`, `{MTA}`); the model is never given a figure (or the counterparty id, which contains digits). `_validate_draft` rejects unknown placeholders, missing required ones and **any digit**; one retry tells the model what was wrong, a second failure raises `NoticeDraftingError`; only then does code fill in `USD 139,525.76`-style values from the calculation. Drafting instructions also forbid mentioning attachments/documents the model wasn't given. Grounding: the CSA agent keeps only chunks from the counterparty's **own** CSA (another counterparty's or a shared chunk is never sent or cited; none left → `CSATermsUnavailableError`); the reconciliation agent returns "manual review" **without calling the model** when no rules/precedent were retrieved.
+- **Decisions:** placeholders instead of "copy these figures exactly" (ADR-0005 amended) — a structural guarantee rather than an instruction. Retry once, then fail loud (the notice is held, never sent with a model-written figure).
+- **Changed:** `src/agents/{communication.py, csa_rag.py, reconciliation.py}`, `src/adapters/model_armor_guardrail.py` (imports by name — ruff/mypy agreement), `tests/unit/test_communication.py` (drafting tests rewritten for the new guarantee), `tests/unit/test_grounding.py` (new), `docs/adr/0005-*.md`.
+- **Verified:** live with Gemini through the full guardrail stack (Model Armor + in-code, SDP masking): **8/8 notices passed on the first try** (5 margin-call, 3 SLA-met), every figure inserted by code exactly as calculated; suite 761 passed; ruff/black/mypy clean.
+- **Cost impact:** none.
+- **Known issues / tech debt:** none new.
+- **Next step:** MM-117 — cost/loop limits + end-to-end guardrail tests (incl. verdicts in the per-run audit log).
 
 ### 2026-10-01 — MM-115: Sensitive Data Protection masking (prompts + RAG index)
 - **Done:** `ports/redactor.py` + `adapters/redactors.py`: `SdpRedactor` (`deidentify_content`, regional parent `projects/…/locations/us-central1`, LIKELY+, financial/contact info types replaced with `[INFO_TYPE]`), strict `RegexRedactor` (email; `+`-prefixed phones; IBAN with mod-97; card numbers with Luhn), `ChainedRedactor`, `NoRedactor`. `GuardedLLM` masks the prompt **before** screening and before the model; `rag.ingest` masks each chunk before it's embedded and stored. Factory `get_redactor()`: `REDACTOR_PROVIDER=regex` (default) | `sdp` (= SDP then regex) | `none`. Terraform `sensitive_data.tf`: DLP API + `roles/dlp.user` for api/agent/mcp SAs — applied by the user.
