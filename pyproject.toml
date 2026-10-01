@@ -38,7 +38,7 @@ notify = ["slack-sdk"]
 auth = ["bcrypt", "pyjwt"]
 # gcp: runtime deps baked into the one app image (AWS + GCP, ground rule 6).
 # gcp-ops: tooling outside the app (billing kill-switch function), CI only.
-gcp = ["google-cloud-secret-manager", "google-genai"]
+gcp = ["google-cloud-secret-manager", "google-genai", "google-cloud-storage"]
 gcp-ops = ["google-cloud-billing", "functions-framework"]
 observability = [
     "opentelemetry-api",

@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0, G1 **done**. G2 (MM-89) in progress — MM-109 done; MM-110 (pgvector RAG + embeddings) in review; next MM-111 (documents in Cloud Storage). Cloud SQL **stopped** until G5.
+- **Phase:** G0, G1 **done**. G2 (MM-89) in progress — MM-109, MM-110 done; MM-111 (documents in GCS) in review; next MM-112 (golden regression + full lifecycle). Cloud SQL **stopped** until G5.
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -29,7 +29,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 |---|---|---|---|
 | G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | **Done** |
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | **Done** (full lifecycle on Postgres verified in G2) |
-| G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | In progress (MM-109 done; MM-110 in review) |
+| G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | In progress (MM-109, MM-110 done; MM-111 in review) |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | Not started |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | Not started |
 | G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | Not started |
@@ -48,6 +48,15 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-01 — MM-111: RAG documents in Cloud Storage
+- **Done:** `rag/gcs_documents.py` — `upload_corpus()` (relative paths as object names, `text/markdown`) and `iter_corpus_documents()` (markdown only, sorted), plus a CLI (`python -m rag.gcs_documents data/documents`). `rag/documents.py` dispatches on `DOCUMENT_STORE=s3|gcs` (default `s3`, so AWS is unchanged; unknown values fail loud); `rag.ingest` now reads through it and reports which store it used. Terraform `documents.tf`: bucket `marginmaestro-demo-documents` (us-central1, versioned — a CSA edit can't silently erase text an earlier call cited — public access prevented, old versions pruned). Applied by the user.
+- **Decisions:** No runtime service account gets bucket access yet — ingestion runs from the laptop; a scheduled re-ingestion job gets read access when one exists. `google-cloud-storage` joins the `gcp` extra (lazy import).
+- **Changed:** `src/rag/{gcs_documents.py (new), documents.py (new), ingest.py}`, `src/config/settings.py` (`document_store`, `gcs_documents_bucket`), `tests/unit/test_gcs_documents.py` (new, 8), `infra/gcp/documents.tf` (new), `infra/gcp/README.md`, `pyproject.toml`, `.env.example`, `docs/gcp/GCP_ROADMAP.md` (Jira keys next to MM-G21…G24).
+- **Verified:** bucket checked (US-CENTRAL1, versioning on, public access prevention enforced), `terraform plan` → no changes; all **15 documents uploaded**; `DOCUMENT_STORE=gcs python -m rag.ingest` rebuilt the local pgvector index **from GCS**: 74 chunks / 15 documents; retrieval ("haircut on US Treasury securities for CP-2") returns CP-2's Eligible Collateral section. Suite 659 passed (3 runs; one earlier run showed 3 errors that didn't reproduce).
+- **Cost impact:** none — a few KB in the 5 GB free tier.
+- **Known issues / tech debt:** re-ingestion into **Cloud SQL** is deferred to G5, when the instance is started again (it's stopped to save credits) — same command with the proxy-backed DB settings.
+- **Next step:** MM-112 — golden regression (Gemini vs OpenAI across all counterparties) + one full margin-call run on Postgres + pgvector + Gemini.
 
 ### 2026-09-30 — MM-110: pgvector RAG store + Gemini embeddings, RLS on RAG
 - **Done:** `adapters/pgvector_adapter.py` — `PgVectorStore` (Core table outside the ORM metadata since it's Postgres-only; `INSERT … ON CONFLICT` upserts; cosine-distance search with the shared filter semantics). Migration `d4e1b9c2a7f5`: `rag_chunks` (`vector(768)`, HNSW `vector_cosine_ops`, scope index, jsonb metadata) with a row-level-security policy (`counterparty_id = '' OR app_can_see(counterparty_id)`). `GeminiEmbedder` (`gemini-embedding-001`, 768 dims, `RETRIEVAL_DOCUMENT`/`RETRIEVAL_QUERY`, batches of 50, fails loud on a short response); the `Embedder` port gained `kind="document"|"query"` (OpenAI ignores it; the retriever passes `query`). Factory: `EMBEDDING_PROVIDER=openai|vertex`, `VECTOR_STORE=chroma|pgvector` (pgvector requires `DB_DIALECT=postgres`). Gemini chat now runs with `GEMINI_THINKING_LEVEL=low`. CI: the pgvector contract runs in the `migrations` job's Postgres leg.

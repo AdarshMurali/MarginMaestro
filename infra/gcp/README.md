@@ -33,6 +33,8 @@ terraform -chdir=infra/gcp apply
 - `service_accounts.tf` — one service account per component (`mm-api-sa`, `mm-agent-sa`, `mm-mcp-sa`, `mm-events-sa`, `mm-ci-sa`, `mm-killswitch-sa`). Runtime accounts get only telemetry roles here; every other role is granted with the resource it applies to.
 - `secrets.tf` — Secret Manager secret `marginmaestro-<environment>` (empty container; values added out-of-band with `gcloud secrets versions add`, never via Terraform) + `secretAccessor` on that one secret for the runtime accounts (MM-101).
 - `cloud_sql.tf` — Cloud SQL `marginmaestro-pg` (Postgres 17, Enterprise `db-f1-micro`, zonal, 10 GB SSD, backups, deletion protection; public IP with no authorized networks), database `marginmaestro`, IAM database users + `cloudsql.client` / `cloudsql.instanceUser` for the runtime accounts (MM-108). Stop it when idle with `cloudsql_activation_policy = "NEVER"` (storage still billed). One-time data setup: `scripts/cloudsql_bootstrap.ps1` (proxy → migrations → seed → `mm_app` grants → RLS tests).
+- `vertex_ai.tf` — Vertex AI API + `aiplatform.user` for `mm-api-sa`, `mm-agent-sa`, `mm-mcp-sa` (MM-109).
+- `documents.tf` — GCS bucket `marginmaestro-demo-documents` for the RAG corpus (versioned, private, old versions pruned) (MM-111). Upload: `python -m rag.gcs_documents data/documents`; ingest: `DOCUMENT_STORE=gcs python -m rag.ingest`.
 - `outputs.tf` — project, region, service account emails, WIF provider, app secret id.
 
 CI (`terraform-gcp` job) runs `fmt -check` and `validate` on both roots with `-backend=false`, so it needs no GCP credentials.

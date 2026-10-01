@@ -88,10 +88,10 @@ ADR: 0011
 ### Phase G2 — Gemini on Vertex AI + RAG on pgvector (Epic: MM-89)
 ADR: 0009
 
-- **MM-G21** `LLM_PROVIDER=vertex`: Gemini Flash with pinned version, structured output, Pydantic validation; OpenAI/Ollama branches kept.
-- **MM-G22** `gemini-embedding-001` (768 dims) embedder; **pgvector** `VectorStore` adapter with HNSW index + metadata filters; `retriever.py` interface unchanged.
-- **MM-G23** RAG source documents move to **Cloud Storage**; full corpus re-ingested.
-- **MM-G24** Golden regression set: every existing margin-call scenario gives the same orchestration decisions on Gemini as on OpenAI; retrieval precision and citation presence re-measured.
+- **MM-G21** (MM-109) `LLM_PROVIDER=vertex`: Gemini Flash with pinned version, structured output, Pydantic validation; OpenAI/Ollama branches kept.
+- **MM-G22** (MM-110) `gemini-embedding-001` (768 dims) embedder; **pgvector** `VectorStore` adapter with HNSW index + metadata filters; `retriever.py` interface unchanged.
+- **MM-G23** (MM-111) RAG source documents move to **Cloud Storage**; full corpus re-ingested.
+- **MM-G24** (MM-112) Golden regression set: every existing margin-call scenario gives the same orchestration decisions on Gemini as on OpenAI; retrieval precision and citation presence re-measured.
 
 **Exit:** `make demo` passes locally on Gemini + pgvector with the same decisions as before.
 
