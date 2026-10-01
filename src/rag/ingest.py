@@ -11,7 +11,7 @@ from config.settings import Settings, get_settings
 from ports.embedder import Embedder
 from ports.vector_store import VectorStore
 from rag.chunker import chunk_markdown, extract_effective_date
-from rag.s3_upload import iter_corpus_documents
+from rag.documents import iter_corpus_documents
 
 # EMBEDDING_MODEL (ADR-0006) now lives with the OpenAI adapter; re-exported
 # here for existing callers.
@@ -94,8 +94,12 @@ def run_ingestion(
 
 
 def main() -> None:
-    count = run_ingestion()
-    print(f"Ingested {count} chunks into ChromaDB collection '{COLLECTION_NAME}'")
+    settings = get_settings()
+    count = run_ingestion(settings)
+    print(
+        f"Ingested {count} chunks from {settings.document_store} into the "
+        f"{settings.vector_store} store ('{COLLECTION_NAME}')"
+    )
 
 
 if __name__ == "__main__":

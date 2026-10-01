@@ -84,6 +84,9 @@ class Settings(BaseSettings):
 
     fred_api_key: str | None = None
 
+    # MM-111: where RAG source documents live -- s3 (AWS, default) or gcs.
+    document_store: str = "s3"
+    gcs_documents_bucket: str | None = None
     s3_documents_bucket: str | None = None
     s3_documents_bucket_owner: str | None = None
 
