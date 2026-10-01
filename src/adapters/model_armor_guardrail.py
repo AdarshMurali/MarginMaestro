@@ -50,20 +50,20 @@ class ModelArmorGuardrail:
         self._client = client
 
     def screen(self, text: str, stage: Stage) -> Verdict:
-        from google.cloud import modelarmor_v1
+        from google.cloud.modelarmor_v1 import (
+            DataItem,
+            SanitizeModelResponseRequest,
+            SanitizeUserPromptRequest,
+        )
 
-        item = modelarmor_v1.DataItem(text=text)
+        item = DataItem(text=text)
         if stage == "prompt":
             response = self._client.sanitize_user_prompt(
-                request=modelarmor_v1.SanitizeUserPromptRequest(
-                    name=self._template, user_prompt_data=item
-                )
+                request=SanitizeUserPromptRequest(name=self._template, user_prompt_data=item)
             )
         else:
             response = self._client.sanitize_model_response(
-                request=modelarmor_v1.SanitizeModelResponseRequest(
-                    name=self._template, model_response_data=item
-                )
+                request=SanitizeModelResponseRequest(name=self._template, model_response_data=item)
             )
         result = response.sanitization_result
         if _name(result.invocation_result) != SUCCESS:
@@ -82,8 +82,8 @@ class ModelArmorGuardrail:
 def model_armor_client(location: str) -> Any:
     """Regional endpoint: Model Armor templates are regional resources."""
     from google.api_core.client_options import ClientOptions
-    from google.cloud import modelarmor_v1
+    from google.cloud.modelarmor_v1 import ModelArmorClient
 
-    return modelarmor_v1.ModelArmorClient(
+    return ModelArmorClient(
         client_options=ClientOptions(api_endpoint=f"modelarmor.{location}.rep.googleapis.com")
     )

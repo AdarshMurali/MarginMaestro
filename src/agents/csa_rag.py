@@ -73,6 +73,9 @@ def answer_csa_terms(
     )
 
     chunks = retrieve(question, counterparty_id=counterparty_id, doc_type="csa", top_k=top_k)
+    # MM-116: only that counterparty's own CSA may ground its terms -- a shared
+    # or another counterparty's chunk is never a citation for them.
+    chunks = [c for c in chunks if c.counterparty_id == counterparty_id]
     if not chunks:
         raise CSATermsUnavailableError(f"No CSA document chunks found for {counterparty_id}")
 

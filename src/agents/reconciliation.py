@@ -18,6 +18,7 @@ from rag.models import Citation
 from rag.retriever import RetrievedChunk, retrieve
 
 DEFAULT_TOP_K = 5
+MANUAL_REVIEW = "No resolution could be drafted; manual review required."
 
 SYSTEM_PROMPT = (
     "You are a margin operations reconciliation assistant. Given isolated "
@@ -63,11 +64,16 @@ def draft_resolution(
         query, doc_type="disputes", top_k=top_k, settings=settings
     )
 
+    if not chunks:
+        # MM-116: without retrieved rules or precedent there is nothing to ground
+        # a suggestion in -- don't ask the model to make one up.
+        return MANUAL_REVIEW, []
+
     llm = llm or get_llm(settings, openai_client)
     text = llm.complete(
         SYSTEM_PROMPT, f"Breaks:\n{break_summary}\n\n---\n\n{_build_context(chunks)}"
     )
-    resolution = text.strip() if text else "No resolution could be drafted; manual review required."
+    resolution = text.strip() if text else MANUAL_REVIEW
     citations = [Citation(source_file=c.source_file, section=c.section) for c in chunks]
     return resolution, citations
 
