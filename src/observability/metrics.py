@@ -27,6 +27,12 @@ MARGIN_CALL_BREACHES_TOTAL = Counter(
     ["breached"],
 )
 
+GUARDRAIL_VERDICTS_TOTAL = Counter(
+    "marginmaestro_guardrail_verdicts_total",
+    "Guardrail screenings of LLM traffic (MM-113), by guardrail, stage and outcome",
+    ["guardrail", "stage", "outcome"],
+)
+
 MARGIN_CALL_APPROVAL_DECISIONS_TOTAL = Counter(
     "marginmaestro_margin_call_approval_decisions_total",
     "First-approver decisions, by decision",

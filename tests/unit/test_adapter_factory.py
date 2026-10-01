@@ -4,6 +4,7 @@ import pytest
 
 from adapters import factory
 from adapters.chroma_adapter import ChromaVectorStore
+from adapters.guarded_llm import GuardedLLM
 from adapters.openai_adapter import OpenAIChat, OpenAIEmbedder
 from adapters.slack_adapter import SlackNotifier
 from config.settings import Settings
@@ -16,7 +17,10 @@ def _settings(**overrides) -> Settings:
 def test_defaults_reproduce_the_pre_gcp_stack():
     settings = _settings()
 
-    assert isinstance(factory.get_llm(settings), OpenAIChat)
+    llm = factory.get_llm(settings)
+    assert isinstance(llm, GuardedLLM)
+    assert isinstance(llm._llm, OpenAIChat)
+    assert llm._guardrail.name == "incode"
     assert isinstance(factory.get_embedder(settings), OpenAIEmbedder)
     assert isinstance(factory.get_notifier(settings), SlackNotifier)
     with patch("rag.ingest.get_chroma_client", return_value=MagicMock()):
@@ -69,7 +73,8 @@ def test_vertex_provider_builds_gemini_on_vertex_ai():
     with patch("google.genai.Client") as client_cls:
         llm = factory.get_llm(settings)
 
-    assert isinstance(llm, GeminiChat)
+    assert isinstance(llm, GuardedLLM)
+    assert isinstance(llm._llm, GeminiChat)
     client_cls.assert_called_once_with(vertexai=True, project="proj-x", location="global")
 
 
