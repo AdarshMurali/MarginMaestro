@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0–G3 **done** (G3: guardrails — Model Armor + in-code, SDP masking, placeholder drafting, limits, audit). Next: G4 (MM-91) — Pub/Sub, Cloud Tasks, Cloud Scheduler. Cloud SQL **stopped** until G5.
+- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — MM-119 (Pub/Sub bus) in review; next MM-120 (live prices → DB). Cloud SQL **stopped** until G5.
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -31,7 +31,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | **Done** (full lifecycle on Postgres verified in G2) |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | **Done** |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
-| G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | Not started |
+| G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | In progress (MM-119 in review) |
 | G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | Not started |
 | G6 | MM-93 | WhatsApp client notifications | Prep done (Meta account, token, template submitted); MM-118 created |
 | G7 | MM-94 | BigQuery analytics & audit warehouse | Not started |
@@ -48,6 +48,16 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-01 — MM-119: Pub/Sub event bus (EVENT_BUS=pubsub)
+- **Done:** `adapters/pubsub_adapter.py` — `PubSubEventBus` behind the existing `EventBus` port: one JSON message per model, `key` → Pub/Sub **ordering key** (publisher created with message ordering enabled), `flush()` waits for every publish, raises `PubSubDeliveryError` listing failures and resumes the paused ordering key. Same topic names as Kafka (`market.prices`, `market.events`, `market.impact`, `margin.calls`, `market.dead-letter`), so callers don't change. `adapters/pubsub_admin.py` creates topics on the emulator. Factory: `EVENT_BUS=kafka|pubsub` (default kafka; pubsub needs `GCP_PROJECT_ID`). Docker compose gains the official **Pub/Sub emulator** (`pubsub`, port 8085). Terraform `pubsub.tf`: Pub/Sub API, the 4 event topics (1-day retention for replay/seek), `market.dead-letter` (7-day retention), `roles/pubsub.publisher` per topic for `mm-api-sa` and `mm-events-sa`. New CI job **`pubsub`**: runs the EventBus contract against the emulator with `REQUIRE_PUBSUB=1`.
+- **Decisions:** Price refresh every **5 minutes** in market hours (user choice) — MM-120. Push subscriptions, dead-letter policies and their targets come in G5 (they need the Cloud Run URL). Cloud SQL billing check (user question): Cloud SQL `db-f1-micro` bills per running hour regardless of query volume — price writes add no cost (unlike Azure SQL Serverless, where polling prevented auto-pause); the lever is stopping the instance, and in G5 the price schedule and the DB share one switch so a stopped DB doesn't pile up retries.
+- **Also fixed:** the intermittent local "3 errors" (open since MM-111/MM-115) were the pre-existing Kafka testcontainers tests timing out — `RedpandaContainer.start()` waits 10 s by default, Redpanda needs ~55 s+ on Docker Desktop for Windows, and the tests only run when Docker is up (hence "intermittent"). Fixture now waits 120 s; all 3 pass locally.
+- **Changed:** `src/adapters/{pubsub_adapter.py, pubsub_admin.py}` (new), `src/adapters/factory.py`, `src/config/settings.py`, `tests/unit/test_pubsub_adapter.py` (new, 8), `tests/contract/test_event_bus_contract.py` (pubsub variant + ordering test), `tests/integration/test_streaming_testcontainers.py` (startup timeout), `infra/gcp/pubsub.tf` (new), `docker-compose.yml`, `.github/workflows/ci.yml`, `pyproject.toml` (`google-cloud-pubsub` in `gcp`), `.env.example`.
+- **Verified:** against the real emulator — EventBus contract passes, and 5 messages published with one ordering key arrive as the exact JSON, with the key, in publish order; suite 784 passed (+ the 3 Kafka integration tests now passing locally); `terraform plan` → 14 to add.
+- **Cost impact:** none (Pub/Sub free tier).
+- **Known issues / tech debt:** `mm119.tfplan` awaits the user's apply (free; nothing at runtime depends on it yet).
+- **Next step:** MM-120 — live prices through Pub/Sub into the database.
 
 ### 2026-10-01 — MM-117: Cost/loop limits, guardrail audit, model pin fix (G3 closed)
 - **Done:** Limits — `max_agent_steps` (LangGraph `recursion_limit` on every start/resume), `llm_max_prompt_chars` (oversized prompts blocked as `limits:prompt_too_large` before masking or the model), `llm_max_output_tokens` (OpenAI `max_tokens`, Gemini `max_output_tokens`), per-user `rate_limit_per_minute` on the action endpoints (`api/rate_limit.py`, sliding window, 429 + `Retry-After`). Steps × (prompt + output) bound a run's cost. **Guardrail audit:** a blocked or unscreenable LLM call in `fetch_csa_terms`, `send_notification`, `send_sla_met_notification` or `escalate` writes a `guardrail_blocked` row (step, guardrail, reasons, error) into that run's audit trail, then the run stops. **Collateral label canonicalisation** (`csa_rag.canonical_collateral_name`): extracted names are mapped back to the document's own labels (exact → unique starts-with/contains → else unchanged; never invented, ambiguous left alone) — closes the MM-112 follow-up. **Model pin:** `gemini-2.5-flash` @ `us-central1`, `GEMINI_THINKING_BUDGET=0` (new setting; 3.x still uses `GEMINI_THINKING_LEVEL`).
@@ -82,7 +92,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 - **Changed:** `src/ports/redactor.py` (new), `src/adapters/redactors.py` (new), `src/adapters/{guarded_llm.py, factory.py}`, `src/rag/ingest.py`, `src/config/settings.py`, `infra/gcp/sensitive_data.tf` (new), `tests/unit/test_redactors.py` (new, 40), `pyproject.toml` (`google-cloud-dlp` in `gcp`), `.env.example`, `docs/gcp/adr/0014-*.md`.
 - **Verified (live SDP):** 15 real documents → none changed; sample with email / +44 phone / IBAN / card → all masked by `sdp+regex`, while "USD 240,000", "2026-08-16" and "Rodriguez Partners" stay intact. Regex alone leaves non-Luhn 16-digit refs and mod-97-failing IBAN-shaped strings alone. `terraform plan` → no changes.
 - **Cost impact:** SDP free tier (1 GiB/month); the whole corpus is ~40 KB.
-- **Known issues / tech debt:** SDP doesn't flag well-known invalid sample SSNs (e.g. 123-45-6789) — correct behaviour, noted so nobody "fixes" it. **Open:** an intermittent "3 errors" in the local unit run, seen twice (MM-111, MM-115), each time right after `pip install -e` in the same command; not reproducible in 5 reruns and never seen in CI (753 passed on rerun). Capture the test IDs with `pytest -rE` if it recurs.
+- **Known issues / tech debt:** SDP doesn't flag well-known invalid sample SSNs (e.g. 123-45-6789) — correct behaviour, noted so nobody "fixes" it. ~~Open: intermittent "3 errors"~~ — resolved in MM-119 (Kafka testcontainers startup timeout).
 - **Next step:** MM-116 — placeholder-based notice drafting (amounts never reach the model) + reject uncited RAG claims.
 
 ### 2026-10-01 — MM-114: Model Armor screening (+ defence in depth)

@@ -36,7 +36,9 @@ def redpanda():
 
     try:
         container = RedpandaContainer()
-        container.start()
+        # 120 s: Redpanda takes ~55 s to boot on Docker Desktop for Windows; the
+        # library default (10 s) made these tests fail intermittently locally.
+        container.start(timeout=120)
     except DockerException as exc:
         pytest.skip(f"Docker not reachable for testcontainers: {exc}")
 

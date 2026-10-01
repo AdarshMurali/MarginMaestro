@@ -113,10 +113,10 @@ ADR: 0014
 ### Phase G4 — Pub/Sub event bus, Cloud Tasks SLA timers, Cloud Scheduler (Epic: MM-91)
 ADR: 0012
 
-- **MM-G41** `EventBus` Pub/Sub adapter: topics, ordering keys per counterparty, dead-letter topics; Pub/Sub emulator for local dev; Kafka adapter kept.
-- **MM-G42** Event Agent becomes a Pub/Sub **push** endpoint on Cloud Run; idempotency re-verified under redelivery.
-- **MM-G43** **Cloud Tasks** schedules the SLA check at each call's exact deadline (replaces the re-pause polling in the SLA node).
-- **MM-G44** **Cloud Scheduler** jobs: live price refresh → `market-events`; daily BigQuery rollup trigger.
+- **MM-G41** (MM-119) `EventBus` Pub/Sub adapter: topics, ordering keys per counterparty, dead-letter topics; Pub/Sub emulator for local dev; Kafka adapter kept.
+- **MM-G42** (MM-121) Event Agent becomes a Pub/Sub **push** endpoint on Cloud Run; idempotency re-verified under redelivery.
+- **MM-G43** (MM-122) **Cloud Tasks** schedules the SLA check at each call's exact deadline (replaces the re-pause polling in the SLA node).
+- **MM-G44** (MM-120) **Cloud Scheduler** jobs: live price refresh → `market-events`; daily BigQuery rollup trigger. *Live prices (MM-120): scheduled refresh every 5 minutes in market hours → `market.prices` → Event Agent upserts `latest_prices` and detects moves; the schedule and Cloud SQL share one on/off switch.*
 
 **Exit:** a price shock published to Pub/Sub raises exactly one call even when the message is delivered twice; SLA breach escalates on time without polling.
 

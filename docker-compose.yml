@@ -26,6 +26,15 @@ services:
     volumes:
       - sqlserver_data:/var/opt/mssql
 
+  # MM-119: Pub/Sub emulator for EVENT_BUS=pubsub locally
+  # (set PUBSUB_EMULATOR_HOST=localhost:8085; topics are created by
+  # `python -m adapters.pubsub_admin` or the tests).
+  pubsub:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+    command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=marginmaestro-demo
+    ports:
+      - "8085:8085"
+
   # MM-104: Postgres + pgvector for the GCP track (Cloud SQL in G1). Runs
   # alongside SQL Server; the app picks one with DB_DIALECT. Local-only
   # credentials (not secrets) -- see .env.example.

@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     # (unlike Gemini 3.x chat, which is global-only).
     gemini_embedding_location: str = "us-central1"
     embedding_dimensions: int = 768
-    event_bus: str = "kafka"
+    event_bus: str = "kafka"  # kafka | pubsub (MM-119; same topic names)
     client_notifier: str = "slack"
 
     chroma_host: str = "localhost"
