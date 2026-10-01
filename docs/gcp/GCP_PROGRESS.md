@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0, G1 **done**. G2 (MM-89) in progress — MM-109, MM-110 done; MM-111 (documents in GCS) in review; next MM-112 (golden regression + full lifecycle). Cloud SQL **stopped** until G5.
+- **Phase:** G0, G1, G2 **done** (G2: Gemini on Vertex AI, pgvector RAG with RLS, documents in GCS, golden regression + full lifecycle on the new stack). Next: G3 (MM-90) — AI guardrails. Cloud SQL **stopped** until G5.
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -29,7 +29,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 |---|---|---|---|
 | G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | **Done** |
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | **Done** (full lifecycle on Postgres verified in G2) |
-| G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | In progress (MM-109, MM-110 done; MM-111 in review) |
+| G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | **Done** |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | Not started |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | Not started |
 | G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | Not started |
@@ -48,6 +48,16 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-01 — MM-112: Golden regression + full lifecycle on Postgres / pgvector / Gemini (G2 closed)
+- **Done:** `tests/integration/test_golden_regression_live.py` (live) — for every counterparty's CSA document, Gemini and OpenAI each run the CSA agent's real extraction (same system prompt + schema, document given directly so the model is isolated from retrieval) and both are compared with the **ground truth parsed from the templated document** (threshold, MTA, currency, haircuts by name, rating triggers); prints a latency report. **Full lifecycle:** API on local Postgres + pgvector + Gemini (`LLM_PROVIDER=vertex`, `EMBEDDING_PROVIDER=vertex`, `VECTOR_STORE=pgvector`) + `python -m demo.run_demo` → **CP-6** (standard tier) call 139,525.76 raised → approved → notified → SLA met; **CP-5** (elite tier) call 288,153.82 → approval → **manager second sign-off** → notified → SLA met; 71 s for both. Audit trail for CP-5 shows all 8 steps (compute_exposure > fetch_csa_terms > evaluate_breach > await_approval > await_manager_approval > send_notification > await_sla_response > send_sla_met_notification); 29 checkpoints across 4 runs in Postgres; 0 errors in the API log. Closes G1's deferred "full lifecycle on Postgres" criterion.
+- **Results:** **Gemini 8/8 exact.** OpenAI 7/8 — on CP-8 it labelled the collateral `"Cash"` instead of the document's `"Cash (USD)"` (haircut value correct). Impact today: **none** — the call amount uses only threshold/MTA (both models right everywhere), and the name-matching consumer, `calc/collateral_optimizer.optimize_collateral`, isn't wired into the live flow. The test stays strict so it keeps catching label drift.
+- **Decisions:** Ground truth comes from the document, not from either model, so a disagreement says which model is wrong. Golden test is `live` (real API calls), not in CI.
+- **Changed:** `tests/integration/test_golden_regression_live.py` (new), `docs/gcp/GCP_ROADMAP.md` (G1 note closed).
+- **Verified:** golden run 16/17 (all Gemini pass; the OpenAI CP-8 label drift above); lifecycle run as described.
+- **Cost impact:** cents (Gemini + OpenAI extraction calls, embeddings during the run).
+- **Known issues / tech debt:** (1) Before wiring the collateral optimizer into the flow, canonicalise extracted collateral names against the document's own list (deterministic post-processing) so label drift from any model can't drop eligible collateral. (2) Occasional slow Gemini calls on the `global` endpoint (see MM-110).
+- **Next step:** close G2 (MM-89); present the **G3 (MM-90) guardrails** plan — Model Armor, Sensitive Data Protection, Agent Gateway / Semantic Governance (pricing check first), in-code output validation.
 
 ### 2026-10-01 — MM-111: RAG documents in Cloud Storage
 - **Done:** `rag/gcs_documents.py` — `upload_corpus()` (relative paths as object names, `text/markdown`) and `iter_corpus_documents()` (markdown only, sorted), plus a CLI (`python -m rag.gcs_documents data/documents`). `rag/documents.py` dispatches on `DOCUMENT_STORE=s3|gcs` (default `s3`, so AWS is unchanged; unknown values fail loud); `rag.ingest` now reads through it and reports which store it used. Terraform `documents.tf`: bucket `marginmaestro-demo-documents` (us-central1, versioned — a CSA edit can't silently erase text an earlier call cited — public access prevented, old versions pruned). Applied by the user.
