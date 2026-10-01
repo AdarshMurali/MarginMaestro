@@ -152,7 +152,13 @@ def get_vector_store(settings: Settings) -> VectorStore:
 
 
 def get_event_bus(settings: Settings) -> EventBus:
-    _choice("EVENT_BUS", settings.event_bus, ("kafka",))
+    bus = _choice("EVENT_BUS", settings.event_bus, ("kafka", "pubsub"))
+    if bus == "pubsub":
+        from adapters.pubsub_adapter import PubSubEventBus
+
+        if not settings.gcp_project_id:
+            raise ValueError("EVENT_BUS=pubsub requires GCP_PROJECT_ID")
+        return PubSubEventBus(settings.gcp_project_id)
     from streaming.producer import EventProducer
 
     return EventProducer(settings)

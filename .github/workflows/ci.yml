@@ -136,6 +136,38 @@ jobs:
           REQUIRE_DB: "1"
         run: pytest tests/contract/test_vector_store_contract.py -k pgvector -p no:cacheprovider -v
 
+  # MM-119: the Pub/Sub EventBus must meet the same contract as Kafka /
+  # in-memory, against the real Pub/Sub emulator (ordering per key included).
+  pubsub:
+    runs-on: ubuntu-latest
+    env:
+      PUBSUB_EMULATOR_HOST: localhost:8085
+      REQUIRE_PUBSUB: "1"
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Start the Pub/Sub emulator
+        run: |
+          docker run -d --name pubsub -p 8085:8085 \
+            gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators \
+            gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=marginmaestro-demo
+
+      - name: Install dependencies
+        run: pip install -e ".[dev,data,db,rag,llm,streaming,notify,auth,observability,gcp]"
+
+      - name: Wait for the emulator
+        run: |
+          for i in $(seq 1 60); do curl -sf http://localhost:8085 && exit 0; sleep 2; done
+          docker logs pubsub; exit 1
+
+      - name: EventBus contract on Pub/Sub
+        run: pytest tests/contract/test_event_bus_contract.py -m "not live" -p no:cacheprovider -v
+
   terraform-gcp:
     runs-on: ubuntu-latest
     steps:
