@@ -70,3 +70,36 @@ def test_no_retrieved_precedent_means_manual_review_without_asking_the_model():
     assert resolution == MANUAL_REVIEW
     assert citations == []
     llm.complete.assert_not_called()
+
+
+# --- collateral label canonicalisation (MM-117) -------------------------------------
+
+DOC = (
+    "## Eligible Collateral\n\n"
+    "- Cash (USD) (haircut: 0%)\n"
+    "- Investment-grade corporate bonds (haircut: 8%)\n"
+    "- US Treasury securities (haircut: 2%)\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("extracted", "expected"),
+    [
+        ("Cash (USD)", "Cash (USD)"),  # exact
+        ("Cash", "Cash (USD)"),  # model dropped the qualifier
+        ("cash", "Cash (USD)"),  # case
+        ("Treasury securities", "US Treasury securities"),  # contained
+        ("Gold", "Gold"),  # not in the document: kept, never invented
+    ],
+)
+def test_collateral_names_map_back_to_the_documents_own_labels(extracted, expected):
+    from agents.csa_rag import canonical_collateral_name
+
+    assert canonical_collateral_name(extracted, DOC) == expected
+
+
+def test_ambiguous_names_are_left_alone():
+    from agents.csa_rag import canonical_collateral_name
+
+    doc = "- Cash (USD) (haircut: 0%)\n- Cash (EUR) (haircut: 1%)\n"
+    assert canonical_collateral_name("Cash", doc) == "Cash"

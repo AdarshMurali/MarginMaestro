@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0, G1, G2 **done**. G3 (MM-90) in progress — MM-113…MM-115 done; MM-116 (placeholder drafting) in review; next MM-117 (limits + end-to-end guardrail tests). Cloud SQL **stopped** until G5.
+- **Phase:** G0–G3 **done** (G3: guardrails — Model Armor + in-code, SDP masking, placeholder drafting, limits, audit). Next: G4 (MM-91) — Pub/Sub, Cloud Tasks, Cloud Scheduler. Cloud SQL **stopped** until G5.
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -30,10 +30,10 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | **Done** |
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | **Done** (full lifecycle on Postgres verified in G2) |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | **Done** |
-| G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | In progress (MM-113…MM-115 done; MM-116 in review) |
+| G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | Not started |
 | G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | Not started |
-| G6 | MM-93 | WhatsApp client notifications | Not started |
+| G6 | MM-93 | WhatsApp client notifications | Prep done (Meta account, token, template submitted); MM-118 created |
 | G7 | MM-94 | BigQuery analytics & audit warehouse | Not started |
 | G8 | MM-95 | Data governance (Dataplex, classification, lineage, audit, retention) | Not started |
 | G9 | MM-96 | Cut-over & AWS/Azure decommission | Not started |
@@ -48,6 +48,24 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-01 — MM-117: Cost/loop limits, guardrail audit, model pin fix (G3 closed)
+- **Done:** Limits — `max_agent_steps` (LangGraph `recursion_limit` on every start/resume), `llm_max_prompt_chars` (oversized prompts blocked as `limits:prompt_too_large` before masking or the model), `llm_max_output_tokens` (OpenAI `max_tokens`, Gemini `max_output_tokens`), per-user `rate_limit_per_minute` on the action endpoints (`api/rate_limit.py`, sliding window, 429 + `Retry-After`). Steps × (prompt + output) bound a run's cost. **Guardrail audit:** a blocked or unscreenable LLM call in `fetch_csa_terms`, `send_notification`, `send_sla_met_notification` or `escalate` writes a `guardrail_blocked` row (step, guardrail, reasons, error) into that run's audit trail, then the run stops. **Collateral label canonicalisation** (`csa_rag.canonical_collateral_name`): extracted names are mapped back to the document's own labels (exact → unique starts-with/contains → else unchanged; never invented, ambiguous left alone) — closes the MM-112 follow-up. **Model pin:** `gemini-2.5-flash` @ `us-central1`, `GEMINI_THINKING_BUDGET=0` (new setting; 3.x still uses `GEMINI_THINKING_LEVEL`).
+- **Decisions:** Switched the model pin after the full-guardrail demo timed out (223 s) — profiling: guardrails ~4.5 s per extraction (SDP ~2 s, Model Armor ~2.5 s), Gemini 3.8 @ global 117 s across 3 calls (one 92 s); a probe showed 3.8 @ global stalling 68 s while 2.5 @ us-central1 stayed ~1.5 s; a golden run on 3.5 @ global hung 15+ min and was stopped. ADR-0009 amended. Rate limiting is in-process (per instance) — a shared store is the production step.
+- **Changed:** `src/agents/{orchestrator.py, csa_rag.py}`, `src/adapters/{guarded_llm.py, openai_adapter.py, gemini_adapter.py, factory.py}`, `src/api/{rate_limit.py (new), main.py}`, `src/config/settings.py`, `tests/unit/{test_limits_and_guardrail_e2e.py (new), conftest.py, test_grounding.py, test_adapter_factory.py}`, `tests/contract/test_llm_contract.py`, `tests/integration/test_golden_regression_live.py`, `.env.example`, `docs/gcp/adr/0009-*.md`.
+- **Verified:** suite 779 passed; end-to-end through the real orchestrator graph: a poisoned CSA chunk is blocked by the real guarded LLM before the model is called, audited as `guardrail_blocked` (step `fetch_csa_terms`, reason `ignore_instructions`), and the run never reaches approval; a guardrail outage is audited and holds the run. Golden regression on the new pin: **8/8**, median 1.6 s, max 7.7 s. **Full demo with every guardrail on** (Gemini 2.5 + pgvector + Model Armor + in-code + SDP masking + placeholder drafting + limits): CP-6 112,630.98 and CP-5 265,088.94 (two-person sign-off) end to end in 145 s; 16 screenings (8 prompts, 8 responses), all allowed; 0 API errors.
+- **Cost impact:** none new (2.5-flash is cheaper than 3.x).
+- **Known issues / tech debt:** none new. G3's Agent Gateway / Semantic Governance (MM-G37) live in G5.
+- **Next step:** close G3 (MM-90); present the **G4 (MM-91)** plan — Pub/Sub event bus, Cloud Tasks SLA timers, Cloud Scheduler.
+
+### 2026-10-01 — MM-93 (G6 prep): WhatsApp Cloud API account setup
+- **Done:** Meta developer app `MarginMaestro-Dev` with the free test WhatsApp Business Account (`2410321463128008`) and test number +1 555-137-2732 (`phone_number_id` `1382503808268641`); one verified recipient. Permanent system-user token stored in AWS Secrets Manager `marginmaestro/prod` (`ap-south-1`, key `whatsapptoken`). Utility template `margin_call_notice` submitted (id `1601248854775468`, 4 variables + Acknowledge button; review pending). A free-form margin-call text was delivered end to end to the test phone. Jira story **MM-118** (MM-G61, WhatsApp notifier adapter + MCP server) created under MM-93.
+- **Decisions:** ADR-0016 amended. The original template-first design stands. A `200` only means accepted; delivery is confirmed via webhook `statuses` (MM-G62 handles them). Free-form text only inside the 24h window and only when no template is configured. No silent Slack fallback.
+- **Incident:** 2026-09-29 Meta auto-flagged the account (`ACCOUNT_VIOLATION` / `SCAM`) about a minute after the first quickstart sends and disabled the portfolio. Sends returned `200` but failed with `131031`, and template creation failed with `3835016`. Review requested 2026-09-30, restored 2026-10-01.
+- **Changed:** `docs/gcp/adr/0016-whatsapp-client-notifications.md`, `docs/gcp/GCP_ROADMAP.md` (G6), this log. No code yet.
+- **Cost impact:** none. Test-number messages are free.
+- **Known issues / tech debt:** the token is still in AWS Secrets Manager (moves to GCP Secret Manager with the rest). Local AWS calls need `AWS_PROFILE=lavanya`; the default profile is a different account. Until MM-G62, delivery errors are only visible in the app dashboard's "Check test webhooks" panel.
+- **Next step:** once `margin_call_notice` is approved, send a template test to the verified phone; then start MM-118 after the current G3 story (MM-117) closes.
 
 ### 2026-10-01 — MM-116: Amounts the model can't touch + grounding rules
 - **Done:** `agents/communication.py` — margin-call and SLA-met notices are drafted with **placeholders only** (`{COUNTERPARTY}`, `{CALL_AMOUNT}`, `{THRESHOLD}`, `{MTA}`); the model is never given a figure (or the counterparty id, which contains digits). `_validate_draft` rejects unknown placeholders, missing required ones and **any digit**; one retry tells the model what was wrong, a second failure raises `NoticeDraftingError`; only then does code fill in `USD 139,525.76`-style values from the calculation. Drafting instructions also forbid mentioning attachments/documents the model wasn't given. Grounding: the CSA agent keeps only chunks from the counterparty's **own** CSA (another counterparty's or a shared chunk is never sent or cited; none left → `CSATermsUnavailableError`); the reconciliation agent returns "manual review" **without calling the model** when no rules/precedent were retrieved.

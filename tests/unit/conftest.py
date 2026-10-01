@@ -1,5 +1,6 @@
 import pytest
 
+from api import rate_limit
 from api.auth import Identity, require_user
 from api.main import app
 
@@ -18,3 +19,13 @@ def _authenticated_reader():
 @pytest.fixture
 def no_user_override():
     app.dependency_overrides.pop(require_user, None)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limiter(monkeypatch):
+    """MM-117: the action limiter is process-wide; unit tests make many calls
+    as the same test user, so each test gets an empty window."""
+    monkeypatch.setattr(rate_limit, "ACTION_LIMITER", rate_limit.SlidingWindowLimiter())
+    import api.main
+
+    monkeypatch.setattr(api.main, "ACTION_LIMITER", rate_limit.ACTION_LIMITER)

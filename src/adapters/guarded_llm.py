@@ -18,6 +18,7 @@ from ports.guardrail import (
     GuardrailBlocked,
     GuardrailUnavailable,
     Stage,
+    Verdict,
 )
 from ports.llm import LLMClient
 from ports.redactor import Redactor
@@ -28,15 +29,29 @@ logger = structlog.get_logger(__name__)
 
 class GuardedLLM:
     def __init__(
-        self, llm: LLMClient, guardrail: Guardrail, redactor: Redactor | None = None
+        self,
+        llm: LLMClient,
+        guardrail: Guardrail,
+        redactor: Redactor | None = None,
+        max_prompt_chars: int | None = None,
     ) -> None:
         self._llm = llm
         self._guardrail = guardrail
         self._redactor = redactor
+        self._max_prompt_chars = max_prompt_chars
 
     def _prepare(self, user: str) -> str:
         """Mask personal/account data (MM-115), then screen the masked text --
-        the model only ever sees what passed both."""
+        the model only ever sees what passed both. Oversized prompts are blocked
+        first (MM-117 cost bound) -- before they're even sent to masking."""
+        if self._max_prompt_chars is not None and len(user) > self._max_prompt_chars:
+            verdict = Verdict(
+                allowed=False,
+                guardrail="limits",
+                reasons=[f"prompt_too_large:{len(user)}>{self._max_prompt_chars}"],
+            )
+            GUARDRAIL_VERDICTS_TOTAL.labels("limits", "prompt", "blocked").inc()
+            raise GuardrailBlocked("prompt", verdict)
         if self._redactor is not None:
             masked = self._redactor.redact(user)
             if masked != user:

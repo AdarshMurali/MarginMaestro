@@ -14,7 +14,14 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class GeminiChat:
-    def __init__(self, client: Any, model: str, thinking_level: str | None = None) -> None:
+    def __init__(
+        self,
+        client: Any,
+        model: str,
+        thinking_level: str | None = None,
+        max_output_tokens: int | None = None,
+        thinking_budget: int | None = None,
+    ) -> None:
         # `client` is a google.genai.Client(vertexai=True, ...); typed Any so
         # this module imports without the SDK (it's only needed when
         # LLM_PROVIDER=vertex).
@@ -24,6 +31,9 @@ class GeminiChat:
         # drafting don't need it: `low` returned the identical CP-6 terms in
         # 2.1 s vs 6.8 s (MM-110 probe). None = the model's default.
         self._thinking_level = thinking_level
+        # Gemini 2.5 takes a token budget instead (0 = no thinking).
+        self._thinking_budget = thinking_budget
+        self._max_output_tokens = max_output_tokens
 
     def _config(self, system: str, **extra: Any) -> Any:
         from google.genai import types
@@ -32,6 +42,10 @@ class GeminiChat:
             extra["thinking_config"] = types.ThinkingConfig(
                 thinking_level=types.ThinkingLevel(self._thinking_level.upper())
             )
+        elif self._thinking_budget is not None:
+            extra["thinking_config"] = types.ThinkingConfig(thinking_budget=self._thinking_budget)
+        if self._max_output_tokens:
+            extra["max_output_tokens"] = self._max_output_tokens
         return types.GenerateContentConfig(system_instruction=system, **extra)
 
     def complete(self, system: str, user: str) -> str | None:

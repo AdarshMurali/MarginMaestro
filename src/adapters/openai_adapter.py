@@ -16,9 +16,13 @@ EMBEDDING_MODEL = "text-embedding-3-small"
 class OpenAIChat:
     """`LLMClient` over OpenAI chat completions."""
 
-    def __init__(self, client: OpenAI, model: str) -> None:
+    def __init__(self, client: OpenAI, model: str, max_output_tokens: int | None = None) -> None:
         self._client = client
         self._model = model
+        self._max_output_tokens = max_output_tokens
+
+    def _limits(self) -> dict:
+        return {"max_tokens": self._max_output_tokens} if self._max_output_tokens else {}
 
     def _messages(self, system: str, user: str) -> list:
         return [
@@ -28,7 +32,7 @@ class OpenAIChat:
 
     def complete(self, system: str, user: str) -> str | None:
         completion = self._client.chat.completions.create(
-            model=self._model, messages=self._messages(system, user)
+            model=self._model, messages=self._messages(system, user), **self._limits()
         )
         content: str | None = completion.choices[0].message.content
         return content
@@ -38,6 +42,7 @@ class OpenAIChat:
             model=self._model,
             messages=self._messages(system, user),
             response_format=schema,
+            **self._limits(),
         )
         parsed: T | None = completion.choices[0].message.parsed
         return parsed

@@ -1,3 +1,5 @@
+import re
+
 from openai import OpenAI
 from pydantic import BaseModel
 
@@ -49,6 +51,26 @@ class _CSATermsExtraction(BaseModel):
     rating_triggers: list[RatingTrigger]
 
 
+_COLLATERAL_LABEL = re.compile(r"^- (.+?) \(haircut:", re.MULTILINE)
+
+
+def canonical_collateral_name(extracted: str, document_text: str) -> str:
+    """Map a model-extracted collateral name back to the exact label the CSA
+    uses (MM-117). Models drift on labels -- both OpenAI and Gemini 2.5 have
+    returned "Cash" for "Cash (USD)" -- and the collateral optimizer matches by
+    exact name, so the document's own wording wins. Deterministic: exact match,
+    else the single document label that starts with / contains the extracted
+    name (case-insensitive); otherwise the extracted name is kept as is."""
+    labels = [label.strip() for label in _COLLATERAL_LABEL.findall(document_text)]
+    if extracted in labels:
+        return extracted
+    wanted = extracted.strip().lower()
+    candidates = [
+        label for label in labels if label.lower().startswith(wanted) or wanted in label.lower()
+    ]
+    return candidates[0] if len(candidates) == 1 else extracted
+
+
 def _build_context(chunks: list[RetrievedChunk]) -> str:
     return "\n\n".join(f"[{chunk.section}]\n{chunk.text}" for chunk in chunks)
 
@@ -90,13 +112,19 @@ def answer_csa_terms(
             f"LLM could not extract structured CSA terms for {counterparty_id}"
         )
 
+    source = "\n".join(c.text for c in chunks)
     return CSATermsResult(
         counterparty_id=counterparty_id,
         threshold=extraction.threshold,
         mta=extraction.mta,
         currency=extraction.currency,
-        eligible_collateral=extraction.eligible_collateral,
-        haircuts={entry.collateral_type: entry.haircut for entry in extraction.haircuts},
+        eligible_collateral=[
+            canonical_collateral_name(name, source) for name in extraction.eligible_collateral
+        ],
+        haircuts={
+            canonical_collateral_name(entry.collateral_type, source): entry.haircut
+            for entry in extraction.haircuts
+        },
         rating_triggers=extraction.rating_triggers,
         citations=[Citation(source_file=c.source_file, section=c.section) for c in chunks],
     )

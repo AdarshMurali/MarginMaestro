@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from adapters.factory import get_llm
-from agents.csa_rag import SYSTEM_PROMPT, _CSATermsExtraction
+from agents.csa_rag import SYSTEM_PROMPT, _CSATermsExtraction, canonical_collateral_name
 from config.settings import Settings
 
 pytestmark = pytest.mark.live
@@ -53,12 +53,16 @@ def _ground_truth(text: str) -> dict:
     }
 
 
-def _normalise(extraction: _CSATermsExtraction) -> dict:
+def _normalise(extraction: _CSATermsExtraction, document: str) -> dict:
     return {
         "threshold": extraction.threshold,
         "mta": extraction.mta,
         "currency": extraction.currency,
-        "haircuts": {h.collateral_type.strip(): round(h.haircut, 4) for h in extraction.haircuts},
+        # Same canonicalisation the CSA agent applies (MM-117).
+        "haircuts": {
+            canonical_collateral_name(h.collateral_type.strip(), document): round(h.haircut, 4)
+            for h in extraction.haircuts
+        },
         "triggers": sorted(
             (str(getattr(t.below_grade, "value", t.below_grade)), float(t.reduced_threshold))
             for t in extraction.rating_triggers
@@ -90,7 +94,7 @@ def test_extraction_matches_the_document(provider, counterparty):
     LATENCIES[name].append(time.monotonic() - started)
 
     assert extraction is not None, f"{name} returned no extraction for {counterparty}"
-    assert _normalise(extraction) == _ground_truth(document)
+    assert _normalise(extraction, document) == _ground_truth(document)
 
 
 def test_latency_report():
