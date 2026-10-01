@@ -220,3 +220,24 @@ def test_gemini_thinking_level_defaults_to_the_model():
     llm.complete("s", "u")
 
     assert client.models.generate_content.call_args.kwargs["config"].thinking_config is None
+
+
+def test_gemini_25_thinking_budget_is_applied():
+    client = MagicMock()
+    client.models.generate_content.return_value = SimpleNamespace(text="ok", parsed=None)
+    GeminiChat(client, model="gemini-2.5-flash", thinking_budget=0).complete("s", "u")
+
+    assert (
+        client.models.generate_content.call_args.kwargs["config"].thinking_config.thinking_budget
+        == 0
+    )
+
+
+def test_thinking_level_takes_precedence_over_budget():
+    client = MagicMock()
+    client.models.generate_content.return_value = SimpleNamespace(text="ok", parsed=None)
+    GeminiChat(client, model="m", thinking_level="low", thinking_budget=0).complete("s", "u")
+
+    thinking = client.models.generate_content.call_args.kwargs["config"].thinking_config
+    assert thinking.thinking_level.value.lower() == "low"
+    assert thinking.thinking_budget is None

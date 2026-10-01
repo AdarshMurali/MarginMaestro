@@ -1,4 +1,6 @@
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import uuid4
@@ -56,6 +58,7 @@ from persistence.db.models import (
     ReferenceRateORM,
 )
 from persistence.models import AssetClass, CounterpartyTier, Position, RatingGrade
+from ports.guardrail import GuardrailError
 from rag.models import Citation
 from streaming.event_agent import latest_close_before
 from streaming.market_feed import MarketFeed, get_market_feed
@@ -462,7 +465,11 @@ def thread_id_for(impact: ImpactSet, counterparty_id: str) -> str:
 
 def start_run(graph: CompiledStateGraph, state: MarginCallState) -> dict:
     thread_id = thread_id_for(state.impact, state.counterparty_id)
-    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    # MM-117: bound the steps one invocation may take (loop / cost guard).
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": get_settings().max_agent_steps,
+    }
     log = logger.bind(
         correlation_id=state.correlation_id,
         thread_id=thread_id,
@@ -481,7 +488,11 @@ def start_run(graph: CompiledStateGraph, state: MarginCallState) -> dict:
 
 
 def resume_run(graph: CompiledStateGraph, thread_id: str, resume_payload: dict) -> dict:
-    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    # MM-117: bound the steps one invocation may take (loop / cost guard).
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": get_settings().max_agent_steps,
+    }
     log = logger.bind(thread_id=thread_id)
     log.info("orchestrator_run_resume_requested", decision=resume_payload.get("decision"))
     result = graph.invoke(Command(resume=resume_payload), config=config)
@@ -556,6 +567,28 @@ def build_orchestrator_graph(
                 counterparty_id=state.counterparty_id,
             )
 
+    @contextmanager
+    def _guardrail_audit(state: MarginCallState, step: str) -> Iterator[None]:
+        """MM-117: a blocked or unscreenable LLM call stops the run; record why
+        in this run's audit trail first (allowed verdicts go to logs/metrics)."""
+        try:
+            yield
+        except GuardrailError as exc:
+            verdict = getattr(exc, "verdict", None)
+            with session_factory() as session:
+                _audit(
+                    session,
+                    state,
+                    "guardrail_blocked",
+                    {
+                        "step": step,
+                        "error": str(exc),
+                        "guardrail": verdict.guardrail if verdict else None,
+                        "reasons": verdict.reasons if verdict else [],
+                    },
+                )
+            raise
+
     def _compute_exposure_node(state: MarginCallState) -> dict:
         log = logger.bind(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
@@ -583,7 +616,8 @@ def build_orchestrator_graph(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
         )
         with observe_step(tracer, "fetch_csa_terms"):
-            result = fetch_csa_terms(state, settings)
+            with _guardrail_audit(state, "fetch_csa_terms"):
+                result = fetch_csa_terms(state, settings)
             with session_factory() as session:
                 _audit(
                     session,
@@ -660,7 +694,8 @@ def build_orchestrator_graph(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
         )
         with observe_step(tracer, "send_notification"):
-            result = send_notification(state, settings)
+            with _guardrail_audit(state, "send_notification"):
+                result = send_notification(state, settings)
             with session_factory() as session:
                 _audit(
                     session,
@@ -685,7 +720,8 @@ def build_orchestrator_graph(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
         )
         with observe_step(tracer, "send_sla_met_notification"):
-            result = send_sla_met_notification(state, settings)
+            with _guardrail_audit(state, "send_sla_met_notification"):
+                result = send_sla_met_notification(state, settings)
             with session_factory() as session:
                 _audit(
                     session,
@@ -708,7 +744,8 @@ def build_orchestrator_graph(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
         )
         with observe_step(tracer, "escalate"):
-            result = escalate(state, settings)
+            with _guardrail_audit(state, "escalate"):
+                result = escalate(state, settings)
             with session_factory() as session:
                 _audit(
                     session,

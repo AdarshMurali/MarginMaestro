@@ -34,15 +34,26 @@ class Settings(BaseSettings):
     # regex (default: strict, no network, post-trial fallback) | sdp
     # (Sensitive Data Protection, us-central1) | none (local only).
     redactor_provider: str = "regex"
+    # MM-117: cost / loop bounds. Per run: <= max_agent_steps graph steps, each
+    # LLM call <= llm_max_prompt_chars in and llm_max_output_tokens out.
+    max_agent_steps: int = 25
+    llm_max_prompt_chars: int = 60_000
+    llm_max_output_tokens: int = 4096
+    # Per-user limit on the action endpoints (approve/respond/simulate...).
+    rate_limit_per_minute: int = 20
     sdp_location: str = "us-central1"
-    # Pinned model version, never an alias (ADR-0009). Gemini 3.x is served
-    # only from the `global` endpoint (probed 2026-09-30: us-central1 tops out
-    # at gemini-2.5-flash), so the model location is separate from
-    # gcp_location. For strict US residency: gemini-2.5-flash + us-central1.
-    gemini_model: str = "gemini-3.8-flash"
-    gemini_location: str = "global"
-    # low | high | "" (model default). low = same extraction, ~3x faster (MM-110).
-    gemini_thinking_level: str = "low"
+    # Pinned model version, never an alias (ADR-0009). MM-117 switched from
+    # gemini-3.8-flash @ global to gemini-2.5-flash @ us-central1: the global
+    # endpoint stalled randomly for 60-90 s (it broke the full demo), the
+    # regional one is steady, keeps data in-region, and scores 8/8 on the
+    # golden regression. Gemini 3.x is served only from `global`.
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_location: str = "us-central1"
+    # Gemini 3.x: thinking level (low | high); Gemini 2.5: thinking budget in
+    # tokens (0 = off). Extraction/drafting don't need thinking. "" / None =
+    # the model default.
+    gemini_thinking_level: str = ""
+    gemini_thinking_budget: int | None = 0
     # Shared by Vertex AI and (as GCP_PROJECT_ID) the Secret Manager source.
     gcp_project_id: str | None = None
     gcp_location: str = "us-central1"

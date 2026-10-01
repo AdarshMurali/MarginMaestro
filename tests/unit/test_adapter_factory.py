@@ -75,7 +75,7 @@ def test_vertex_provider_builds_gemini_on_vertex_ai():
 
     assert isinstance(llm, GuardedLLM)
     assert isinstance(llm._llm, GeminiChat)
-    client_cls.assert_called_once_with(vertexai=True, project="proj-x", location="global")
+    client_cls.assert_called_once_with(vertexai=True, project="proj-x", location="us-central1")
 
 
 def test_vertex_provider_requires_a_project():

@@ -34,7 +34,10 @@ def get_llm(settings: Settings, openai_client: OpenAI | None = None) -> LLMClien
     from adapters.guarded_llm import GuardedLLM
 
     return GuardedLLM(
-        _get_model(settings, openai_client), get_guardrail(settings), get_redactor(settings)
+        _get_model(settings, openai_client),
+        get_guardrail(settings),
+        get_redactor(settings),
+        max_prompt_chars=settings.llm_max_prompt_chars,
     )
 
 
@@ -97,9 +100,13 @@ def _get_model(settings: Settings, openai_client: OpenAI | None = None) -> LLMCl
             _genai_client(settings),
             model=settings.gemini_model,
             thinking_level=settings.gemini_thinking_level or None,
+            thinking_budget=settings.gemini_thinking_budget,
+            max_output_tokens=settings.llm_max_output_tokens,
         )
     client = openai_client or OpenAI(api_key=settings.openai_api_key)
-    return OpenAIChat(client, model=settings.openai_model)
+    return OpenAIChat(
+        client, model=settings.openai_model, max_output_tokens=settings.llm_max_output_tokens
+    )
 
 
 def _genai_client(settings: Settings, location: str | None = None) -> Any:

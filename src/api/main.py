@@ -27,6 +27,7 @@ from api.margin_calls import (
     list_margin_calls_for_counterparty,
 )
 from api.middleware import CorrelationIdMiddleware
+from api.rate_limit import ACTION_LIMITER
 from api.schemas import (
     ApprovalRequest,
     ApprovalResponse,
@@ -96,6 +97,18 @@ def get_orchestrator_graph() -> CompiledStateGraph:
 @lru_cache
 def get_db_session_factory() -> sessionmaker[Session]:
     return get_session_factory()
+
+
+def approver_action(approver: str = Depends(require_approver)) -> str:
+    """Approver-only action, rate limited per user (MM-117)."""
+    ACTION_LIMITER.check(approver, get_settings().rate_limit_per_minute)
+    return approver
+
+
+def manager_action(manager: str = Depends(require_manager)) -> str:
+    """Manager-only action, rate limited per user (MM-117)."""
+    ACTION_LIMITER.check(manager, get_settings().rate_limit_per_minute)
+    return manager
 
 
 def user_session(identity: Identity) -> Session:
@@ -217,7 +230,7 @@ def _require_pending_node(graph: CompiledStateGraph, thread_id: str, expected_no
 
 @app.post("/margin-calls/{thread_id}/approve", response_model=ApprovalResponse)
 async def approve_margin_call(
-    thread_id: str, body: ApprovalRequest, approver: str = Depends(require_approver)
+    thread_id: str, body: ApprovalRequest, approver: str = Depends(approver_action)
 ) -> ApprovalResponse:
     """PROVISIONAL (see MM-37 note in docs/ROADMAP.md): audit trail
     (who/when, not just role-gating) is still Phase 9's MM-91. Revisit
@@ -241,7 +254,7 @@ async def approve_margin_call(
 
 @app.post("/margin-calls/{thread_id}/manager-approve", response_model=ManagerApprovalResponse)
 async def manager_approve_margin_call(
-    thread_id: str, body: ManagerApprovalRequest, manager: str = Depends(require_manager)
+    thread_id: str, body: ManagerApprovalRequest, manager: str = Depends(manager_action)
 ) -> ManagerApprovalResponse:
     """Second signature for elite-tier counterparties (Phase 9 scope
     addition) -- only reachable once await_manager_approval is the run's
@@ -267,7 +280,7 @@ async def manager_approve_margin_call(
 
 @app.post("/margin-calls/{thread_id}/respond", response_model=SlaResponse)
 async def respond_to_margin_call(
-    thread_id: str, _approver: str = Depends(require_approver)
+    thread_id: str, _approver: str = Depends(approver_action)
 ) -> SlaResponse:
     """PROVISIONAL (MM-42): stands in for a real counterparty-facing response
     channel, which doesn't exist in this demo -- simulates the counterparty
@@ -347,7 +360,7 @@ async def market_universe() -> MarketUniverseResponse:
 
 @app.post("/simulate", response_model=SimulateEventResponse)
 async def simulate_event(
-    body: SimulateEventRequest, _approver: str = Depends(require_approver)
+    body: SimulateEventRequest, _approver: str = Depends(approver_action)
 ) -> SimulateEventResponse:
     settings = get_settings()
     if body.ticker not in settings.market_universe_list:
@@ -434,7 +447,7 @@ async def price_history(
 
 @app.post("/margin-calls/{thread_id}/check-sla", response_model=SlaResponse)
 async def check_margin_call_sla(
-    thread_id: str, _approver: str = Depends(require_approver)
+    thread_id: str, _approver: str = Depends(approver_action)
 ) -> SlaResponse:
     """PROVISIONAL (MM-42): re-evaluates whether the SLA deadline has passed.
     A no-op (stays pending) if called before the deadline -- there's no real
