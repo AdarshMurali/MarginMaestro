@@ -36,7 +36,28 @@ def get_llm(settings: Settings, openai_client: OpenAI | None = None) -> LLMClien
 
 
 def get_guardrail(settings: Settings) -> Guardrail:
-    choice = _choice("GUARDRAIL_PROVIDER", settings.guardrail_provider, ("incode", "none"))
+    choice = _choice(
+        "GUARDRAIL_PROVIDER", settings.guardrail_provider, ("incode", "modelarmor", "none")
+    )
+    if choice == "modelarmor":
+        from adapters.model_armor_guardrail import ModelArmorGuardrail, model_armor_client
+
+        if not settings.gcp_project_id:
+            raise ValueError("GUARDRAIL_PROVIDER=modelarmor requires GCP_PROJECT_ID")
+        template = (
+            f"projects/{settings.gcp_project_id}/locations/{settings.model_armor_location}"
+            f"/templates/{settings.model_armor_template_id}"
+        )
+        from adapters.composite_guardrail import CompositeGuardrail
+        from adapters.incode_guardrail import InCodeGuardrail
+
+        # Defence in depth: Model Armor plus the in-code checks; either blocks.
+        return CompositeGuardrail(
+            [
+                ModelArmorGuardrail(template, model_armor_client(settings.model_armor_location)),
+                InCodeGuardrail(),
+            ]
+        )
     from adapters.incode_guardrail import InCodeGuardrail, NoGuardrail
 
     return NoGuardrail() if choice == "none" else InCodeGuardrail()
