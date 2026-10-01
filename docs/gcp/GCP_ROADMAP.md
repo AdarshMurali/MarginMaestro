@@ -136,9 +136,11 @@ ADRs: 0008, 0010
 ### Phase G6 — WhatsApp client notifications (Epic: MM-93)
 ADR: 0016
 
-- **MM-G61** `whatsapp_notifier` MCP server (Cloud Run): approved `margin_call_notice` template, variables from calc output; `CLIENT_NOTIFIER=whatsapp|slack`.
-- **MM-G62** Inbound webhook with `X-Hub-Signature-256` verification → Pub/Sub → Model Armor → existing respond/dispute path.
+- **MM-G61** (MM-118) `whatsapp_notifier` MCP server (Cloud Run): approved `margin_call_notice` template, variables from calc output; `CLIENT_NOTIFIER=whatsapp|slack`.
+- **MM-G62** Inbound webhook with `X-Hub-Signature-256` verification (handles both replies and delivery `statuses` events) → Pub/Sub → Model Armor → existing respond/dispute path.
 - **MM-G63** Slack kept for internal approvals, escalations and SLA alerts; tests on both adapters.
+
+**Prep done (2026-10-01):** Meta app, test number, token in Secret Manager and `margin_call_notice` template submitted; free-form delivery verified to the test phone. See the ADR-0016 amendment.
 
 **Exit:** an approved call reaches a verified test phone on WhatsApp; the client's reply resolves the SLA.
 
