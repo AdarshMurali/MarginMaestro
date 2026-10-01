@@ -55,7 +55,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 - **Changed:** `src/ports/redactor.py` (new), `src/adapters/redactors.py` (new), `src/adapters/{guarded_llm.py, factory.py}`, `src/rag/ingest.py`, `src/config/settings.py`, `infra/gcp/sensitive_data.tf` (new), `tests/unit/test_redactors.py` (new, 40), `pyproject.toml` (`google-cloud-dlp` in `gcp`), `.env.example`, `docs/gcp/adr/0014-*.md`.
 - **Verified (live SDP):** 15 real documents → none changed; sample with email / +44 phone / IBAN / card → all masked by `sdp+regex`, while "USD 240,000", "2026-08-16" and "Rodriguez Partners" stay intact. Regex alone leaves non-Luhn 16-digit refs and mod-97-failing IBAN-shaped strings alone. `terraform plan` → no changes.
 - **Cost impact:** SDP free tier (1 GiB/month); the whole corpus is ~40 KB.
-- **Known issues / tech debt:** SDP doesn't flag well-known invalid sample SSNs (e.g. 123-45-6789) — correct behaviour, noted so nobody "fixes" it.
+- **Known issues / tech debt:** SDP doesn't flag well-known invalid sample SSNs (e.g. 123-45-6789) — correct behaviour, noted so nobody "fixes" it. **Open:** an intermittent "3 errors" in the local unit run, seen twice (MM-111, MM-115), each time right after `pip install -e` in the same command; not reproducible in 5 reruns and never seen in CI (753 passed on rerun). Capture the test IDs with `pytest -rE` if it recurs.
 - **Next step:** MM-116 — placeholder-based notice drafting (amounts never reach the model) + reject uncited RAG claims.
 
 ### 2026-10-01 — MM-114: Model Armor screening (+ defence in depth)
