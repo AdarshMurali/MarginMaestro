@@ -84,6 +84,8 @@ ADR: 0011
 **Exit:** full lifecycle runs on Postgres locally and on Cloud SQL; RLS isolation proven by tests.
 
 > **G1 status (2026-09-30):** schema, data, checkpoints and RLS are proven on local Postgres **and Cloud SQL** (47 isolation tests + checkpoint persistence test ran against Cloud SQL). A full margin-call run (`/simulate` → approve → notify) on Postgres is verified in **G2**, when RAG moves off Chroma onto pgvector in the same database — until then that path still needs Chroma + OpenAI + Slack locally.
+>
+> **Closed 2026-10-01 (MM-112):** the full lifecycle ran on Postgres + pgvector + Gemini — both demo scenarios (CP-6 standard, CP-5 elite with two-person sign-off) end to end, all 8 audit steps, checkpoints persisted, 0 API errors.
 
 ### Phase G2 — Gemini on Vertex AI + RAG on pgvector (Epic: MM-89)
 ADR: 0009
