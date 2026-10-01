@@ -5,10 +5,11 @@ import chromadb
 from openai import OpenAI
 
 from adapters.chroma_adapter import ChromaVectorStore
-from adapters.factory import RAG_COLLECTION, get_embedder, get_vector_store
+from adapters.factory import RAG_COLLECTION, get_embedder, get_redactor, get_vector_store
 from adapters.openai_adapter import EMBEDDING_MODEL, OpenAIEmbedder
 from config.settings import Settings, get_settings
 from ports.embedder import Embedder
+from ports.redactor import Redactor
 from ports.vector_store import VectorStore
 from rag.chunker import chunk_markdown, extract_effective_date
 from rag.documents import iter_corpus_documents
@@ -50,6 +51,7 @@ def run_ingestion(
     chroma_client: chromadb.ClientAPI | None = None,
     embedder: Embedder | None = None,
     vector_store: VectorStore | None = None,
+    redactor: Redactor | None = None,
 ) -> int:
     """Chunks every document in the corpus, embeds each chunk (OpenAI), and
     upserts into ChromaDB with citation metadata. upsert (not add) keyed by a
@@ -61,6 +63,7 @@ def run_ingestion(
         return 0
 
     embedder = embedder or get_embedder(settings, openai_client)
+    redactor = redactor or get_redactor(settings)
     if vector_store is None:
         vector_store = (
             ChromaVectorStore(chroma_client, COLLECTION_NAME)
@@ -77,7 +80,9 @@ def run_ingestion(
         effective_date = extract_effective_date(content)
         for i, chunk in enumerate(chunk_markdown(content)):
             ids.append(f"{key}#{i}")
-            texts.append(chunk.text)
+            # MM-115: mask personal/account data before it is embedded,
+            # stored, or later quoted back to the model as a citation.
+            texts.append(redactor.redact(chunk.text))
             metadatas.append(
                 {
                     "source_file": key,

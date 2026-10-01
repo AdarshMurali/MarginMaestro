@@ -20,15 +20,30 @@ from ports.guardrail import (
     Stage,
 )
 from ports.llm import LLMClient
+from ports.redactor import Redactor
 
 T = TypeVar("T", bound=BaseModel)
 logger = structlog.get_logger(__name__)
 
 
 class GuardedLLM:
-    def __init__(self, llm: LLMClient, guardrail: Guardrail) -> None:
+    def __init__(
+        self, llm: LLMClient, guardrail: Guardrail, redactor: Redactor | None = None
+    ) -> None:
         self._llm = llm
         self._guardrail = guardrail
+        self._redactor = redactor
+
+    def _prepare(self, user: str) -> str:
+        """Mask personal/account data (MM-115), then screen the masked text --
+        the model only ever sees what passed both."""
+        if self._redactor is not None:
+            masked = self._redactor.redact(user)
+            if masked != user:
+                logger.info("prompt_redacted", redactor=self._redactor.name)
+            user = masked
+        self._check(user, "prompt")
+        return user
 
     def _check(self, text: str, stage: Stage) -> None:
         try:
@@ -59,14 +74,14 @@ class GuardedLLM:
             raise GuardrailBlocked(stage, verdict)
 
     def complete(self, system: str, user: str) -> str | None:
-        self._check(user, "prompt")
+        user = self._prepare(user)
         text = self._llm.complete(system, user)
         if text:
             self._check(text, "response")
         return text
 
     def parse(self, system: str, user: str, schema: type[T]) -> T | None:
-        self._check(user, "prompt")
+        user = self._prepare(user)
         result = self._llm.parse(system, user, schema)
         if result is not None:
             self._check(result.model_dump_json(), "response")

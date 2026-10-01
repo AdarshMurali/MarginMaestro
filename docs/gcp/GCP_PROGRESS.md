@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0, G1, G2 **done**. G3 (MM-90) in progress — MM-113 done; MM-114 (Model Armor) in review; next MM-115 (Sensitive Data Protection). Cloud SQL **stopped** until G5.
+- **Phase:** G0, G1, G2 **done**. G3 (MM-90) in progress — MM-113, MM-114 done; MM-115 (SDP masking) in review; next MM-116 (placeholder drafting). Cloud SQL **stopped** until G5.
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -30,7 +30,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G0 | MM-87 | Foundation, Terraform, WIF, Secret Manager, adapter interfaces, billing kill-switch | **Done** |
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | **Done** (full lifecycle on Postgres verified in G2) |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | **Done** |
-| G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | In progress (MM-113 done; MM-114 in review) |
+| G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | In progress (MM-113, MM-114 done; MM-115 in review) |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | Not started |
 | G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | Not started |
 | G6 | MM-93 | WhatsApp client notifications | Not started |
@@ -48,6 +48,15 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-01 — MM-115: Sensitive Data Protection masking (prompts + RAG index)
+- **Done:** `ports/redactor.py` + `adapters/redactors.py`: `SdpRedactor` (`deidentify_content`, regional parent `projects/…/locations/us-central1`, LIKELY+, financial/contact info types replaced with `[INFO_TYPE]`), strict `RegexRedactor` (email; `+`-prefixed phones; IBAN with mod-97; card numbers with Luhn), `ChainedRedactor`, `NoRedactor`. `GuardedLLM` masks the prompt **before** screening and before the model; `rag.ingest` masks each chunk before it's embedded and stored. Factory `get_redactor()`: `REDACTOR_PROVIDER=regex` (default) | `sdp` (= SDP then regex) | `none`. Terraform `sensitive_data.tf`: DLP API + `roles/dlp.user` for api/agent/mcp SAs — applied by the user.
+- **Decisions:** `PERSON_NAME` excluded (it would mask counterparty names the CSA extraction needs). Chained SDP + regex after a live miss: SDP at LIKELY left an international phone number unmasked. Masking failure raises (never sends unmasked text). Corpus check found no real PII — the realistic sources are client replies (G6) and free-text notes — but a naive phone regex matched the corpus's ISO dates, hence the strict validators.
+- **Changed:** `src/ports/redactor.py` (new), `src/adapters/redactors.py` (new), `src/adapters/{guarded_llm.py, factory.py}`, `src/rag/ingest.py`, `src/config/settings.py`, `infra/gcp/sensitive_data.tf` (new), `tests/unit/test_redactors.py` (new, 40), `pyproject.toml` (`google-cloud-dlp` in `gcp`), `.env.example`, `docs/gcp/adr/0014-*.md`.
+- **Verified (live SDP):** 15 real documents → none changed; sample with email / +44 phone / IBAN / card → all masked by `sdp+regex`, while "USD 240,000", "2026-08-16" and "Rodriguez Partners" stay intact. Regex alone leaves non-Luhn 16-digit refs and mod-97-failing IBAN-shaped strings alone. `terraform plan` → no changes.
+- **Cost impact:** SDP free tier (1 GiB/month); the whole corpus is ~40 KB.
+- **Known issues / tech debt:** SDP doesn't flag well-known invalid sample SSNs (e.g. 123-45-6789) — correct behaviour, noted so nobody "fixes" it.
+- **Next step:** MM-116 — placeholder-based notice drafting (amounts never reach the model) + reject uncited RAG claims.
 
 ### 2026-10-01 — MM-114: Model Armor screening (+ defence in depth)
 - **Done:** Terraform `model_armor.tf`: Model Armor API, template `marginmaestro-llm-traffic` (us-central1; prompt injection / jailbreak MEDIUM_AND_ABOVE, malicious URIs, RAI hate / harassment / sexually-explicit / dangerous), `roles/modelarmor.user` for `mm-api-sa`, `mm-agent-sa`, `mm-mcp-sa` — applied by the user. `adapters/model_armor_guardrail.py`: `SanitizeUserPrompt` for prompts, `SanitizeModelResponse` for answers, regional endpoint, names the matched filters (e.g. `pi_and_jailbreak`, `rai:dangerous`), and **fails closed** on a partial/failed invocation. `adapters/composite_guardrail.py`: runs several guardrails, any block wins, any outage fails closed. `GUARDRAIL_PROVIDER=modelarmor` = **Model Armor + in-code**. In-code patterns broadened (`guidance/guidelines/directions`, new `fabricate_source`: "pretend the CSA says …").

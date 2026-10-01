@@ -15,6 +15,7 @@ from ports.event_bus import EventBus
 from ports.guardrail import Guardrail
 from ports.llm import LLMClient
 from ports.notifier import Notifier
+from ports.redactor import Redactor
 from ports.vector_store import VectorStore
 
 RAG_COLLECTION = "csa_documents"
@@ -32,7 +33,31 @@ def get_llm(settings: Settings, openai_client: OpenAI | None = None) -> LLMClien
     every prompt and response is screened, failing closed."""
     from adapters.guarded_llm import GuardedLLM
 
-    return GuardedLLM(_get_model(settings, openai_client), get_guardrail(settings))
+    return GuardedLLM(
+        _get_model(settings, openai_client), get_guardrail(settings), get_redactor(settings)
+    )
+
+
+def get_redactor(settings: Settings) -> Redactor:
+    choice = _choice("REDACTOR_PROVIDER", settings.redactor_provider, ("regex", "sdp", "none"))
+    from adapters.redactors import (
+        ChainedRedactor,
+        NoRedactor,
+        RegexRedactor,
+        SdpRedactor,
+        dlp_client,
+    )
+
+    if choice == "sdp":
+        if not settings.gcp_project_id:
+            raise ValueError("REDACTOR_PROVIDER=sdp requires GCP_PROJECT_ID")
+        return ChainedRedactor(
+            [
+                SdpRedactor(settings.gcp_project_id, settings.sdp_location, dlp_client()),
+                RegexRedactor(),
+            ]
+        )
+    return NoRedactor() if choice == "none" else RegexRedactor()
 
 
 def get_guardrail(settings: Settings) -> Guardrail:
