@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # (Gemini on Vertex AI). The old "ollama" default was never honoured by
     # the agents, which always used OpenAI.
     llm_provider: str = "openai"
+    # MM-113: screens every LLM call. incode (default: conservative, no
+    # network, post-trial fallback) | modelarmor (MM-114) | none (local only).
+    guardrail_provider: str = "incode"
     # Pinned model version, never an alias (ADR-0009). Gemini 3.x is served
     # only from the `global` endpoint (probed 2026-09-30: us-central1 tops out
     # at gemini-2.5-flash), so the model location is separate from

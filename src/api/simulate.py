@@ -20,6 +20,7 @@ from agents.orchestrator import MarginCallState, build_orchestrator_graph, start
 from api.schemas import SimulatedCounterpartyResult, SimulateEventResponse
 from calc.models import PricingError
 from config.settings import Settings
+from ports.guardrail import GuardrailError
 from streaming.event_agent import affected_counterparties
 from streaming.market_feed import CompositeMarketFeed, MarketDataUnavailableError, MarketFeed
 from streaming.schemas import ImpactSet, MarketEventType
@@ -70,7 +71,14 @@ def trigger_simulation(
         )
         try:
             result = start_run(graph, state)
-        except (PricingError, CSATermsUnavailableError, MarketDataUnavailableError) as exc:
+        # GuardrailError (MM-113): a blocked or unscreenable LLM call holds this
+        # counterparty's call -- reported, never raised on unscreened text.
+        except (
+            PricingError,
+            CSATermsUnavailableError,
+            MarketDataUnavailableError,
+            GuardrailError,
+        ) as exc:
             results.append(
                 SimulatedCounterpartyResult(counterparty_id=counterparty_id, error=str(exc))
             )

@@ -12,6 +12,7 @@ from adapters.openai_adapter import OpenAIChat, OpenAIEmbedder
 from config.settings import Settings
 from ports.embedder import Embedder
 from ports.event_bus import EventBus
+from ports.guardrail import Guardrail
 from ports.llm import LLMClient
 from ports.notifier import Notifier
 from ports.vector_store import VectorStore
@@ -27,6 +28,21 @@ def _choice(name: str, value: str, allowed: tuple[str, ...]) -> str:
 
 
 def get_llm(settings: Settings, openai_client: OpenAI | None = None) -> LLMClient:
+    """The configured model, wrapped in the configured guardrail (MM-113):
+    every prompt and response is screened, failing closed."""
+    from adapters.guarded_llm import GuardedLLM
+
+    return GuardedLLM(_get_model(settings, openai_client), get_guardrail(settings))
+
+
+def get_guardrail(settings: Settings) -> Guardrail:
+    choice = _choice("GUARDRAIL_PROVIDER", settings.guardrail_provider, ("incode", "none"))
+    from adapters.incode_guardrail import InCodeGuardrail, NoGuardrail
+
+    return NoGuardrail() if choice == "none" else InCodeGuardrail()
+
+
+def _get_model(settings: Settings, openai_client: OpenAI | None = None) -> LLMClient:
     provider = _choice("LLM_PROVIDER", settings.llm_provider, ("openai", "vertex"))
     if provider == "vertex":
         from adapters.gemini_adapter import GeminiChat

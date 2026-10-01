@@ -100,13 +100,13 @@ ADR: 0009
 ### Phase G3 — AI guardrails (Epic: MM-90)
 ADR: 0014
 
-- **MM-G31** `Guardrail` pipeline wrapped around every LLM call (pre + post), failing closed.
-- **MM-G32** **Model Armor** templates: prompt injection / jailbreak, malicious URLs, responsible-AI filters; attached to **Agent Gateway** (every prompt and tool response) and called directly for text outside the gateway (WhatsApp webhook).
-- **MM-G37** **Semantic Governance Policies**: plain-language runtime rules (no client notification without a recorded approval; no amounts in drafts that don't match calc output). Confirm pricing first; in-code equivalents stay either way.
-- **MM-G33** **Sensitive Data Protection** de-identification before LLM calls and RAG indexing; data-class filter (only allowed classes reach the model).
-- **MM-G34** Output validation: any amount / date / counterparty in drafted text must exactly match calc output; uncited RAG claims rejected.
-- **MM-G35** Cost / loop limits: per-run token cap, max agent steps, per-user rate limit.
-- **MM-G36** Every verdict written to the audit trail; tests for block, mask, mismatch-reject and fail-closed paths (mocked services).
+- **MM-G31** (MM-113) `Guardrail` pipeline wrapped around every LLM call (pre + post), failing closed.
+- **MM-G32** (MM-114) **Model Armor** templates: prompt injection / jailbreak, malicious URLs, responsible-AI filters; attached to **Agent Gateway** (every prompt and tool response) and called directly for text outside the gateway (WhatsApp webhook).
+- **MM-G37** **Semantic Governance Policies**: plain-language runtime rules (no client notification without a recorded approval; no amounts in drafts that don't match calc output). Confirm pricing first; in-code equivalents stay either way. *Moved to G5 (2026-10-01, user decision): Semantic Governance and Agent Gateway govern a deployed agent's traffic, so they land with Agent Engine (MM-G56).*
+- **MM-G33** (MM-115) **Sensitive Data Protection** de-identification before LLM calls and RAG indexing; data-class filter (only allowed classes reach the model).
+- **MM-G34** (MM-116) Output validation: any amount / date / counterparty in drafted text must exactly match calc output; uncited RAG claims rejected.
+- **MM-G35** (MM-117) Cost / loop limits: per-run token cap, max agent steps, per-user rate limit.
+- **MM-G36** (MM-117) Every verdict written to the audit trail; tests for block, mask, mismatch-reject and fail-closed paths (mocked services).
 
 **Exit:** an injected instruction inside a CSA chunk or a client reply is blocked and audited; a draft with a wrong amount is never sent.
 
