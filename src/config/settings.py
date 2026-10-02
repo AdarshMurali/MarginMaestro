@@ -100,6 +100,11 @@ class Settings(BaseSettings):
     db_name: str = "marginmaestro"
     db_user: str | None = None
     db_password: str | None = None
+    # MM-123: password (default) or iam -- Cloud SQL IAM database login, the
+    # runtime service account's OAuth token as the password (Postgres only).
+    # A DB_HOST starting with '/' is a Unix socket directory, e.g. Cloud Run's
+    # /cloudsql/<project>:<region>:<instance>.
+    db_auth: str = "password"
 
     kafka_bootstrap_servers: str = "localhost:19092"
     kafka_topic_prices: str = "market.prices"

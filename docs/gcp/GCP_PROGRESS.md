@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — MM-119, MM-120, MM-121 done; MM-122 (Cloud Tasks SLA timers) in review — the last G4 story. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
+- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123 (API on Cloud Run) in review. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -31,8 +31,8 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | **Done** (full lifecycle on Postgres verified in G2) |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | **Done** |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
-| G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | In progress (MM-119–121 done, MM-122 in review) |
-| G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | Not started |
+| G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | **Done** (live run on GCP comes with G5) |
+| G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | In progress (MM-123 in review) |
 | G6 | MM-93 | WhatsApp client notifications | Prep done (Meta account, token, template submitted); MM-118 created |
 | G7 | MM-94 | BigQuery analytics & audit warehouse | Not started |
 | G8 | MM-95 | Data governance (Dataplex, classification, lineage, audit, retention) | Not started |
@@ -48,6 +48,36 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-02 — MM-123: API on Cloud Run (code + Terraform; deploy pending)
+- **G5 re-plan (user decisions, 2026-10-02):**
+  - **No Agent Gateway (option B).** Our agents call their tools as in-process Python functions; the MCP servers wrap the same functions, but nothing in the app calls them. So a gateway would govern nothing. Agent Identity and the in-code controls stay.
+  - **New MM-G58, "Ask the margin desk".** The user wants MCP to have a real use: an analyst chat where Gemini picks tools from the MCP servers (read-only, scoped by row-level security, no notifier tool).
+  - **Frontend move to Cloud Run dropped (MM-G53).** Vercel works once the API is HTTPS.
+  - Roadmap updated.
+- **Done:**
+  - **Cloud SQL IAM database login** (`persistence/db/iam_auth.py`, `DB_AUTH=password|iam`). The runtime service account logs in as itself, with a short-lived OAuth token (scope `sqlservice.login`) added as the password on every new connection through SQLAlchemy's `do_connect` event. It is thread-safe and refreshes only when stale. It uses `google-auth`, so no new dependency. `DB_HOST` starting with `/` is a Unix socket directory (Cloud Run's `/cloudsql/<connection>`). `DB_AUTH=iam` fails loud on SQL Server.
+  - **Tracing off switch.** An empty `OTEL_EXPORTER_OTLP_ENDPOINT` means no exporter; Cloud Run has no collector until story 4.
+  - **Terraform `cloud_run.tf`:** service `marginmaestro-api` from `docker.io/adarshmurali/marginmaestro` as `mm-api-sa`.
+    - Scaling and runtime: min 0 / max 2 instances, 1 vCPU / 1 GiB, CPU only during requests, startup CPU boost, 600 s timeout (impact pushes run the orchestrator), `/health` startup probe.
+    - Cloud SQL volume, plus the GCP adapter env vars (Vertex, pgvector, Model Armor + in-code, SDP, GCS, Pub/Sub, `SECRETS_SOURCE=gcp`).
+    - Public invoker; CORS for the Vercel origin; output `api_url`.
+    - CD (MM-G57) owns the image after the first deploy.
+  - **Scripts:**
+    - `scripts/gcp_secret_from_aws.ps1` copies only the keys Cloud Run reads (`AUTH_BACKEND_SECRET`, `SLACK_*`, `SERVICENOW_*`) from AWS into the GCP secret, which had **no version yet**. It prints names and lengths only. The Azure `DB_*`, OpenAI and S3 keys are left out because the JSON secret takes precedence over env vars.
+    - `scripts/cloudsql_rag_ingest.ps1` loads the corpus from GCS into Cloud SQL's pgvector store.
+- **Decisions:**
+  - Keep Vercel's server-side `/api` rewrite proxy and point `BACKEND_API_URL` at the Cloud Run URL. The mixed-content reason is gone, but the proxy also avoids CORS and needs no frontend change.
+  - Deploy only after this PR merges, so `latest` contains the IAM login.
+- **Changed:** `src/persistence/db/{iam_auth.py (new), engine.py}`, `src/config/settings.py`, `src/observability/tracing.py`, `src/adapters/cloud_tasks_sla.py` (import form for mypy), `tests/unit/{test_iam_db_auth.py (new, 10), test_tracing.py}`, `infra/gcp/{cloud_run.tf (new), variables.tf (api_image, frontend_origin), README.md}`, `scripts/{gcp_secret_from_aws.ps1, cloudsql_rag_ingest.ps1}` (new), `docs/gcp/GCP_ROADMAP.md`, `.env.example`.
+- **Verified:** suite 857 passed (coverage 98%). The IAM URL over the Cloud Run socket parses to the expected psycopg arguments (user, no password, socket host). `terraform validate` passes.
+- **Next step (user + me):**
+  1. Run `scripts/gcp_secret_from_aws.ps1`.
+  2. Set `demo_online = true`.
+  3. Apply the Cloud Run plan (made after merge).
+  4. Run `scripts/cloudsql_rag_ingest.ps1`.
+  5. I verify `/health`, `/ready`, login and the exposure board on the Cloud Run URL.
+  6. Update Vercel's `BACKEND_API_URL`.
 
 ### 2026-10-02 — MM-122: Cloud Tasks SLA timers
 - **Done:**
@@ -74,7 +104,7 @@ At the end of each story, prepend an entry to **Log** using this template:
   - Suite 846 passed (coverage 98%). `terraform plan` → 6 to add, 0 to change.
 - **G4 exit criterion:** both halves covered by tests. A shock delivered twice raises exactly one call (MM-121). The SLA breach escalates at the deadline via a scheduled task, with no polling (MM-122). The live end-to-end run on GCP comes with G5's Cloud Run deployment.
 - **Cost impact:** none (Cloud Tasks free tier: 1M operations/month).
-- **Known issues / tech debt:** awaiting the user's `mm122.tfplan` apply. The Kafka path still has no impact consumer (retired at G9).
+- **Known issues / tech debt:** `mm122.tfplan` applied by the user 2026-10-02 (queue `sla-checks` RUNNING). The Kafka path still has no impact consumer (retired at G9).
 - **Next step:** close G4 (epic MM-91); present the **G5 (MM-92)** plan — Cloud Run deployment, push subscriptions + scheduler + SLA timer switched on, Agent Engine, observability.
 
 ### 2026-10-02 — MM-121: Pub/Sub push endpoint + impact consumer
