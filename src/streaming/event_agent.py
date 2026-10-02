@@ -60,6 +60,18 @@ def price_event_id(quote: PriceQuote) -> str:
     return f"{quote.ticker}:{quote.as_of.isoformat()}:{quote.source}"
 
 
+def shock_event_id(quote: PriceQuote, event_type: MarketEventType) -> str:
+    """One shock per ticker, trading day and severity (MM-124). A ticker that
+    stays 7% above its prior close all day produces a new tick every 5
+    minutes; keying the shock by the tick (`price_event_id`) raised a fresh
+    impact -- and a fresh set of margin calls -- on every one of them, found
+    live on GCP with HPE (+7.4%) on 2026-10-02. Keyed by the day instead, the
+    first crossing raises the event and later ticks that day are no-ops; a
+    move that escalates to VOL_SPIKE is a new, bigger signal and raises once
+    more."""
+    return f"{quote.ticker}:{quote.as_of.date().isoformat()}:{event_type.value}"
+
+
 def is_already_processed(session: Session, event_id: str) -> bool:
     return session.get(ProcessedEventORM, event_id) is not None
 
@@ -148,16 +160,22 @@ def handle_price_message(
         mark_processed(session, event_id)
         return None
 
+    shock_id = shock_event_id(quote, event_type)
+    if is_already_processed(session, shock_id):
+        mark_processed(session, event_id)  # same shock, later tick: nothing new
+        return None
+
     pct_change = abs(quote.price - prior_close) / prior_close
     impact = ImpactSet(
-        event_id=event_id,
+        event_id=shock_id,
         event_type=event_type,
         counterparty_ids=affected_counterparties(session, quote.ticker),
         reason=f"{quote.ticker} moved {pct_change:.1%} vs prior close ({prior_close} -> {quote.price})",
         occurred_at=quote.as_of,
     )
-    producer.publish(settings.kafka_topic_impact, impact, key=event_id)
+    producer.publish(settings.kafka_topic_impact, impact, key=shock_id)
     producer.flush()
+    mark_processed(session, shock_id)
     mark_processed(session, event_id)
     return impact
 

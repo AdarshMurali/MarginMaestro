@@ -49,14 +49,28 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Log
 
-### 2026-10-02 — MM-124: Event flow switched on (in progress)
+### 2026-10-02 — MM-124: Event flow switched on + live end-to-end run
 - **Done (Terraform):**
   - **Stable API URL.** `local.api_base_url` is Cloud Run's deterministic URL (name + project number + region), known before the service exists. It serves as the `api_url` output, the OIDC audience (`INTERNAL_CALLER_AUDIENCE`) and the target for push, the scheduler and tasks.
   - **Push delivery.** The three consumer subscriptions get a `push_config` → `/internal/pubsub/push`, signed as `mm-invoker-sa` (pull → push in place).
   - **Price schedule.** `scheduler.tf` adds `price-refresh`: `*/5 9-15 * * 1-5` America/New_York, OIDC, no retries, paused with `demo_online`.
   - **SLA timers on.** Cloud Run gets `SLA_SCHEDULER=cloudtasks`, `INTERNAL_BASE_URL` and `CLOUD_TASKS_QUEUE`.
   - Plan: 2 to add, 4 to change.
-- **Next:** the user applies `mm124.tfplan`, then the live end-to-end run on GCP: scheduled ticks land in `latest_prices`; a market event published twice raises exactly one call; a human approves it in the UI; the SLA task fires at the deadline and escalates to ServiceNow.
+- **Applied and run live (2026-10-02, US market open):**
+  - **Price path:** a manual trigger of `price-refresh` → `/internal/prices/refresh` 200 → 30 ticks pushed back to `/internal/pubsub/push` (all 204) → `latest_prices` updated.
+  - **A real shock, end to end with no human trigger.** HPE was **+7.4%** vs the previous close ($65.07 → $69.88). The Event Agent raised an impact; the impact consumer ran the orchestrator for every HPE holder (CSA RAG with Gemini, guardrails passed). The breached calls (CP-1, 2, 3, 5, 7) paused at the approval gate; CP-4 and CP-8 had no breach.
+  - **Human approval:** `approver`, then a second signature from `manager` (CP-1 is elite tier). The **real Slack notice** was sent (USD 250,785.91; threshold USD 340,000; MTA USD 11,000). One Cloud Task was scheduled on `sla-checks` for the 60-minute deadline.
+- **Bug found live, fixed here — one shock per tick instead of per day.** The shock's event id was the tick id (ticker + timestamp). A ticker that stays past the threshold therefore raised a new impact, and a new set of calls, on every 5-minute tick: 4 HPE events by 17:30 UTC, i.e. 20 calls instead of 5.
+  - Mitigation: the user paused `price-refresh` and rejected the 15 duplicates (the 17:30 set was kept).
+  - Fix: `shock_event_id = ticker:trading-day:type`. The first crossing raises the event and later ticks that day are no-ops; an escalation to `vol_spike` raises once more; the next trading day is a new event. Ticks are still deduplicated by their own id.
+- **Gap found live, fixed here — `price_history` was never refreshed.** It was loaded once at bootstrap (30 Sep), and it is what "vs previous close", IM volatility and the charts read. `latest_prices` can't stand in: it keeps only the current price.
+  - New `persistence/daily_close.py` + `POST /internal/prices/eod` + Scheduler job `eod-prices` (16:30 New York, Mon–Fri, paused with `demo_online`).
+  - It appends official daily closes with a 7-day back-fill (covers days the app was off) and refreshes FRED reference rates when `FRED_API_KEY` is set (otherwise skipped with a warning).
+- **Also:** 4 pushes were aborted with "no available instance" at 17:20 (30 pushes at once while Cloud Run scaled). Pub/Sub retried them, so nothing was lost. `max_instance_count` raised 2 → 4; idle cost is still $0.
+- **Follow-ups noted:**
+  - The notice text says "next business day", while the enforced SLA is 60 minutes (`MARGIN_CALL_SLA_MINUTES`). The drafting step should quote the computed deadline.
+  - `FRED_API_KEY` is not in the GCP secret yet (it wasn't in the AWS one either), so reference rates stay at bootstrap values until it's added.
+- **Next:** merge; deploy the new image to Cloud Run (CD is story 3, so this one is manual); apply `mm124b.tfplan` (the EOD job, the instance cap, and the resume of `price-refresh` — applied after today's close so HPE doesn't raise a new-id event today); watch the SLA task fire and escalate to ServiceNow.
 
 ### 2026-10-02 — MM-123: API on Cloud Run
 - **G5 re-plan (user decisions, 2026-10-02):**

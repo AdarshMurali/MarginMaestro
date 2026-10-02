@@ -39,3 +39,36 @@ resource "google_cloud_scheduler_job" "price_refresh" {
 
   depends_on = [google_project_service.cloudscheduler]
 }
+
+# Daily end-of-day load (MM-124): 16:30 New York on weekdays, after the
+# close, appends official daily closes (with a short back-fill for days the
+# app was off) to price_history and refreshes FRED reference rates -- the
+# "previous close" the shock check compares against, and the history behind
+# initial-margin volatility and the charts. Same on/off switch.
+resource "google_cloud_scheduler_job" "eod_prices" {
+  name        = "eod-prices"
+  region      = var.region
+  description = "Load official daily closes and reference rates after the US close"
+  schedule    = "30 16 * * 1-5"
+  time_zone   = "America/New_York"
+  paused      = !var.demo_online
+
+  attempt_deadline = "300s"
+
+  retry_config {
+    retry_count          = 2
+    min_backoff_duration = "60s"
+  }
+
+  http_target {
+    http_method = "POST"
+    uri         = "${local.api_base_url}/internal/prices/eod"
+
+    oidc_token {
+      service_account_email = google_service_account.component["invoker"].email
+      audience              = local.api_base_url
+    }
+  }
+
+  depends_on = [google_project_service.cloudscheduler]
+}
