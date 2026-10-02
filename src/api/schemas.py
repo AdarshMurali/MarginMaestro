@@ -239,6 +239,10 @@ class SimulateEventResponse(BaseModel):
     affected_counterparties: list[SimulatedCounterpartyResult]
 
 
+class PriceRefreshResponse(BaseModel):
+    published: int
+
+
 class MarketUniverseResponse(BaseModel):
     tickers: list[str]
 

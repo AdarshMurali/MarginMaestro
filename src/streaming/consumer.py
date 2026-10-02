@@ -5,6 +5,7 @@ from confluent_kafka import Consumer, KafkaError, Message
 from pydantic import BaseModel
 
 from config.settings import Settings, get_settings
+from streaming import inbound
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -66,7 +67,7 @@ class EventConsumer:
 
 
 def decode(message: Message, model: type[T]) -> T:
-    value = message.value()
-    if value is None:
-        raise ConsumerError("message has no value to decode (tombstone or empty payload)")
-    return model.model_validate_json(value)
+    try:
+        return inbound.decode(message, model)
+    except inbound.EmptyMessageError as exc:
+        raise ConsumerError(str(exc)) from exc

@@ -76,13 +76,8 @@ variable "github_deploy_ref" {
   default     = "refs/heads/main"
 }
 
-variable "cloudsql_activation_policy" {
-  description = "ALWAYS = running (billed per hour), NEVER = stopped (only storage billed). Flip to NEVER when the demo isn't in use."
-  type        = string
-  default     = "ALWAYS"
-
-  validation {
-    condition     = contains(["ALWAYS", "NEVER"], var.cloudsql_activation_policy)
-    error_message = "cloudsql_activation_policy must be ALWAYS or NEVER."
-  }
+variable "demo_online" {
+  description = "One on/off switch for the paid, always-running pieces (MM-120): true = Cloud SQL running (billed per hour) and the live-price schedule active; false = Cloud SQL stopped (storage only) and the schedule paused, so a stopped DB never piles up retries."
+  type        = bool
+  default     = false
 }
