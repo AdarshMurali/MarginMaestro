@@ -81,3 +81,15 @@ variable "demo_online" {
   type        = bool
   default     = false
 }
+
+variable "api_image" {
+  description = "Initial API image for Cloud Run (MM-123). CD updates it on every merge to main; Terraform ignores later changes."
+  type        = string
+  default     = "docker.io/adarshmurali/marginmaestro:latest"
+}
+
+variable "frontend_origin" {
+  description = "Browser origin allowed by the API's CORS policy (the Vercel frontend)."
+  type        = string
+  default     = "https://marginmaestro.vercel.app"
+}

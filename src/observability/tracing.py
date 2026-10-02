@@ -38,6 +38,11 @@ def configure_tracing(settings: Settings) -> None:
     per process and silently ignores later ones, so calling this more than
     once (e.g. multiple test files importing api.main) is harmless."""
     provider = TracerProvider(resource=Resource.create({SERVICE_NAME: settings.otel_service_name}))
+    if not settings.otel_exporter_otlp_endpoint:
+        # MM-123: no collector (e.g. Cloud Run before Cloud Trace is wired):
+        # spans are still created for logs/metrics context, just not exported.
+        trace.set_tracer_provider(provider)
+        return
     exporter = OTLPSpanExporter(
         endpoint=settings.otel_exporter_otlp_endpoint.rstrip("/") + _TRACES_PATH,
         timeout=_EXPORT_REQUEST_TIMEOUT_SECONDS,

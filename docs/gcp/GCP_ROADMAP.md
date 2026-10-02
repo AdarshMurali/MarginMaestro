@@ -124,12 +124,15 @@ ADR: 0012
 ADRs: 0008, 0010
 
 - **MM-G51** Deploy the LangGraph orchestrator to **Vertex AI Agent Engine**; API calls it for simulate / approve / resume (`AGENT_RUNTIME=agent_engine|cloudrun`). Check idle pricing first (does it keep an instance warm?).
-- **MM-G56** **Agent Identity** for the orchestrator + **Agent Gateway** in front of all MCP servers and Gemini, with deny-by-default IAM tool policies per agent; MCP servers registered behind the gateway.
-- **MM-G52** API + MCP servers on **Cloud Run** (min-instances 0), connected to Cloud SQL, Secret Manager and Pub/Sub.
-- **MM-G53** Frontend on **Cloud Run** (HTTPS by default, which removes the mixed-content rewrite workaround); Vercel kept as fallback.
+- **MM-G56** **Agent Identity** for the orchestrator. *Re-planned 2026-10-02 (user decision, option B): **no Agent Gateway**. The orchestrator is a fixed pipeline that calls its tools as in-process functions, not through MCP, so a gateway in front of the MCP servers would govern nothing. The in-code controls (tool allow-list in the graph, approval check before any notifier call, guardrails) remain the enforcement layer; see ADR-0010's fallback clause.*
+- **MM-G52** (MM-123) API on **Cloud Run** (min-instances 0), connected to Cloud SQL (IAM database login), Secret Manager and Pub/Sub; RAG corpus re-ingested into Cloud SQL. *MCP servers stay out of Cloud Run until MM-G58 gives them a consumer.*
+- ~~**MM-G53** Frontend on Cloud Run~~ — *dropped 2026-10-02: once the API has an HTTPS Cloud Run URL, the Vercel frontend works as is (free), so moving it buys nothing.*
 - **MM-G54** OTel → **Cloud Trace**, JSON logs → **Cloud Logging**, metrics + alerts in **Cloud Monitoring** (SLA breaches, guardrail blocks, error rate).
 - **MM-G55** **Gen AI evaluation** run on the golden scenario set from CI (on demand).
+- **MM-G59** (MM-124) **Switch on the event flow:** Pub/Sub push subscriptions → `/internal/pubsub/push`, Cloud Scheduler price refresh (every 5 min, market hours, paused with `demo_online`), `SLA_SCHEDULER=cloudtasks`, OIDC audience = the API URL; then the live end-to-end run on GCP.
 - **MM-G57** **Automated CD:** `deploy-gcp` job in `ci.yml` after `build-and-push` — WIF login (MM-100), then `google-github-actions/deploy-cloudrun` with `docker.io/adarshmurali/marginmaestro:<sha>` for each Cloud Run service; `mm-ci-sa` gets `roles/run.developer` + `iam.serviceAccountUser` on the runtime accounts only. Every merge to `main` goes live with no manual step (the AWS EC2 deploy needed a manual `docker compose pull` over SSM).
+
+- **MM-G58** **"Ask the margin desk" analyst assistant — the MCP showcase** (user request 2026-10-02: MCP needs a real use case). A Gemini chat in the UI where the **LLM chooses tools** from our MCP servers: current/historical prices (`market_data`), CSA and policy search (`rag_retriever`), and a new read-only margin-call status tool. Tools are read-only and scoped to the user's own counterparties (row-level security); no notifier tool, so the human-approval rule holds. Guardrails screen every turn. This is where MCP earns its place: self-describing tools an LLM picks at runtime, which the fixed orchestrator pipeline never needed.
 
 **Exit:** the full lifecycle runs end to end on GCP from the public Cloud Run URL, with one trace per run in Cloud Trace.
 

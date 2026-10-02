@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 import persistence.db.rls  # noqa: F401  -- registers the RLS session listener (MM-106)
 from config.settings import Settings, get_settings
+from persistence.db.iam_auth import use_iam_login
 
 ODBC_DRIVER = "ODBC Driver 18 for SQL Server"
 
@@ -37,14 +38,32 @@ def db_dialect(settings: Settings) -> str:
     return dialect
 
 
+DB_AUTH_MODES = ("password", "iam")
+
+
+def db_auth(settings: Settings) -> str:
+    mode = settings.db_auth.strip().lower()
+    if mode not in DB_AUTH_MODES:
+        raise ValueError(f"DB_AUTH must be one of {DB_AUTH_MODES}, got {settings.db_auth!r}")
+    if mode == "iam" and db_dialect(settings) != "postgres":
+        raise ValueError("DB_AUTH=iam needs DB_DIALECT=postgres (Cloud SQL)")
+    return mode
+
+
 def build_connection_url(settings: Settings, database: str | None = None) -> str:
     user = quote_plus(settings.db_user or "")
     password = quote_plus(settings.db_password or "")
     name = database or settings.db_name
     if db_dialect(settings) == "postgres":
-        return (
-            f"postgresql+psycopg://{user}:{password}@{settings.db_host}:{settings.db_port}/{name}"
-        )
+        # IAM login: the password is a token added per connection (iam_auth).
+        credentials = user if db_auth(settings) == "iam" else f"{user}:{password}"
+        host = settings.db_host or ""
+        if host.startswith("/"):  # Unix socket directory (Cloud Run's /cloudsql/...)
+            return (
+                f"postgresql+psycopg://{credentials}@/{name}"
+                f"?host={quote_plus(host)}&port={settings.db_port}"
+            )
+        return f"postgresql+psycopg://{credentials}@{host}:{settings.db_port}/{name}"
     driver = quote_plus(ODBC_DRIVER)
     return (
         f"mssql+pyodbc://{user}:{password}@{settings.db_host}:{settings.db_port}"
@@ -67,11 +86,14 @@ def get_engine(settings: Settings | None = None) -> Engine:
     # both during MM-70's local verification (a stale connection after the
     # dev container sat idle) and again running MM-102's first deployed
     # queries against Azure SQL for real.
-    return create_engine(
+    engine = create_engine(
         build_connection_url(settings),
         pool_pre_ping=True,
         connect_args=connect_args(settings),
     )
+    if db_auth(settings) == "iam":
+        use_iam_login(engine)
+    return engine
 
 
 def get_session_factory(settings: Settings | None = None) -> sessionmaker[Session]:

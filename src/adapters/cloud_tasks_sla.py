@@ -78,6 +78,6 @@ class CloudTasksSlaScheduler:
 
 
 def _tasks_client() -> Any:
-    from google.cloud import tasks_v2
+    from google.cloud.tasks_v2 import CloudTasksClient
 
-    return tasks_v2.CloudTasksClient()
+    return CloudTasksClient()

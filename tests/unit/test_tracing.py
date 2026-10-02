@@ -37,3 +37,16 @@ class TestConfigureTracing:
         settings = Settings(_env_file=None, otel_exporter_otlp_endpoint="http://localhost:4318")
         configure_tracing(settings)  # no exception == pass
         assert OTLPSpanExporter is not None  # sanity: the real import worked
+
+    def test_an_empty_endpoint_exports_nothing(self) -> None:
+        """MM-123: Cloud Run has no collector until Cloud Trace is wired."""
+        settings = Settings(_env_file=None, otel_exporter_otlp_endpoint="")
+
+        with (
+            patch("observability.tracing.OTLPSpanExporter") as mock_exporter_cls,
+            patch("observability.tracing.trace.set_tracer_provider") as set_provider,
+        ):
+            configure_tracing(settings)
+
+        mock_exporter_cls.assert_not_called()
+        set_provider.assert_called_once()
