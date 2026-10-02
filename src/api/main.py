@@ -446,6 +446,39 @@ def pubsub_push(envelope: PubSubPushEnvelope) -> Response:
     return Response(status_code=204)
 
 
+@app.post(
+    "/internal/sla/{thread_id}/check",
+    response_model=SlaResponse,
+    dependencies=[Depends(require_internal_caller)],
+)
+def internal_sla_check(thread_id: str) -> SlaResponse:
+    """The SLA timer's target (MM-122): Cloud Tasks calls this at the call's
+    deadline. Status codes tell Cloud Tasks what to do:
+
+    - 200: resolved now (met/breached -> escalation), or already resolved
+      earlier (e.g. the client responded first) -- nothing to retry.
+    - 503: still within the SLA window (the task fired a moment early) --
+      Cloud Tasks retries with backoff.
+    - 404 / 409: unknown thread, or a thread not at the SLA step."""
+    graph = get_orchestrator_graph()
+    snapshot = graph.get_state({"configurable": {"thread_id": thread_id}})
+    pending = {task.name for task in snapshot.tasks if task.interrupts}
+    if "await_sla_response" not in pending:
+        if not snapshot.values:
+            raise HTTPException(status_code=404, detail="Unknown margin call")
+        outcome = snapshot.values.get("sla_outcome")
+        if outcome is None:
+            raise HTTPException(status_code=409, detail="Margin call is not at the SLA step")
+        return SlaResponse(thread_id=thread_id, sla_outcome=outcome)
+
+    result = resume_run(graph, thread_id, {"check": True})
+    if result.get("sla_outcome") is None:
+        raise HTTPException(
+            status_code=503, detail="SLA deadline not reached yet", headers={"Retry-After": "30"}
+        )
+    return SlaResponse(thread_id=thread_id, sla_outcome=result["sla_outcome"])
+
+
 @app.get("/margin-calls/{thread_id}/trace", response_model=MarginCallTraceResponse)
 async def margin_call_trace(
     thread_id: str, identity: Identity = Depends(require_user)
@@ -517,9 +550,9 @@ async def check_margin_call_sla(
     thread_id: str, _approver: str = Depends(approver_action)
 ) -> SlaResponse:
     """PROVISIONAL (MM-42): re-evaluates whether the SLA deadline has passed.
-    A no-op (stays pending) if called before the deadline -- there's no real
-    scheduler calling this periodically yet; a human or a future cron would
-    call it. See docs/ROADMAP.md's Phase 6 note."""
+    A no-op (stays pending) if called before the deadline. The manual path:
+    with SLA_SCHEDULER=cloudtasks (MM-122) a timer calls
+    /internal/sla/{thread_id}/check at the deadline instead."""
     graph = get_orchestrator_graph()
     _require_pending_node(graph, thread_id, "await_sla_response")
     result = resume_run(graph, thread_id, {"check": True})

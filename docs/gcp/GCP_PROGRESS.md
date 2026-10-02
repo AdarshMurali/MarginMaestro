@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — MM-119, MM-120 done; MM-121 (push endpoint + impact consumer) in review; next MM-122 (Cloud Tasks SLA timers). Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
+- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — MM-119, MM-120, MM-121 done; MM-122 (Cloud Tasks SLA timers) in review — the last G4 story. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -31,7 +31,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | **Done** (full lifecycle on Postgres verified in G2) |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | **Done** |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
-| G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | In progress (MM-119, MM-120 done, MM-121 in review) |
+| G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | In progress (MM-119–121 done, MM-122 in review) |
 | G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | Not started |
 | G6 | MM-93 | WhatsApp client notifications | Prep done (Meta account, token, template submitted); MM-118 created |
 | G7 | MM-94 | BigQuery analytics & audit warehouse | Not started |
@@ -48,6 +48,34 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-02 — MM-122: Cloud Tasks SLA timers
+- **Done:**
+  - **Interface.** New `SlaScheduler` port (`ports/sla_scheduler.py`), picked by `SLA_SCHEDULER=none|cloudtasks` (default `none` = today's behaviour, where the SLA check runs only when called by hand).
+  - **Cloud Tasks adapter.** `adapters/cloud_tasks_sla.py`, `google-cloud-tasks` added to the `gcp` extra. One HTTP task per call, `schedule_time` = the SLA deadline, which calls `POST {INTERNAL_BASE_URL}/internal/sla/{thread_id}/check` with an OIDC token for `mm-invoker-sa`. The task id is a hash of the thread id (valid characters, stable), so scheduling the same call twice is rejected by Cloud Tasks (`AlreadyExists`) and ignored. The factory fails loud and names every missing setting.
+  - **Orchestrator.** The send-notification step arms the timer right after the notice goes out (`sla_deadline()` helper replaces three copies of the deadline arithmetic). A scheduling failure never fails the step: the notice is already sent, and a retry would send it again. It is logged and audited (`sla_check_schedule_failed`), and the manual check still works.
+  - **Endpoint.** `POST /internal/sla/{thread_id}/check` (`require_internal_caller`):
+    - 200 = resolved now (met, or breached → escalation/ServiceNow), or already resolved earlier;
+    - 503 + `Retry-After` = still inside the SLA window (the task fired early), so Cloud Tasks retries;
+    - 404 = unknown run; 409 = not at the SLA step.
+  - **Terraform** (`cloud_tasks.tf`): Cloud Tasks API; `sla-checks` queue (5 dispatches/s; retries 30 s → 10 min backoff, up to a day); `cloudtasks.enqueuer` on the queue for `mm-api-sa` and `mm-agent-sa`; `serviceAccountUser` on `mm-invoker-sa` for both, so their tasks can carry its token.
+- **Decisions:**
+  - The timer stays off (`none`) until G5 gives the API a Cloud Run URL. The local demo keeps the manual "Check SLA deadline" button.
+  - The SLA node's re-pause loop is kept. It is what makes an early check safe (re-pause, then 503 and a retry).
+- **Changed:** `src/ports/sla_scheduler.py` (new), `src/adapters/{cloud_tasks_sla.py (new), factory.py}`, `src/agents/orchestrator.py`, `src/api/main.py`, `src/config/settings.py`, `tests/unit/test_sla_scheduler.py` (new, 18), `infra/gcp/{cloud_tasks.tf (new), README.md}`, `pyproject.toml`, `.env.example`.
+- **Verified:**
+  - Tests through the real orchestrator graph:
+    - the timer is armed exactly once, after approval + notice, at `sent_at + SLA minutes`;
+    - a rejected call arms no timer;
+    - a Cloud Tasks outage still leaves the run paused at the SLA step, with an audit row;
+    - the endpoint returns 503 before the deadline, breaches and opens one incident after it, and a retried task opens no second incident;
+    - met / 404 / 409 / auth cases.
+  - A `CloudTasksClient` `Task` built from the adapter's dict converts the deadline correctly.
+  - Suite 846 passed (coverage 98%). `terraform plan` → 6 to add, 0 to change.
+- **G4 exit criterion:** both halves covered by tests. A shock delivered twice raises exactly one call (MM-121). The SLA breach escalates at the deadline via a scheduled task, with no polling (MM-122). The live end-to-end run on GCP comes with G5's Cloud Run deployment.
+- **Cost impact:** none (Cloud Tasks free tier: 1M operations/month).
+- **Known issues / tech debt:** awaiting the user's `mm122.tfplan` apply. The Kafka path still has no impact consumer (retired at G9).
+- **Next step:** close G4 (epic MM-91); present the **G5 (MM-92)** plan — Cloud Run deployment, push subscriptions + scheduler + SLA timer switched on, Agent Engine, observability.
 
 ### 2026-10-02 — MM-121: Pub/Sub push endpoint + impact consumer
 - **Done:**
@@ -71,7 +99,7 @@ At the end of each story, prepend an entry to **Log** using this template:
   - Suite 828 passed (coverage 98%); emulator tests pass.
   - `terraform plan` → 5 to add, 0 to change.
 - **Cost impact:** none (a service account and a subscription are free).
-- **Known issues / tech debt:** awaiting the user's `mm121.tfplan` apply. Push subscriptions and the scheduler job are set in G5, once Cloud Run has a URL.
+- **Known issues / tech debt:** `mm121.tfplan` applied by the user 2026-10-02 (5 resources). Push subscriptions and the scheduler job are set in G5, once Cloud Run has a URL.
 - **Next step:** MM-122 — Cloud Tasks schedules each call's SLA check at its exact deadline (second half of the G4 exit criterion).
 
 ### 2026-10-02 — MM-120: Live prices through Pub/Sub into the database
