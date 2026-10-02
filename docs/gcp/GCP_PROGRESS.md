@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — MM-119 done; MM-120 (live prices → DB) in review; next MM-121 (Event Agent push endpoint). Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
+- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — MM-119, MM-120 done; next MM-121 (Event Agent push endpoint). Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -31,7 +31,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | **Done** (full lifecycle on Postgres verified in G2) |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | **Done** |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
-| G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | In progress (MM-119 done, MM-120 in review) |
+| G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | In progress (MM-119, MM-120 done) |
 | G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | Not started |
 | G6 | MM-93 | WhatsApp client notifications | Prep done (Meta account, token, template submitted); MM-118 created |
 | G7 | MM-94 | BigQuery analytics & audit warehouse | Not started |
@@ -67,8 +67,12 @@ At the end of each story, prepend an entry to **Log** using this template:
   - Tests: the suite passed 805 (coverage 98%). On the real emulator, a tick published twice lands once in `latest_prices` and publishes exactly one impact set. A unit test caught a token accepted without the `Bearer ` prefix; fixed.
   - `terraform plan` → 7 to add, 0 to change (Cloud SQL untouched).
 - **Cost impact:** none (Pub/Sub free tier; subscriptions free).
-- **Known issues / tech debt:** awaiting the user's `mm120.tfplan` apply. A one-off check against real Pub/Sub + Cloud SQL (start with `demo_online = true`, run the listener locally via the Auth Proxy, confirm rows in `latest_prices`, stop again) is the remaining step before MM-120 is closed.
-- **Next step:** Cloud SQL check, then MM-121 — Event Agent as a Pub/Sub push endpoint (OIDC, idempotent under redelivery).
+- **Verified on GCP (2026-10-02):**
+  - The user applied `mm120.tfplan` (7 resources), then started Cloud SQL with `demo_online = true`.
+  - A one-off check published 30 real yfinance ticks to the real `market.prices` topic, ran the Event Agent locally against `event-agent.market.prices`, and wrote through the Cloud SQL Auth Proxy: **30/30 rows updated in Cloud SQL `latest_prices`** (PASS).
+  - Cloud SQL was stopped again (`demo_online = false`).
+- **Known issues / tech debt:** none new. The Event Agent's ~4 database round trips per tick take ~1–2 s each from a laptop through the proxy; on Cloud Run in us-central1 (G5) that latency goes away.
+- **Next step:** MM-121 — Event Agent as a Pub/Sub push endpoint (OIDC, idempotent under redelivery).
 
 ### 2026-10-01 — MM-119: Pub/Sub event bus (EVENT_BUS=pubsub)
 - **Done:** `adapters/pubsub_adapter.py` — `PubSubEventBus` behind the existing `EventBus` port: one JSON message per model, `key` → Pub/Sub **ordering key** (publisher created with message ordering enabled), `flush()` waits for every publish, raises `PubSubDeliveryError` listing failures and resumes the paused ordering key. Same topic names as Kafka (`market.prices`, `market.events`, `market.impact`, `margin.calls`, `market.dead-letter`), so callers don't change. `adapters/pubsub_admin.py` creates topics on the emulator. Factory: `EVENT_BUS=kafka|pubsub` (default kafka; pubsub needs `GCP_PROJECT_ID`). Docker compose gains the official **Pub/Sub emulator** (`pubsub`, port 8085). Terraform `pubsub.tf`: Pub/Sub API, the 4 event topics (1-day retention for replay/seek), `market.dead-letter` (7-day retention), `roles/pubsub.publisher` per topic for `mm-api-sa` and `mm-events-sa`. New CI job **`pubsub`**: runs the EventBus contract against the emulator with `REQUIRE_PUBSUB=1`.
