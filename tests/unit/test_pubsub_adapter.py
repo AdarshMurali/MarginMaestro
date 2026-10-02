@@ -110,3 +110,30 @@ def test_admin_creates_missing_topics_only():
         "margin.calls",
         "market.dead-letter",
     ]
+
+
+def test_each_thread_flushes_only_its_own_publishes():
+    """MM-121: the push endpoint shares one bus across request threads; one
+    request's flush must not take (or report) another request's messages."""
+    import threading
+
+    publisher = _publisher(failing={"B"})
+    bus = PubSubEventBus("p", publisher=publisher)
+    bus.publish("t", _Quote(ticker="A", price=1), key="A")
+
+    outcome = {}
+
+    def other_request():
+        bus.publish("t", _Quote(ticker="B", price=2), key="B")
+        try:
+            bus.flush()
+        except PubSubDeliveryError as exc:
+            outcome["error"] = str(exc)
+
+    thread = threading.Thread(target=other_request)
+    thread.start()
+    thread.join()
+
+    assert "t" in outcome["error"]  # the other thread saw its own failure
+    assert bus.flush() == 0  # this thread's message A is fine and still flushed here
+    assert bus.flush() == 0

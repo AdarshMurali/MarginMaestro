@@ -1,3 +1,5 @@
+import base64
+import binascii
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
@@ -9,12 +11,14 @@ from langgraph.graph.state import CompiledStateGraph
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy.orm import Session, sessionmaker
 
+from adapters.factory import get_event_bus
+from adapters.pubsub_admin import topic_for_subscription
 from agents.orchestrator import build_orchestrator_graph, resume_run
 from api.audit_log import get_margin_call_audit_log
 from api.auth import (
     Identity,
     require_approver,
-    require_job_caller,
+    require_internal_caller,
     require_manager,
     require_user,
     verify_credentials,
@@ -55,6 +59,7 @@ from api.schemas import (
     PriceHistoryResponse,
     PriceRefreshResponse,
     PublicStatsResponse,
+    PubSubPushEnvelope,
     SimulateEventRequest,
     SimulateEventResponse,
     SlaResponse,
@@ -64,8 +69,11 @@ from config.settings import get_settings
 from observability.tracing import configure_tracing
 from persistence.db.engine import get_session_factory
 from persistence.db.rls import RLS_SCOPE_KEY, can_see, scope_for
+from ports.event_bus import EventBus
+from streaming.inbound import PubSubInbound
 from streaming.live_feed_publisher import publish_live_prices
 from streaming.market_feed import MarketDataUnavailableError
+from streaming.pubsub_dispatch import dispatch
 from streaming.schemas import MarketEventType
 
 configure_logging()
@@ -106,6 +114,12 @@ def get_orchestrator_graph() -> CompiledStateGraph:
 @lru_cache
 def get_db_session_factory() -> sessionmaker[Session]:
     return get_session_factory()
+
+
+@lru_cache
+def get_push_event_bus() -> EventBus:
+    """One publisher per process for the push endpoint (impact sets, dead letters)."""
+    return get_event_bus(get_settings())
 
 
 def approver_action(approver: str = Depends(require_approver)) -> str:
@@ -391,7 +405,7 @@ async def simulate_event(
 @app.post(
     "/internal/prices/refresh",
     response_model=PriceRefreshResponse,
-    dependencies=[Depends(require_job_caller)],
+    dependencies=[Depends(require_internal_caller)],
 )
 def refresh_prices() -> PriceRefreshResponse:
     """Scheduled every 5 minutes in market hours (MM-120): publishes one tick
@@ -404,6 +418,32 @@ def refresh_prices() -> PriceRefreshResponse:
     except MarketDataUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return PriceRefreshResponse(published=published)
+
+
+@app.post(
+    "/internal/pubsub/push",
+    status_code=204,
+    dependencies=[Depends(require_internal_caller)],
+)
+def pubsub_push(envelope: PubSubPushEnvelope) -> Response:
+    """Pub/Sub push target (MM-121): 2xx acks, anything else makes Pub/Sub
+    redeliver (dead-letter after 5 attempts). Same dispatch as the pull
+    worker, so prices, events and impact sets are handled identically."""
+    settings = get_settings()
+    topic = topic_for_subscription(settings, envelope.subscription)
+    if topic is None:
+        raise HTTPException(status_code=400, detail="Unknown subscription")
+    try:
+        data = base64.b64decode(envelope.message.data, validate=True)
+    except binascii.Error as exc:
+        raise HTTPException(status_code=400, detail="Message data is not base64") from exc
+    dispatch(
+        PubSubInbound(topic, data, envelope.message.ordering_key),
+        settings,
+        get_db_session_factory(),
+        get_push_event_bus(),
+    )
+    return Response(status_code=204)
 
 
 @app.get("/margin-calls/{thread_id}/trace", response_model=MarginCallTraceResponse)

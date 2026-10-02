@@ -1,19 +1,18 @@
-"""Event Agent over Pub/Sub pull (MM-120) -- the Pub/Sub counterpart to
-`event_agent.run()`'s Kafka loop, with the same handling, retry and
-dead-letter code (`_handle_with_retry`):
+"""Pub/Sub pull worker (MM-120, MM-121) -- the local way to run the
+Pub/Sub consumers, the counterpart to `event_agent.run()`'s Kafka loop:
 
-    EVENT_BUS=pubsub GCP_PROJECT_ID=marginmaestro-demo python -m streaming.pubsub_event_agent
+    EVENT_BUS=pubsub GCP_PROJECT_ID=marginmaestro-demo python -m streaming.pubsub_worker
 
-It pulls from the `event-agent.<topic>` subscriptions on `market.prices` and
-`market.events`, so each price tick upserts `latest_prices` and a big move
-publishes an impact set to `market.impact`. On the emulator
-(`PUBSUB_EMULATOR_HOST`) it creates the subscriptions itself; on GCP they are
-Terraform-managed. In G5 the same subscriptions push to the Event Agent on
-Cloud Run (MM-121) and this loop is only for local runs.
+It pulls from every consumer subscription (`event-agent.market.prices`,
+`event-agent.market.events`, `orchestrator.market.impact`) and hands each
+message to `pubsub_dispatch.dispatch`: ticks update `latest_prices`, a big
+move publishes an impact set, and an impact set starts margin-call runs. On
+the emulator (`PUBSUB_EMULATOR_HOST`) it creates the subscriptions itself; on
+GCP they are Terraform-managed. From G5 the same subscriptions push to
+`POST /internal/pubsub/push` on Cloud Run instead, running the same dispatch.
 
-A message is acked only after it has been handled or dead-lettered. If
-dead-lettering itself fails, the error propagates and the message is
-redelivered -- safe, because handling is idempotent (`processed_events`).
+A message is acked only after dispatch returns. If it raises, the message is
+left unacked and redelivered -- safe, because every consumer is idempotent.
 """
 
 import itertools
@@ -25,12 +24,12 @@ import structlog
 from sqlalchemy.orm import Session, sessionmaker
 
 from adapters.factory import get_event_bus
-from adapters.pubsub_admin import ensure_subscriptions, event_agent_subscription, event_agent_topics
+from adapters.pubsub_admin import consumer_subscriptions, ensure_subscriptions
 from config.settings import Settings, get_settings
 from persistence.db.engine import get_session_factory
 from ports.event_bus import EventBus
-from streaming.event_agent import _handle_with_retry
 from streaming.inbound import PubSubInbound
+from streaming.pubsub_dispatch import dispatch
 
 logger = structlog.get_logger()
 
@@ -61,8 +60,11 @@ def drain_once(
         except DeadlineExceeded:
             continue  # nothing waiting on this subscription
         for received in response.received_messages:
-            _handle_with_retry(
-                PubSubInbound(topic, received.message), producer, settings, session_factory
+            dispatch(
+                PubSubInbound.from_pulled(topic, received.message),
+                settings,
+                session_factory,
+                producer,
             )
             subscriber.acknowledge(request={"subscription": path, "ack_ids": [received.ack_id]})
             handled += 1
@@ -77,23 +79,22 @@ def run(
     """`max_iterations` bounds the loop for tests; leave it None to run until stopped."""
     settings = settings or get_settings()
     if settings.event_bus != "pubsub" or not settings.gcp_project_id:
-        raise ValueError("pubsub_event_agent needs EVENT_BUS=pubsub and GCP_PROJECT_ID")
+        raise ValueError("pubsub_worker needs EVENT_BUS=pubsub and GCP_PROJECT_ID")
     project = settings.gcp_project_id
 
     if subscriber is None:
         from google.cloud.pubsub_v1 import SubscriberClient
 
         subscriber = SubscriberClient()
-    topics = event_agent_topics(settings)
+    names = consumer_subscriptions(settings)
     if os.environ.get("PUBSUB_EMULATOR_HOST"):
-        ensure_subscriptions(project, topics, subscriber=subscriber)
+        ensure_subscriptions(project, names, subscriber=subscriber)
     subscriptions = {
-        topic: subscriber.subscription_path(project, event_agent_subscription(topic))
-        for topic in topics
+        topic: subscriber.subscription_path(project, name) for topic, name in names.items()
     }
     producer = get_event_bus(settings)
     session_factory = get_session_factory(settings)
-    logger.info("pubsub_event_agent_started", subscriptions=list(subscriptions.values()))
+    logger.info("pubsub_worker_started", subscriptions=list(subscriptions.values()))
 
     iterations = range(max_iterations) if max_iterations is not None else itertools.count()
     for _ in iterations:

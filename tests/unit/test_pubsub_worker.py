@@ -1,6 +1,6 @@
-"""MM-120: the Event Agent over Pub/Sub pull, with a mocked subscriber and an
+"""MM-120/121: the Pub/Sub pull worker, with a mocked subscriber and an
 in-memory database (the emulator-backed run is in
-tests/contract/test_pubsub_event_agent_emulator.py)."""
+tests/contract/test_pubsub_worker_emulator.py)."""
 
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
@@ -11,7 +11,11 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from adapters.in_memory import InMemoryEventBus
-from adapters.pubsub_admin import ensure_subscriptions, event_agent_subscription
+from adapters.pubsub_admin import (
+    consumer_subscriptions,
+    ensure_subscriptions,
+    topic_for_subscription,
+)
 from config.settings import Settings
 from persistence.db.models import (
     Base,
@@ -21,11 +25,11 @@ from persistence.db.models import (
     PositionORM,
     PriceHistoryORM,
 )
-from streaming import pubsub_event_agent
+from streaming import pubsub_worker
 from streaming.event_agent import _dead_letter_event
 from streaming.inbound import EmptyMessageError, PubSubInbound, decode
 from streaming.market_feed import PriceQuote
-from streaming.pubsub_event_agent import drain_once
+from streaming.pubsub_worker import drain_once
 
 AS_OF = datetime(2026, 10, 2, 15, 0, tzinfo=UTC)
 
@@ -150,7 +154,7 @@ def test_an_empty_pull_that_times_out_is_skipped(session_factory, settings):
 
 def test_run_requires_pubsub_and_a_project():
     with pytest.raises(ValueError, match="EVENT_BUS=pubsub"):
-        pubsub_event_agent.run(Settings(_env_file=None), subscriber=MagicMock())
+        pubsub_worker.run(Settings(_env_file=None), subscriber=MagicMock())
 
 
 def test_run_pulls_from_both_subscriptions(settings, monkeypatch):
@@ -159,16 +163,17 @@ def test_run_pulls_from_both_subscriptions(settings, monkeypatch):
     subscriber.subscription_path.side_effect = lambda p, s: f"projects/{p}/subscriptions/{s}"
 
     with (
-        patch.object(pubsub_event_agent, "get_session_factory"),
-        patch.object(pubsub_event_agent, "get_event_bus"),
-        patch.object(pubsub_event_agent.time, "sleep") as sleep,
+        patch.object(pubsub_worker, "get_session_factory"),
+        patch.object(pubsub_worker, "get_event_bus"),
+        patch.object(pubsub_worker.time, "sleep") as sleep,
     ):
-        pubsub_event_agent.run(settings, subscriber=subscriber, max_iterations=1)
+        pubsub_worker.run(settings, subscriber=subscriber, max_iterations=1)
 
     pulled = [call.kwargs["request"]["subscription"] for call in subscriber.pull.call_args_list]
     assert pulled == [
         "projects/proj/subscriptions/event-agent.market.prices",
         "projects/proj/subscriptions/event-agent.market.events",
+        "projects/proj/subscriptions/orchestrator.market.impact",
     ]
     sleep.assert_called_once()  # idle: nothing was handled
     subscriber.create_subscription.assert_not_called()  # real GCP: Terraform owns them
@@ -177,29 +182,31 @@ def test_run_pulls_from_both_subscriptions(settings, monkeypatch):
 def test_run_creates_subscriptions_on_the_emulator(settings, monkeypatch):
     monkeypatch.setenv("PUBSUB_EMULATOR_HOST", "localhost:8085")
     with (
-        patch.object(pubsub_event_agent, "ensure_subscriptions") as ensure,
-        patch.object(pubsub_event_agent, "get_session_factory"),
-        patch.object(pubsub_event_agent, "get_event_bus"),
-        patch.object(pubsub_event_agent.time, "sleep"),
+        patch.object(pubsub_worker, "ensure_subscriptions") as ensure,
+        patch.object(pubsub_worker, "get_session_factory"),
+        patch.object(pubsub_worker, "get_event_bus"),
+        patch.object(pubsub_worker.time, "sleep"),
     ):
-        pubsub_event_agent.run(settings, subscriber=_subscriber(), max_iterations=1)
+        pubsub_worker.run(settings, subscriber=_subscriber(), max_iterations=1)
 
-    assert ensure.call_args.args == ("proj", ["market.prices", "market.events"])
+    assert ensure.call_args.args == ("proj", consumer_subscriptions(settings))
 
 
 def test_pubsub_inbound_maps_ordering_key_and_has_no_offset():
-    inbound = PubSubInbound("market.prices", SimpleNamespace(data=b"{}", ordering_key="MU"))
+    inbound = PubSubInbound.from_pulled(
+        "market.prices", SimpleNamespace(data=b"{}", ordering_key="MU")
+    )
 
     assert (inbound.topic(), inbound.key(), inbound.value()) == ("market.prices", b"MU", b"{}")
     assert (inbound.partition(), inbound.offset()) == (None, None)
-    no_key = PubSubInbound("t", SimpleNamespace(data=b"", ordering_key=""))
+    no_key = PubSubInbound("t", b"")
     assert (no_key.key(), no_key.value()) == (None, None)
     with pytest.raises(EmptyMessageError):
         decode(no_key, PriceQuote)
 
 
 def test_dead_letter_event_from_a_pubsub_message():
-    inbound = PubSubInbound("market.prices", SimpleNamespace(data=b"bad", ordering_key="MU"))
+    inbound = PubSubInbound("market.prices", b"bad", "MU")
 
     dead_letter = _dead_letter_event(inbound, ValueError("boom"), attempts=3)
 
@@ -218,9 +225,30 @@ def test_ensure_subscriptions_creates_missing_ordered_ones_only():
     subscriber.subscription_path.side_effect = lambda p, s: f"projects/{p}/subscriptions/{s}"
     subscriber.create_subscription.side_effect = [None, AlreadyExists("exists")]
 
-    created = ensure_subscriptions("p", ["market.prices", "market.events"], subscriber=subscriber)
+    created = ensure_subscriptions(
+        "p",
+        {
+            "market.prices": "event-agent.market.prices",
+            "market.events": "event-agent.market.events",
+        },
+        subscriber=subscriber,
+    )
 
-    assert created == [event_agent_subscription("market.prices")]
+    assert created == ["event-agent.market.prices"]
     request = subscriber.create_subscription.call_args_list[0].kwargs["request"]
     assert request["enable_message_ordering"] is True
     assert request["topic"] == "projects/p/topics/market.prices"
+
+
+def test_subscription_names_map_back_to_their_topics():
+    settings = Settings(_env_file=None)
+
+    assert consumer_subscriptions(settings) == {
+        "market.prices": "event-agent.market.prices",
+        "market.events": "event-agent.market.events",
+        "market.impact": "orchestrator.market.impact",
+    }
+    full = "projects/p/subscriptions/orchestrator.market.impact"
+    assert topic_for_subscription(settings, full) == "market.impact"
+    assert topic_for_subscription(settings, "event-agent.market.prices") == "market.prices"
+    assert topic_for_subscription(settings, "something-else") is None

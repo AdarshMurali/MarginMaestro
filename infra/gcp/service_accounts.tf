@@ -11,6 +11,7 @@ locals {
     ci         = "MarginMaestro CI/CD (GitHub Actions via WIF)"
     killswitch = "MarginMaestro billing kill-switch"
     build      = "MarginMaestro Cloud Build (function builds)"
+    invoker    = "MarginMaestro internal caller (Pub/Sub push, Cloud Scheduler)"
   }
 
   runtime_accounts = ["api", "agent", "mcp", "events"]

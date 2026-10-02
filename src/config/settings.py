@@ -149,10 +149,14 @@ class Settings(BaseSettings):
     # separate secret from NextAuth's own internal session-cookie
     # encryption key (NEXTAUTH_SECRET), which this backend never sees.
     auth_backend_secret: str | None = None
-    # MM-120: bearer token for scheduled internal jobs (POST
-    # /internal/prices/refresh). Unset = those endpoints are disabled (503).
-    # G5 adds Cloud Scheduler's Google-signed OIDC token as the deployed path.
+    # MM-120/121: who may call the internal endpoints (/internal/prices/refresh,
+    # /internal/pubsub/push). Either the shared job token (local runs), or a
+    # Google-signed OIDC token for `internal_caller_service_account` with this
+    # audience (Cloud Scheduler and Pub/Sub push, from G5). Neither set = the
+    # endpoints are disabled (503).
     internal_job_token: str | None = None
+    internal_caller_audience: str | None = None
+    internal_caller_service_account: str | None = None
     # Seed-time only (persistence/seed_users.py hashes these into `users`
     # once) -- never read at request time, so rotating them doesn't
     # invalidate already-seeded accounts. Documented local-dev defaults, not

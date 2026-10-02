@@ -9,8 +9,11 @@ counterpart to the Kafka `EventProducer`. Same topic names (`market.prices`,
   same contract as the Kafka producer. A failed ordered publish pauses that
   key in the client, so the key is resumed for the next attempt.
 - Local dev and CI use the Pub/Sub emulator (`PUBSUB_EMULATOR_HOST`).
+- Safe to share across threads (MM-121, the push endpoint): each thread's
+  `flush()` waits only for that thread's own publishes.
 """
 
+import threading
 from typing import Any
 
 import structlog
@@ -27,7 +30,19 @@ class PubSubEventBus:
     def __init__(self, project_id: str, publisher: Any | None = None) -> None:
         self._project_id = project_id
         self._publisher = publisher if publisher is not None else _ordered_publisher()
-        self._pending: list[tuple[Any, str, str]] = []  # (future, topic_path, ordering_key)
+        self._local = threading.local()
+
+    @property
+    def _pending(self) -> list[tuple[Any, str, str]]:
+        """This thread's unflushed publishes: (future, topic_path, ordering_key)."""
+        if not hasattr(self._local, "pending"):
+            self._local.pending = []
+        pending: list[tuple[Any, str, str]] = self._local.pending
+        return pending
+
+    @_pending.setter
+    def _pending(self, value: list[tuple[Any, str, str]]) -> None:
+        self._local.pending = value
 
     def publish(self, topic: str, value: BaseModel, key: str | None = None) -> None:
         topic_path = self._publisher.topic_path(self._project_id, topic)
