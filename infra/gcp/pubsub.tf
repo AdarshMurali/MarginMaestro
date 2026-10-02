@@ -2,8 +2,7 @@
 # topics, same names so the app's topic settings don't change. Free tier:
 # 10 GB/month -- the demo's price + event traffic is a few MB.
 #
-# The Event Agent's subscriptions (below) are pull until G5, when they get a
-# push endpoint on Cloud Run once the API has a URL.
+# The consumer subscriptions (below) push to the API on Cloud Run (MM-124).
 
 locals {
   event_topics = [
@@ -48,11 +47,11 @@ resource "google_pubsub_topic_iam_member" "publishers" {
   member = "serviceAccount:${google_service_account.component[each.value.account].email}"
 }
 
-# Event Agent subscriptions (MM-120). Pull for now -- the local listener
-# (`python -m streaming.pubsub_worker`) drains them; G5 adds a
-# push_config pointing at the Event Agent on Cloud Run (MM-121), on these same
-# subscriptions. Ordering is on (it can't be changed after creation), so one
-# ticker's ticks are handled in publish order.
+# Event Agent subscriptions (MM-120). They push to the API on Cloud Run since
+# MM-124 (`POST /internal/pubsub/push`, MM-121); locally the emulator's own
+# subscriptions are pulled by `python -m streaming.pubsub_worker` instead.
+# Ordering is on (it can't be changed after creation), so one ticker's ticks
+# are handled in publish order.
 #
 # The app dead-letters a message itself after 3 failed attempts and acks it;
 # the subscription's own dead-letter policy is the backstop for a consumer
@@ -70,6 +69,16 @@ resource "google_pubsub_subscription" "event_agent" {
   enable_message_ordering    = true
   ack_deadline_seconds       = 60
   message_retention_duration = "86400s" # an unread tick is stale after a day
+
+  # MM-124: Pub/Sub pushes each message to the API, signed as mm-invoker-sa.
+  # 2xx acks; anything else is retried, then dead-lettered.
+  push_config {
+    push_endpoint = "${local.api_base_url}/internal/pubsub/push"
+    oidc_token {
+      service_account_email = google_service_account.component["invoker"].email
+      audience              = local.api_base_url
+    }
+  }
 
   expiration_policy {
     ttl = "" # never expire, even while nothing is pulling (e.g. demo offline)
@@ -120,6 +129,16 @@ resource "google_pubsub_subscription" "orchestrator_impact" {
   enable_message_ordering    = true
   ack_deadline_seconds       = 600
   message_retention_duration = "86400s"
+
+  # MM-124: Pub/Sub pushes each message to the API, signed as mm-invoker-sa.
+  # 2xx acks; anything else is retried, then dead-lettered.
+  push_config {
+    push_endpoint = "${local.api_base_url}/internal/pubsub/push"
+    oidc_token {
+      service_account_email = google_service_account.component["invoker"].email
+      audience              = local.api_base_url
+    }
+  }
 
   expiration_policy {
     ttl = ""
