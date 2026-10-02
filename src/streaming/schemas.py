@@ -48,11 +48,12 @@ class DeadLetterEvent(BaseModel):
     partition, offset, key, raw value) to inspect or manually replay it,
     plus what actually went wrong. Published to market.dead-letter; the
     original message's offset is still committed on its source topic once
-    this lands, so one bad message can't wedge the partition."""
+    this lands, so one bad message can't wedge the partition. Pub/Sub
+    messages (MM-120) have no partition or offset, so those are None."""
 
     topic: str
-    partition: int
-    offset: int
+    partition: int | None
+    offset: int | None
     key: str | None
     value: str
     error_type: str

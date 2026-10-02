@@ -11,7 +11,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from agents.orchestrator import build_orchestrator_graph, resume_run
 from api.audit_log import get_margin_call_audit_log
-from api.auth import Identity, require_approver, require_manager, require_user, verify_credentials
+from api.auth import (
+    Identity,
+    require_approver,
+    require_job_caller,
+    require_manager,
+    require_user,
+    verify_credentials,
+)
 from api.exposure import (
     build_exposure_board,
     get_counterparty_exposure,
@@ -46,6 +53,7 @@ from api.schemas import (
     MarginCallTraceResponse,
     MarketUniverseResponse,
     PriceHistoryResponse,
+    PriceRefreshResponse,
     PublicStatsResponse,
     SimulateEventRequest,
     SimulateEventResponse,
@@ -56,6 +64,7 @@ from config.settings import get_settings
 from observability.tracing import configure_tracing
 from persistence.db.engine import get_session_factory
 from persistence.db.rls import RLS_SCOPE_KEY, can_see, scope_for
+from streaming.live_feed_publisher import publish_live_prices
 from streaming.market_feed import MarketDataUnavailableError
 from streaming.schemas import MarketEventType
 
@@ -377,6 +386,24 @@ async def simulate_event(
             session_factory,
             settings,
         )
+
+
+@app.post(
+    "/internal/prices/refresh",
+    response_model=PriceRefreshResponse,
+    dependencies=[Depends(require_job_caller)],
+)
+def refresh_prices() -> PriceRefreshResponse:
+    """Scheduled every 5 minutes in market hours (MM-120): publishes one tick
+    per ticker to market.prices; the Event Agent upserts latest_prices and
+    raises an impact set on a big move. Sync so the feed call runs in the
+    threadpool, not on the event loop."""
+    settings = get_settings()
+    try:
+        published = publish_live_prices(settings.market_universe_list, settings=settings)
+    except MarketDataUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return PriceRefreshResponse(published=published)
 
 
 @app.get("/margin-calls/{thread_id}/trace", response_model=MarginCallTraceResponse)

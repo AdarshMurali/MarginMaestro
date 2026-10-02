@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — MM-119 (Pub/Sub bus) in review; next MM-120 (live prices → DB). Cloud SQL **stopped** until G5.
+- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — MM-119 done; MM-120 (live prices → DB) in review; next MM-121 (Event Agent push endpoint). Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -31,7 +31,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | **Done** (full lifecycle on Postgres verified in G2) |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | **Done** |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
-| G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | In progress (MM-119 in review) |
+| G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | In progress (MM-119 done, MM-120 in review) |
 | G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | Not started |
 | G6 | MM-93 | WhatsApp client notifications | Prep done (Meta account, token, template submitted); MM-118 created |
 | G7 | MM-94 | BigQuery analytics & audit warehouse | Not started |
@@ -49,6 +49,27 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Log
 
+### 2026-10-02 — MM-120: Live prices through Pub/Sub into the database
+- **Done:**
+  - **Event Agent works with any event bus.** `streaming/inbound.py` defines the message shape the handlers need (topic, key, value; partition and offset are None on Pub/Sub). Kafka messages already fit it, and `PubSubInbound` wraps a pulled Pub/Sub message, with the ordering key playing the Kafka key's role. `handle_message`, retries and dead-lettering in `event_agent.py` are unchanged apart from the types. `DeadLetterEvent.partition`/`offset` are now optional, and a Pub/Sub dead letter is keyed `topic:ordering-key`.
+  - **Pub/Sub listener.** `streaming/pubsub_event_agent.py` (`python -m streaming.pubsub_event_agent`, needs `EVENT_BUS=pubsub` + `GCP_PROJECT_ID`) pulls from `event-agent.market.prices` and `event-agent.market.events`. Each message is acked only after it is handled or dead-lettered; if dead-lettering itself fails, the message stays unacked and is redelivered, which is safe because handling is idempotent. On the emulator it creates its own subscriptions (`pubsub_admin.ensure_subscriptions`, also run by `python -m adapters.pubsub_admin`).
+  - **Refresh endpoint.** `POST /internal/prices/refresh` publishes one tick per ticker in the market universe through the existing `publish_live_prices`. It is guarded by `require_job_caller`: the bearer token must equal `INTERNAL_JOB_TOKEN` (constant-time compare); an unset token means 503 (disabled), and a feed outage returns 503.
+  - **Terraform.**
+    - `pubsub.tf` adds the two Event Agent subscriptions (pull for now; G5 adds a push endpoint to the same ones). Settings: ordering on, 60 s ack deadline, 1-day retention, never expire, retry backoff 10–300 s, dead-letter policy → `market.dead-letter` after 5 attempts.
+    - IAM: `roles/pubsub.subscriber` for `mm-events-sa`, plus the Pub/Sub service agent's publisher/subscriber roles for dead-lettering.
+    - **One switch:** `demo_online` (bool, default false) replaces `cloudsql_activation_policy`. It drives Cloud SQL's activation policy now and the Cloud Scheduler job's paused state in G5. Local `terraform.tfvars` was migrated (`demo_online = false`); the plan shows no change to Cloud SQL.
+- **Decisions:**
+  - The Cloud Scheduler job is created in G5, because it needs the Cloud Run URL. It will run every 5 minutes, Mon–Fri 09:00–16:00 New York time. Market hours are enforced by the cron, not by code; holiday or pre-market runs only re-publish the last price, which is skipped as a duplicate.
+  - The deployed scheduler will authenticate with a Google-signed OIDC token (MM-121), not the shared job token.
+  - BigQuery loads only data tied to a named report (user, 2026-10-02). Ticks are kept only for the detection lead-time analysis; daily closes drive stress replay and backtests.
+- **Changed:** `src/streaming/{inbound.py (new), pubsub_event_agent.py (new), event_agent.py, consumer.py, schemas.py}`, `src/adapters/pubsub_admin.py`, `src/api/{main.py, auth.py, schemas.py}`, `src/config/settings.py`, `tests/unit/{test_pubsub_event_agent.py (new, 11), test_internal_prices_refresh.py (new, 7)}`, `tests/contract/test_pubsub_event_agent_emulator.py` (new), `.github/workflows/ci.yml` (pubsub job runs it), `infra/gcp/{pubsub.tf, variables.tf, cloud_sql.tf, README.md}`, `.env.example`.
+- **Verified:**
+  - Tests: the suite passed 805 (coverage 98%). On the real emulator, a tick published twice lands once in `latest_prices` and publishes exactly one impact set. A unit test caught a token accepted without the `Bearer ` prefix; fixed.
+  - `terraform plan` → 7 to add, 0 to change (Cloud SQL untouched).
+- **Cost impact:** none (Pub/Sub free tier; subscriptions free).
+- **Known issues / tech debt:** awaiting the user's `mm120.tfplan` apply. A one-off check against real Pub/Sub + Cloud SQL (start with `demo_online = true`, run the listener locally via the Auth Proxy, confirm rows in `latest_prices`, stop again) is the remaining step before MM-120 is closed.
+- **Next step:** Cloud SQL check, then MM-121 — Event Agent as a Pub/Sub push endpoint (OIDC, idempotent under redelivery).
+
 ### 2026-10-01 — MM-119: Pub/Sub event bus (EVENT_BUS=pubsub)
 - **Done:** `adapters/pubsub_adapter.py` — `PubSubEventBus` behind the existing `EventBus` port: one JSON message per model, `key` → Pub/Sub **ordering key** (publisher created with message ordering enabled), `flush()` waits for every publish, raises `PubSubDeliveryError` listing failures and resumes the paused ordering key. Same topic names as Kafka (`market.prices`, `market.events`, `market.impact`, `margin.calls`, `market.dead-letter`), so callers don't change. `adapters/pubsub_admin.py` creates topics on the emulator. Factory: `EVENT_BUS=kafka|pubsub` (default kafka; pubsub needs `GCP_PROJECT_ID`). Docker compose gains the official **Pub/Sub emulator** (`pubsub`, port 8085). Terraform `pubsub.tf`: Pub/Sub API, the 4 event topics (1-day retention for replay/seek), `market.dead-letter` (7-day retention), `roles/pubsub.publisher` per topic for `mm-api-sa` and `mm-events-sa`. New CI job **`pubsub`**: runs the EventBus contract against the emulator with `REQUIRE_PUBSUB=1`.
 - **Decisions:** Price refresh every **5 minutes** in market hours (user choice) — MM-120. Push subscriptions, dead-letter policies and their targets come in G5 (they need the Cloud Run URL). Cloud SQL billing check (user question): Cloud SQL `db-f1-micro` bills per running hour regardless of query volume — price writes add no cost (unlike Azure SQL Serverless, where polling prevented auto-pause); the lever is stopping the instance, and in G5 the price schedule and the DB share one switch so a stopped DB doesn't pile up retries.
@@ -56,7 +77,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 - **Changed:** `src/adapters/{pubsub_adapter.py, pubsub_admin.py}` (new), `src/adapters/factory.py`, `src/config/settings.py`, `tests/unit/test_pubsub_adapter.py` (new, 8), `tests/contract/test_event_bus_contract.py` (pubsub variant + ordering test), `tests/integration/test_streaming_testcontainers.py` (startup timeout), `infra/gcp/pubsub.tf` (new), `docker-compose.yml`, `.github/workflows/ci.yml`, `pyproject.toml` (`google-cloud-pubsub` in `gcp`), `.env.example`.
 - **Verified:** against the real emulator — EventBus contract passes, and 5 messages published with one ordering key arrive as the exact JSON, with the key, in publish order; suite 784 passed (+ the 3 Kafka integration tests now passing locally); `terraform plan` → 14 to add.
 - **Cost impact:** none (Pub/Sub free tier).
-- **Known issues / tech debt:** `mm119.tfplan` awaits the user's apply (free; nothing at runtime depends on it yet).
+- **Known issues / tech debt:** `mm119.tfplan` awaited the user's apply — applied 2026-10-02 (14 resources).
 - **Next step:** MM-120 — live prices through Pub/Sub into the database.
 
 ### 2026-10-01 — MM-117: Cost/loop limits, guardrail audit, model pin fix (G3 closed)

@@ -2,7 +2,7 @@
 #
 # Smallest shape: Enterprise edition, shared-core db-f1-micro, zonal, 10 GB
 # SSD without autoresize (~$9-10/month, from trial credits). Stop it when idle
-# with `cloudsql_activation_policy = "NEVER"` (storage is still billed).
+# with `demo_online = false` (storage is still billed; MM-120 switch).
 #
 # Access: public IP with NO authorized networks -- the only way in is the
 # Cloud SQL Auth Proxy / Connector, which encrypts the connection and checks
@@ -35,7 +35,7 @@ resource "google_sql_database_instance" "main" {
     disk_type         = "PD_SSD"
     disk_size         = 10
     disk_autoresize   = false
-    activation_policy = var.cloudsql_activation_policy
+    activation_policy = var.demo_online ? "ALWAYS" : "NEVER"
 
     deletion_protection_enabled = true
 

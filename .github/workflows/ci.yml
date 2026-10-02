@@ -165,8 +165,8 @@ jobs:
           for i in $(seq 1 60); do curl -sf http://localhost:8085 && exit 0; sleep 2; done
           docker logs pubsub; exit 1
 
-      - name: EventBus contract on Pub/Sub
-        run: pytest tests/contract/test_event_bus_contract.py -m "not live" -p no:cacheprovider -v
+      - name: EventBus contract + Event Agent on Pub/Sub
+        run: pytest tests/contract/test_event_bus_contract.py tests/contract/test_pubsub_event_agent_emulator.py -m "not live" -p no:cacheprovider -v
 
   terraform-gcp:
     runs-on: ubuntu-latest

@@ -3,7 +3,6 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 import structlog
-from confluent_kafka import Message
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -19,7 +18,8 @@ from persistence.db.models import (
     RatingORM,
 )
 from ports.event_bus import EventBus
-from streaming.consumer import EventConsumer, decode
+from streaming.consumer import EventConsumer
+from streaming.inbound import InboundMessage, decode
 from streaming.market_feed import PriceQuote
 from streaming.schemas import DeadLetterEvent, ImpactSet, MarketEvent, MarketEventType
 
@@ -186,7 +186,7 @@ def handle_market_event_message(
 
 def handle_message(
     session: Session,
-    msg: Message,
+    msg: InboundMessage,
     producer: EventBus,
     settings: Settings,
 ) -> ImpactSet | None:
@@ -195,13 +195,12 @@ def handle_message(
     return handle_market_event_message(session, decode(msg, MarketEvent), producer, settings)
 
 
-def _dead_letter_event(msg: Message, error: Exception, attempts: int) -> DeadLetterEvent:
-    # confluent_kafka's stubs type these as Optional (a raw error Message can
-    # lack them), but EventConsumer.poll() already filters error messages
-    # out before anything reaches here -- a real, successfully polled
-    # message always has all three set.
+def _dead_letter_event(msg: InboundMessage, error: Exception, attempts: int) -> DeadLetterEvent:
+    # A delivered message always has a topic. Partition and offset are set for
+    # Kafka (EventConsumer.poll() filters out error messages) and None for
+    # Pub/Sub, which has neither.
     topic, partition, offset = msg.topic(), msg.partition(), msg.offset()
-    assert topic is not None and partition is not None and offset is not None
+    assert topic is not None
     key = msg.key()
     value = msg.value()
     return DeadLetterEvent(
@@ -218,7 +217,7 @@ def _dead_letter_event(msg: Message, error: Exception, attempts: int) -> DeadLet
 
 
 def _publish_dead_letter(
-    msg: Message, error: Exception, attempts: int, producer: EventBus, settings: Settings
+    msg: InboundMessage, error: Exception, attempts: int, producer: EventBus, settings: Settings
 ) -> None:
     """Deliberately doesn't catch its own failure -- if Redpanda itself is
     unreachable, publish()/flush() raising and propagating out of
@@ -229,7 +228,11 @@ def _publish_dead_letter(
     "crash forever on this one message" with "crash if the broker itself is
     down" -- a materially bigger, more visible problem than one bad message."""
     dead_letter = _dead_letter_event(msg, error, attempts)
-    dlq_key = f"{dead_letter.topic}:{dead_letter.partition}:{dead_letter.offset}"
+    dlq_key = (
+        f"{dead_letter.topic}:{dead_letter.partition}:{dead_letter.offset}"
+        if dead_letter.offset is not None
+        else f"{dead_letter.topic}:{dead_letter.key or ''}"
+    )
     producer.publish(settings.kafka_topic_dead_letter, dead_letter, key=dlq_key)
     producer.flush()
     logger.error(
@@ -243,7 +246,7 @@ def _publish_dead_letter(
 
 
 def _handle_with_retry(
-    msg: Message,
+    msg: InboundMessage,
     producer: EventBus,
     settings: Settings,
     session_factory: sessionmaker[Session],

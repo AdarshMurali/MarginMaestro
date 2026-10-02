@@ -15,6 +15,8 @@ Two pieces, deliberately separate:
    endpoint's own logic ever runs.
 """
 
+import hmac
+
 import bcrypt
 import jwt
 from fastapi import Header, HTTPException
@@ -94,3 +96,17 @@ def require_manager(authorization: str | None = Header(default=None)) -> str:
     (401/403 at the API layer, not a hidden frontend button). FastAPI
     dependency -- add as `Depends(require_manager)`."""
     return _require_role("manager", authorization)
+
+
+def require_job_caller(authorization: str | None = Header(default=None)) -> None:
+    """Scheduled internal jobs (MM-120): the bearer token must equal
+    INTERNAL_JOB_TOKEN. Unset token = the job endpoints are disabled (503),
+    so a missing config never leaves them open."""
+    expected = get_settings().internal_job_token
+    if not expected:
+        raise HTTPException(status_code=503, detail="Internal jobs are disabled")
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid job token")
+    supplied = authorization.removeprefix("Bearer ")
+    if not hmac.compare_digest(supplied.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="Invalid job token")
