@@ -55,15 +55,17 @@ def build_connection_url(settings: Settings, database: str | None = None) -> str
     password = quote_plus(settings.db_password or "")
     name = database or settings.db_name
     if db_dialect(settings) == "postgres":
-        # IAM login: the password is a token added per connection (iam_auth).
+        # IAM login: no password in the URL on purpose -- a short-lived OAuth
+        # token is set as the password on every new connection (iam_auth,
+        # do_connect), so the database is still password-protected.
         credentials = user if db_auth(settings) == "iam" else f"{user}:{password}"
         host = settings.db_host or ""
         if host.startswith("/"):  # Unix socket directory (Cloud Run's /cloudsql/...)
             return (
-                f"postgresql+psycopg://{credentials}@/{name}"
+                f"postgresql+psycopg://{credentials}@/{name}"  # NOSONAR -- IAM token password
                 f"?host={quote_plus(host)}&port={settings.db_port}"
             )
-        return f"postgresql+psycopg://{credentials}@{host}:{settings.db_port}/{name}"
+        return f"postgresql+psycopg://{credentials}@{host}:{settings.db_port}/{name}"  # NOSONAR
     driver = quote_plus(ODBC_DRIVER)
     return (
         f"mssql+pyodbc://{user}:{password}@{settings.db_host}:{settings.db_port}"
@@ -86,7 +88,7 @@ def get_engine(settings: Settings | None = None) -> Engine:
     # both during MM-70's local verification (a stale connection after the
     # dev container sat idle) and again running MM-102's first deployed
     # queries against Azure SQL for real.
-    engine = create_engine(
+    engine = create_engine(  # NOSONAR -- DB_AUTH=iam sets a token password per connection
         build_connection_url(settings),
         pool_pre_ping=True,
         connect_args=connect_args(settings),
