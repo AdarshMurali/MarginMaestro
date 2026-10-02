@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123 (API on Cloud Run) in review. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
+- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123 done (API live on Cloud Run, Vercel switched); MM-124 (event flow on GCP) in progress. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -32,7 +32,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | **Done** |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | **Done** (live run on GCP comes with G5) |
-| G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | In progress (MM-123 in review) |
+| G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | In progress (MM-123 done, MM-124 in progress) |
 | G6 | MM-93 | WhatsApp client notifications | Prep done (Meta account, token, template submitted); MM-118 created |
 | G7 | MM-94 | BigQuery analytics & audit warehouse | Not started |
 | G8 | MM-95 | Data governance (Dataplex, classification, lineage, audit, retention) | Not started |
@@ -48,6 +48,15 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-02 — MM-124: Event flow switched on (in progress)
+- **Done (Terraform):**
+  - **Stable API URL.** `local.api_base_url` is Cloud Run's deterministic URL (name + project number + region), known before the service exists. It serves as the `api_url` output, the OIDC audience (`INTERNAL_CALLER_AUDIENCE`) and the target for push, the scheduler and tasks.
+  - **Push delivery.** The three consumer subscriptions get a `push_config` → `/internal/pubsub/push`, signed as `mm-invoker-sa` (pull → push in place).
+  - **Price schedule.** `scheduler.tf` adds `price-refresh`: `*/5 9-15 * * 1-5` America/New_York, OIDC, no retries, paused with `demo_online`.
+  - **SLA timers on.** Cloud Run gets `SLA_SCHEDULER=cloudtasks`, `INTERNAL_BASE_URL` and `CLOUD_TASKS_QUEUE`.
+  - Plan: 2 to add, 4 to change.
+- **Next:** the user applies `mm124.tfplan`, then the live end-to-end run on GCP: scheduled ticks land in `latest_prices`; a market event published twice raises exactly one call; a human approves it in the UI; the SLA task fires at the deadline and escalates to ServiceNow.
 
 ### 2026-10-02 — MM-123: API on Cloud Run
 - **G5 re-plan (user decisions, 2026-10-02):**
@@ -77,7 +86,7 @@ At the end of each story, prepend an entry to **Log** using this template:
   - **SonarCloud:** the gate failed once on python:S2115 ("databases should be password-protected"). This is a false positive: the IAM URL carries no password by design, because the token is set per connection. It is marked `NOSONAR` with that reason.
   - **Smoke test (signed user JWTs, secret never printed):** `/health`, `/ready` and `/public/stats` respond (8 counterparties via IAM login over the socket). Row-level security on Cloud Run: analyst1 → CP-1..4, analyst2 → CP-5..8, auditor → all 8. `/exposure` as analyst1 returns 200 in 9.7 s cold, including real prices, CSA RAG on pgvector + Gemini behind Model Armor/SDP, and breach evaluation (CP-1 and CP-3 breached, CP-2 at risk, CP-4 healthy).
   - Cloud SQL is running (`demo_online = true`) for the rest of G5.
-- **Remaining for MM-123:** the user points Vercel's `BACKEND_API_URL` at the Cloud Run URL, redeploys, and logs in.
+- **Closed (2026-10-02):** the user set Vercel's `BACKEND_API_URL` to the deterministic Cloud Run URL `https://marginmaestro-api-793928354019.us-central1.run.app` (replacing the released AWS Elastic IP), redeployed, and logged in as `analyst1`: the exposure board shows CP-1..4 only. Demo account passwords are the documented `settings.py` defaults; change them before the site is shared publicly (G9).
 - **Original next-step list (done):**
   1. Run `scripts/gcp_secret_from_aws.ps1`.
   2. Set `demo_online = true`.

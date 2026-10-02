@@ -13,6 +13,10 @@
 
 locals {
   cloud_sql_connection = google_sql_database_instance.main.connection_name
+  # Cloud Run's deterministic URL (name + project number + region): stable
+  # even if the service is recreated, and known before it exists, so it can
+  # be the OIDC audience and the target of push / scheduler / tasks (MM-124).
+  api_base_url = "https://marginmaestro-api-${data.google_project.this.number}.${var.region}.run.app"
 
   api_env = {
     APP_ENV          = var.environment
@@ -39,9 +43,14 @@ locals {
     CLIENT_NOTIFIER      = "slack"
 
     # Internal callers (Pub/Sub push, Cloud Scheduler, Cloud Tasks) sign as
-    # mm-invoker-sa; the audience is the service's own URL, set by MM-124
-    # once the URL exists (it can't reference itself here).
+    # mm-invoker-sa, with the service's own URL as the audience (MM-124).
     INTERNAL_CALLER_SERVICE_ACCOUNT = google_service_account.component["invoker"].email
+    INTERNAL_CALLER_AUDIENCE        = local.api_base_url
+
+    # SLA timers (MM-122): one Cloud Tasks task per call, at its deadline.
+    SLA_SCHEDULER     = "cloudtasks"
+    INTERNAL_BASE_URL = local.api_base_url
+    CLOUD_TASKS_QUEUE = google_cloud_tasks_queue.sla_checks.name
 
     CORS_ALLOWED_ORIGINS = var.frontend_origin
 
@@ -133,6 +142,6 @@ resource "google_cloud_run_v2_service_iam_member" "api_public" {
 }
 
 output "api_url" {
-  description = "Public HTTPS URL of the API on Cloud Run (BACKEND_API_URL for Vercel)"
-  value       = google_cloud_run_v2_service.api.uri
+  description = "Stable HTTPS URL of the API on Cloud Run (BACKEND_API_URL for Vercel)"
+  value       = local.api_base_url
 }
