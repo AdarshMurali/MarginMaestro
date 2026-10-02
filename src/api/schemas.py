@@ -243,6 +243,12 @@ class PriceRefreshResponse(BaseModel):
     published: int
 
 
+class EodLoadResponse(BaseModel):
+    tickers_loaded: int
+    tickers_failed: list[str]
+    reference_rates: int
+
+
 class PubSubPushMessage(BaseModel):
     """Pub/Sub push body's `message` (MM-121); `data` is base64."""
 

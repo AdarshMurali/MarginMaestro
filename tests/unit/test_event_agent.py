@@ -590,3 +590,77 @@ class TestHandleWithRetry:
 
         assert len(seen_sessions) == 2
         assert seen_sessions[0] is not seen_sessions[1]
+
+
+class TestOneShockPerTickerPerDay:
+    """MM-124: a ticker that stays past the threshold all day must raise one
+    impact, not one per 5-minute tick (found live with HPE on GCP)."""
+
+    @staticmethod
+    def _seed(session: Session) -> None:
+        _seed_position(session, "CP-1", "HPE")
+        session.add(
+            PriceHistoryORM(
+                ticker="HPE",
+                price_date=date(2026, 10, 1),
+                price=65.07,
+                currency="USD",
+                source="yfinance",
+            )
+        )
+        session.commit()
+
+    def test_later_ticks_the_same_day_raise_nothing_new(
+        self, session: Session, settings: Settings
+    ) -> None:
+        self._seed(session)
+        producer = MagicMock()
+        ticks = [
+            _quote("HPE", 69.88, datetime(2026, 10, 2, 17, minute, tzinfo=UTC))
+            for minute in (16, 20, 25, 30)
+        ]
+
+        impacts = [handle_price_message(session, tick, producer, settings) for tick in ticks]
+
+        assert [i is not None for i in impacts] == [True, False, False, False]
+        assert impacts[0].event_id == "HPE:2026-10-02:price_shock"
+        producer.publish.assert_called_once()
+        assert all(is_already_processed(session, price_event_id(t)) for t in ticks)
+
+    def test_escalating_to_a_vol_spike_raises_once_more(
+        self, session: Session, settings: Settings
+    ) -> None:
+        self._seed(session)
+        producer = MagicMock()
+
+        shock = handle_price_message(
+            session, _quote("HPE", 69.88, datetime(2026, 10, 2, 15, tzinfo=UTC)), producer, settings
+        )
+        spike = handle_price_message(
+            session, _quote("HPE", 76.0, datetime(2026, 10, 2, 16, tzinfo=UTC)), producer, settings
+        )
+        again = handle_price_message(
+            session, _quote("HPE", 77.0, datetime(2026, 10, 2, 17, tzinfo=UTC)), producer, settings
+        )
+
+        assert shock.event_type == MarketEventType.PRICE_SHOCK
+        assert spike.event_type == MarketEventType.VOL_SPIKE
+        assert spike.event_id == "HPE:2026-10-02:vol_spike"
+        assert again is None
+        assert producer.publish.call_count == 2
+
+    def test_the_next_trading_day_is_a_new_event(
+        self, session: Session, settings: Settings
+    ) -> None:
+        self._seed(session)
+        producer = MagicMock()
+
+        first = handle_price_message(
+            session, _quote("HPE", 69.88, datetime(2026, 10, 2, 15, tzinfo=UTC)), producer, settings
+        )
+        next_day = handle_price_message(
+            session, _quote("HPE", 69.88, datetime(2026, 10, 5, 15, tzinfo=UTC)), producer, settings
+        )
+
+        assert first.event_id != next_day.event_id
+        assert next_day.event_id == "HPE:2026-10-05:price_shock"

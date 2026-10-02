@@ -77,7 +77,7 @@ resource "google_cloud_run_v2_service" "api" {
 
     scaling {
       min_instance_count = 0
-      max_instance_count = 2
+      max_instance_count = 4 # MM-124: 30 price pushes arrive at once every 5 minutes
     }
 
     volumes {

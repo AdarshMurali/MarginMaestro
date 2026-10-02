@@ -48,6 +48,7 @@ from api.schemas import (
     CounterpartyExposure,
     CounterpartyHistoryResponse,
     CounterpartyListResponse,
+    EodLoadResponse,
     ExposureBoardResponse,
     HealthResponse,
     ManagerApprovalRequest,
@@ -67,6 +68,7 @@ from api.schemas import (
 from api.simulate import trigger_simulation
 from config.settings import get_settings
 from observability.tracing import configure_tracing
+from persistence.daily_close import load_daily_closes, refresh_reference_rates
 from persistence.db.engine import get_session_factory
 from persistence.db.rls import RLS_SCOPE_KEY, can_see, scope_for
 from ports.event_bus import EventBus
@@ -418,6 +420,25 @@ def refresh_prices() -> PriceRefreshResponse:
     except MarketDataUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return PriceRefreshResponse(published=published)
+
+
+@app.post(
+    "/internal/prices/eod",
+    response_model=EodLoadResponse,
+    dependencies=[Depends(require_internal_caller)],
+)
+def load_end_of_day() -> EodLoadResponse:
+    """Scheduled once a day after the US close (MM-124): official daily
+    closes into price_history (with a short back-fill window) and FRED
+    reference rates. Internal jobs run firm-wide, so no user scope."""
+    settings = get_settings()
+    session_factory = get_db_session_factory()
+    with session_factory() as session:
+        closes = load_daily_closes(session, settings.market_universe_list)
+        rates = refresh_reference_rates(session, settings)
+    return EodLoadResponse(
+        tickers_loaded=len(closes["loaded"]), tickers_failed=closes["failed"], reference_rates=rates
+    )
 
 
 @app.post(
