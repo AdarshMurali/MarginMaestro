@@ -1,5 +1,6 @@
-# Load the RAG corpus into Cloud SQL's pgvector store (MM-123). Run from the
-# repo root in PowerShell, with Cloud SQL running (demo_online = true):
+# Migrate Cloud SQL to the latest schema, then load the RAG corpus into its
+# pgvector store (MM-123). Run from the repo root in PowerShell, with Cloud
+# SQL running (demo_online = true):
 #   powershell -ExecutionPolicy Bypass -File scripts\cloudsql_rag_ingest.ps1
 #
 # Reads the source documents from the GCS bucket, redacts them (Sensitive
@@ -44,6 +45,14 @@ try {
     $env:GCS_DOCUMENTS_BUCKET = "marginmaestro-demo-documents"
     $env:REDACTOR_PROVIDER = "sdp"
 
+    # Bring the schema up to date first: Cloud SQL was bootstrapped before
+    # rag_chunks existed (G2), and nothing else runs migrations there. New
+    # tables get mm_app grants via the RLS migration's default privileges.
+    Write-Host "[1/2] Migrations"
+    & .venv\Scripts\alembic.exe upgrade head
+    if ($LASTEXITCODE -ne 0) { throw "alembic failed" }
+
+    Write-Host "[2/2] Ingest the RAG corpus"
     & .venv\Scripts\python.exe -m rag.ingest
     if ($LASTEXITCODE -ne 0) { throw "rag.ingest failed" }
 }

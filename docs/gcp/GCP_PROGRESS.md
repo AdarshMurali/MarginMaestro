@@ -49,7 +49,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Log
 
-### 2026-10-02 — MM-123: API on Cloud Run (code + Terraform; deploy pending)
+### 2026-10-02 — MM-123: API on Cloud Run
 - **G5 re-plan (user decisions, 2026-10-02):**
   - **No Agent Gateway (option B).** Our agents call their tools as in-process Python functions; the MCP servers wrap the same functions, but nothing in the app calls them. So a gateway would govern nothing. Agent Identity and the in-code controls stay.
   - **New MM-G58, "Ask the margin desk".** The user wants MCP to have a real use: an analyst chat where Gemini picks tools from the MCP servers (read-only, scoped by row-level security, no notifier tool).
@@ -71,7 +71,14 @@ At the end of each story, prepend an entry to **Log** using this template:
   - Deploy only after this PR merges, so `latest` contains the IAM login.
 - **Changed:** `src/persistence/db/{iam_auth.py (new), engine.py}`, `src/config/settings.py`, `src/observability/tracing.py`, `src/adapters/cloud_tasks_sla.py` (import form for mypy), `tests/unit/{test_iam_db_auth.py (new, 10), test_tracing.py}`, `infra/gcp/{cloud_run.tf (new), variables.tf (api_image, frontend_origin), README.md}`, `scripts/{gcp_secret_from_aws.ps1, cloudsql_rag_ingest.ps1}` (new), `docs/gcp/GCP_ROADMAP.md`, `.env.example`.
 - **Verified:** suite 857 passed (coverage 98%). The IAM URL over the Cloud Run socket parses to the expected psycopg arguments (user, no password, socket host). `terraform validate` passes.
-- **Next step (user + me):**
+- **Deployed (2026-10-02):** API live at `https://marginmaestro-api-pkjc2r5ivq-uc.a.run.app` (image `a53aff7`).
+  - **First apply failed:** the GCP secret had no version yet, so the app failed loud at startup. The user then ran `gcp_secret_from_aws.ps1` (6 keys, version 1), and the re-apply replaced the tainted service.
+  - **Second finding:** Cloud SQL had never been migrated past `b7d2f4a8c613`, so `rag_chunks` was missing and `/exposure` returned 500. `cloudsql_rag_ingest.ps1` now runs `alembic upgrade head` before ingesting: 74 chunks from GCS.
+  - **SonarCloud:** the gate failed once on python:S2115 ("databases should be password-protected"). This is a false positive: the IAM URL carries no password by design, because the token is set per connection. It is marked `NOSONAR` with that reason.
+  - **Smoke test (signed user JWTs, secret never printed):** `/health`, `/ready` and `/public/stats` respond (8 counterparties via IAM login over the socket). Row-level security on Cloud Run: analyst1 → CP-1..4, analyst2 → CP-5..8, auditor → all 8. `/exposure` as analyst1 returns 200 in 9.7 s cold, including real prices, CSA RAG on pgvector + Gemini behind Model Armor/SDP, and breach evaluation (CP-1 and CP-3 breached, CP-2 at risk, CP-4 healthy).
+  - Cloud SQL is running (`demo_online = true`) for the rest of G5.
+- **Remaining for MM-123:** the user points Vercel's `BACKEND_API_URL` at the Cloud Run URL, redeploys, and logs in.
+- **Original next-step list (done):**
   1. Run `scripts/gcp_secret_from_aws.ps1`.
   2. Set `demo_online = true`.
   3. Apply the Cloud Run plan (made after merge).
