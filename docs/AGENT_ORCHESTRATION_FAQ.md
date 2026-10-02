@@ -63,9 +63,10 @@ The live path (`src/streaming/live_feed_poller.py`, MM-59) polls on a fixed inte
 So if a real counterparty's stock actually crashed:
 
 1. **Poller** fetches the real yfinance/CoinGecko quote → publishes to `market.prices` (identical schema to a simulated tick).
-2. **Event Agent** consumes it — same deterministic entity/portfolio mapping as any price event (LLM doesn't get involved; that's news-only).
-3. **Calculation Agent** revalues MTM/VM/IM off the real price — same pure-Python code path.
-4. **CSA-RAG Agent** pulls that counterparty's real threshold/MTA from ChromaDB.
-5. **Breach?** → **Reconciliation** → **Collateral Optimizer** → **human approval gate** (nothing client-facing fires without this) → **Communication Agent** sends the real Slack notice → **SLA timer** → escalate to a real ServiceNow incident if missed → every step written to the immutable audit log.
+2. **Event Agent** consumes it — same deterministic entity/portfolio mapping as any price event (LLM doesn't get involved; that's news-only). A big enough move publishes an **impact set** to `market.impact`.
+3. **Impact consumer** (`src/streaming/impact_consumer.py`, MM-121) reads the impact set and starts one orchestrator run per affected counterparty — the same `start_run` that `/simulate` calls, exactly once per (event, counterparty) even if the message is delivered twice. *Correction (2026-10-02): before MM-121 nothing consumed `market.impact`, so this step was missing and only `/simulate` started runs. It exists on the Pub/Sub path (`python -m streaming.pubsub_worker` locally, push to Cloud Run from G5); the legacy Kafka path still has no impact consumer and is retired at cut-over (G9).*
+4. **Calculation Agent** revalues MTM/VM/IM off the real price — same pure-Python code path.
+5. **CSA-RAG Agent** pulls that counterparty's real threshold/MTA from ChromaDB.
+6. **Breach?** → **Reconciliation** → **Collateral Optimizer** → **human approval gate** (nothing client-facing fires without this) → **Communication Agent** sends the real Slack notice → **SLA timer** → escalate to a real ServiceNow incident if missed → every step written to the immutable audit log.
 
 **The full LangGraph agent trace runs step-by-step exactly as it does today in the demo.** The only difference between "simulated" and "real" is *which process produced the tick* — the orchestrator, every agent, and the approval/SLA/escalation machinery have no branch that distinguishes the two. This is a deliberate design choice (see `docs/ARCHITECTURE.md` §2, principle 7 — "pluggable feed"), not something that would need to be built later.

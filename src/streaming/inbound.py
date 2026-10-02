@@ -32,11 +32,17 @@ def decode(message: InboundMessage, model: type[T]) -> T:
 
 
 class PubSubInbound:
-    """Wraps a pulled Pub/Sub message. Its ordering key plays the Kafka key's role."""
+    """A Pub/Sub message, pulled or pushed. Its ordering key plays the Kafka
+    key's role."""
 
-    def __init__(self, topic: str, message: Any) -> None:
+    def __init__(self, topic: str, data: bytes, ordering_key: str = "") -> None:
         self._topic = topic
-        self._message = message
+        self._data = data
+        self._ordering_key = ordering_key
+
+    @classmethod
+    def from_pulled(cls, topic: str, message: Any) -> "PubSubInbound":
+        return cls(topic, message.data, message.ordering_key)
 
     def topic(self) -> str | None:
         return self._topic
@@ -48,8 +54,7 @@ class PubSubInbound:
         return None
 
     def key(self) -> bytes | None:
-        ordering_key = self._message.ordering_key
-        return ordering_key.encode("utf-8") if ordering_key else None
+        return self._ordering_key.encode("utf-8") if self._ordering_key else None
 
     def value(self) -> bytes | None:
-        return self._message.data or None
+        return self._data or None

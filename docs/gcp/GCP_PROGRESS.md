@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — MM-119, MM-120 done; next MM-121 (Event Agent push endpoint). Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
+- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — MM-119, MM-120 done; MM-121 (push endpoint + impact consumer) in review; next MM-122 (Cloud Tasks SLA timers). Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -31,7 +31,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G1 | MM-88 | Cloud SQL Postgres + pgvector + row-level security | **Done** (full lifecycle on Postgres verified in G2) |
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | **Done** |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
-| G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | In progress (MM-119, MM-120 done) |
+| G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | In progress (MM-119, MM-120 done, MM-121 in review) |
 | G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | Not started |
 | G6 | MM-93 | WhatsApp client notifications | Prep done (Meta account, token, template submitted); MM-118 created |
 | G7 | MM-94 | BigQuery analytics & audit warehouse | Not started |
@@ -48,6 +48,31 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-02 — MM-121: Pub/Sub push endpoint + impact consumer
+- **Done:**
+  - **Gap found and closed.** Nothing consumed `market.impact` — on Kafka or Pub/Sub — so a real price shock never started a margin-call run; only `/simulate` did, by calling the orchestrator directly. The FAQ claimed otherwise (corrected).
+  - **Impact consumer.** `streaming/impact_consumer.py` starts one orchestrator run per affected counterparty (the same `start_run` as `/simulate`).
+    - Exactly once: a claim row `run:<thread_id>` is inserted into `processed_events` first; a duplicate insert fails and is skipped. No migration was needed.
+    - Known business errors (missing CSA terms, pricing gaps, market data down, a guardrail block) are logged and stay claimed, so retries don't repeat LLM calls.
+    - Unexpected errors release the claim and re-raise, so the message is redelivered.
+  - **Shared dispatch.** `streaming/pubsub_dispatch.py` routes prices/events to the Event Agent and `market.impact` to the impact consumer. It is used by both:
+    - the pull worker, renamed `streaming/pubsub_worker.py` (now also reads `orchestrator.market.impact`);
+    - the new `POST /internal/pubsub/push`, which takes the push envelope (base64 data, ordering key, subscription → topic). 2xx acks; any failure returns a 5xx, so Pub/Sub redelivers and dead-letters after 5 attempts. Unknown subscription or non-base64 data → 400.
+  - **Auth for both internal endpoints.** `require_internal_caller` accepts the local job token, or a Google-signed OIDC token (`google-auth`'s `id_token.verify_oauth2_token`) whose email is `INTERNAL_CALLER_SERVICE_ACCOUNT`, verified, with audience `INTERNAL_CALLER_AUDIENCE`. If Google's keys can't be fetched → 503 (retryable). With nothing configured → 503 (disabled).
+  - **Event bus.** `PubSubEventBus` keeps a per-thread pending list, so concurrent push requests each flush only their own publishes (before this, one request's flush could ack another's unconfirmed impact set).
+  - **Terraform.** `orchestrator.market.impact` subscription: ordered, 600 s ack deadline (runs call the LLM), dead-letter policy. `mm-invoker-sa`, plus the Pub/Sub service agent's `serviceAccountTokenCreator` on it so push requests carry its OIDC token.
+- **Decisions:**
+  - The impact consumer runs on the Pub/Sub path only. The Kafka path stays without one and retires at G9.
+  - A live shock now costs LLM calls (CSA RAG, drafting), but runs still pause at the approval gate, and real moves of 7%+ in the universe are rare.
+- **Changed:** `src/streaming/{impact_consumer.py (new), pubsub_dispatch.py (new), pubsub_worker.py (renamed from pubsub_event_agent.py), inbound.py}`, `src/adapters/{pubsub_admin.py (consumer_subscriptions, topic_for_subscription), pubsub_adapter.py (per-thread pending)}`, `src/api/{main.py, auth.py, schemas.py}`, `src/config/settings.py`, `tests/unit/{test_impact_consumer.py (new), test_pubsub_push.py (new), test_pubsub_worker.py (renamed), test_pubsub_adapter.py}`, `tests/contract/test_pubsub_worker_emulator.py` (renamed), `.github/workflows/ci.yml`, `infra/gcp/{pubsub.tf, service_accounts.tf, README.md}`, `docs/AGENT_ORCHESTRATION_FAQ.md`, `.env.example`.
+- **Verified:**
+  - **G4 exit criterion (first half):** the same impact set pushed twice through `/internal/pubsub/push` runs the **real orchestrator once**. The LLM-backed CSA step is called once, each audit step is written once, and the run is paused at `await_approval` with `breached=True`.
+  - Suite 828 passed (coverage 98%); emulator tests pass.
+  - `terraform plan` → 5 to add, 0 to change.
+- **Cost impact:** none (a service account and a subscription are free).
+- **Known issues / tech debt:** awaiting the user's `mm121.tfplan` apply. Push subscriptions and the scheduler job are set in G5, once Cloud Run has a URL.
+- **Next step:** MM-122 — Cloud Tasks schedules each call's SLA check at its exact deadline (second half of the G4 exit criterion).
 
 ### 2026-10-02 — MM-120: Live prices through Pub/Sub into the database
 - **Done:**

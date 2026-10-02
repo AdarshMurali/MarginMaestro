@@ -1,5 +1,5 @@
 """MM-120 end to end on the Pub/Sub emulator: a price tick published to
-Pub/Sub is pulled by the Event Agent, lands in `latest_prices`, and a big move
+Pub/Sub is pulled by the worker's Event Agent path, lands in `latest_prices`, and a big move
 publishes exactly one impact set even when the tick arrives twice.
 
 Runs in CI's `pubsub` job (REQUIRE_PUBSUB=1); skips locally without
@@ -77,13 +77,19 @@ def test_tick_lands_in_latest_prices_and_raises_one_impact_set(emulator):
     from google.cloud.pubsub_v1 import SubscriberClient
 
     from adapters.pubsub_adapter import PubSubEventBus
-    from adapters.pubsub_admin import ensure_subscriptions, ensure_topics, event_agent_subscription
-    from streaming.pubsub_event_agent import drain_once
+    from adapters.pubsub_admin import consumer_subscriptions, ensure_subscriptions, ensure_topics
+    from streaming.pubsub_worker import drain_once
 
     settings = _settings()
-    topics = [settings.kafka_topic_prices, settings.kafka_topic_events]
-    ensure_topics(PROJECT, [*topics, settings.kafka_topic_impact, settings.kafka_topic_dead_letter])
-    ensure_subscriptions(PROJECT, topics)
+    # The Event Agent's subscriptions only -- the impact set it publishes is
+    # read back directly below rather than starting an orchestrator run.
+    names = {
+        topic: name
+        for topic, name in consumer_subscriptions(settings).items()
+        if topic != settings.kafka_topic_impact
+    }
+    ensure_topics(PROJECT, [*names, settings.kafka_topic_impact, settings.kafka_topic_dead_letter])
+    ensure_subscriptions(PROJECT, names)
     subscriber = SubscriberClient()
     impact_sub = subscriber.subscription_path(PROJECT, f"{settings.kafka_topic_impact}.test")
     subscriber.create_subscription(
@@ -93,8 +99,7 @@ def test_tick_lands_in_latest_prices_and_raises_one_impact_set(emulator):
         }
     )
     subscriptions = {
-        topic: subscriber.subscription_path(PROJECT, event_agent_subscription(topic))
-        for topic in topics
+        topic: subscriber.subscription_path(PROJECT, name) for topic, name in names.items()
     }
 
     # The scheduler's publish, then the same tick again (a duplicate delivery).

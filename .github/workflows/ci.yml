@@ -166,7 +166,7 @@ jobs:
           docker logs pubsub; exit 1
 
       - name: EventBus contract + Event Agent on Pub/Sub
-        run: pytest tests/contract/test_event_bus_contract.py tests/contract/test_pubsub_event_agent_emulator.py -m "not live" -p no:cacheprovider -v
+        run: pytest tests/contract/test_event_bus_contract.py tests/contract/test_pubsub_worker_emulator.py -m "not live" -p no:cacheprovider -v
 
   terraform-gcp:
     runs-on: ubuntu-latest

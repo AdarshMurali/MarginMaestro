@@ -98,15 +98,42 @@ def require_manager(authorization: str | None = Header(default=None)) -> str:
     return _require_role("manager", authorization)
 
 
-def require_job_caller(authorization: str | None = Header(default=None)) -> None:
-    """Scheduled internal jobs (MM-120): the bearer token must equal
-    INTERNAL_JOB_TOKEN. Unset token = the job endpoints are disabled (503),
-    so a missing config never leaves them open."""
-    expected = get_settings().internal_job_token
-    if not expected:
-        raise HTTPException(status_code=503, detail="Internal jobs are disabled")
+def _verify_google_token(token: str, audience: str) -> dict:
+    """Checks a Google-signed OIDC token (signature, expiry, audience)."""
+    from google.auth.transport import requests as google_requests
+    from google.oauth2 import id_token
+
+    return id_token.verify_oauth2_token(token, google_requests.Request(), audience=audience)
+
+
+def require_internal_caller(authorization: str | None = Header(default=None)) -> None:
+    """Internal endpoints (MM-120/121): scheduled jobs and Pub/Sub push.
+    Accepts the shared INTERNAL_JOB_TOKEN (local runs), or a Google-signed
+    OIDC token whose email is INTERNAL_CALLER_SERVICE_ACCOUNT and audience is
+    INTERNAL_CALLER_AUDIENCE (Cloud Scheduler / Pub/Sub push). With neither
+    configured the endpoints are disabled (503), so a missing config never
+    leaves them open."""
+    from google.auth.exceptions import GoogleAuthError, TransportError
+
+    settings = get_settings()
+    job_token = settings.internal_job_token
+    audience = settings.internal_caller_audience
+    caller = settings.internal_caller_service_account
+    if not job_token and not (audience and caller):
+        raise HTTPException(status_code=503, detail="Internal endpoints are disabled")
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid job token")
-    supplied = authorization.removeprefix("Bearer ")
-    if not hmac.compare_digest(supplied.encode(), expected.encode()):
-        raise HTTPException(status_code=401, detail="Invalid job token")
+        raise HTTPException(status_code=401, detail="Invalid caller token")
+    token = authorization.removeprefix("Bearer ")
+
+    if job_token and hmac.compare_digest(token.encode(), job_token.encode()):
+        return
+    if audience and caller:
+        try:
+            claims = _verify_google_token(token, audience)
+        except TransportError as exc:  # couldn't fetch Google's keys: retryable
+            raise HTTPException(status_code=503, detail="Token check unavailable") from exc
+        except (ValueError, GoogleAuthError):
+            claims = {}
+        if claims.get("email") == caller and claims.get("email_verified") is True:
+            return
+    raise HTTPException(status_code=401, detail="Invalid caller token")

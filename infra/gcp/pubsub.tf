@@ -49,7 +49,7 @@ resource "google_pubsub_topic_iam_member" "publishers" {
 }
 
 # Event Agent subscriptions (MM-120). Pull for now -- the local listener
-# (`python -m streaming.pubsub_event_agent`) drains them; G5 adds a
+# (`python -m streaming.pubsub_worker`) drains them; G5 adds a
 # push_config pointing at the Event Agent on Cloud Run (MM-121), on these same
 # subscriptions. Ordering is on (it can't be changed after creation), so one
 # ticker's ticks are handled in publish order.
@@ -108,4 +108,50 @@ resource "google_pubsub_subscription_iam_member" "dead_letter_ack" {
   subscription = each.value.name
   role         = "roles/pubsub.subscriber"
   member       = local.pubsub_agent
+}
+
+# Impact consumer (MM-121): impact sets -> margin-call runs, one per affected
+# counterparty, exactly once (claim row in processed_events). A run calls the
+# LLM and pauses at the approval gate, so the ack deadline is the 10-minute
+# maximum rather than the Event Agent's 60 s.
+resource "google_pubsub_subscription" "orchestrator_impact" {
+  name                       = "orchestrator.market.impact"
+  topic                      = google_pubsub_topic.events["market.impact"].id
+  enable_message_ordering    = true
+  ack_deadline_seconds       = 600
+  message_retention_duration = "86400s"
+
+  expiration_policy {
+    ttl = ""
+  }
+
+  retry_policy {
+    minimum_backoff = "10s"
+    maximum_backoff = "300s"
+  }
+
+  dead_letter_policy {
+    dead_letter_topic     = google_pubsub_topic.dead_letter.id
+    max_delivery_attempts = 5
+  }
+}
+
+resource "google_pubsub_subscription_iam_member" "orchestrator_impact" {
+  for_each = {
+    consumer   = "serviceAccount:${google_service_account.component["events"].email}"
+    deadletter = local.pubsub_agent
+  }
+
+  subscription = google_pubsub_subscription.orchestrator_impact.name
+  role         = "roles/pubsub.subscriber"
+  member       = each.value
+}
+
+# Push authentication (MM-121): Pub/Sub signs each push request with an OIDC
+# token for mm-invoker-sa; the API accepts only that identity
+# (INTERNAL_CALLER_SERVICE_ACCOUNT). The push_config itself is added in G5.
+resource "google_service_account_iam_member" "pubsub_signs_as_invoker" {
+  service_account_id = google_service_account.component["invoker"].name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = local.pubsub_agent
 }

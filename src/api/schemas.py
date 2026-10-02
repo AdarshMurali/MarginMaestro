@@ -2,7 +2,7 @@ from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HealthResponse(BaseModel):
@@ -241,6 +241,21 @@ class SimulateEventResponse(BaseModel):
 
 class PriceRefreshResponse(BaseModel):
     published: int
+
+
+class PubSubPushMessage(BaseModel):
+    """Pub/Sub push body's `message` (MM-121); `data` is base64."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    data: str = ""
+    message_id: str = Field(default="", alias="messageId")
+    ordering_key: str = Field(default="", alias="orderingKey")
+
+
+class PubSubPushEnvelope(BaseModel):
+    message: PubSubPushMessage
+    subscription: str
 
 
 class MarketUniverseResponse(BaseModel):
