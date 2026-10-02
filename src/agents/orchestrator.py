@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from adapters.factory import get_sla_scheduler
 from agents.communication import (
     NotificationResult,
     draft_margin_call_notice,
@@ -59,6 +60,7 @@ from persistence.db.models import (
 )
 from persistence.models import AssetClass, CounterpartyTier, Position, RatingGrade
 from ports.guardrail import GuardrailError
+from ports.sla_scheduler import SlaScheduler
 from rag.models import Citation
 from streaming.event_agent import latest_close_before
 from streaming.market_feed import MarketFeed, get_market_feed
@@ -370,18 +372,27 @@ def send_sla_met_notification(state: MarginCallState, settings: Settings) -> dic
     return {"sla_met_notification_result": result}
 
 
+def sla_deadline(state: MarginCallState, settings: Settings) -> datetime:
+    """When the counterparty must have responded: notice sent + SLA minutes."""
+    if state.notification_sent_at is None:
+        raise PricingError("the SLA deadline needs notification_sent_at to already be set")
+    return state.notification_sent_at + timedelta(minutes=settings.margin_call_sla_minutes)
+
+
 def await_sla_response(state: MarginCallState, settings: Settings) -> dict:
     """SLA timer (MM-42, docs/AGENTS.md "SLA & Escalation"): pauses
     (interrupt()) after notification, resolving "met" if a response signal
     arrives before the deadline, or "breached" once the deadline has passed.
     No real counterparty-facing channel exists in this demo, so "responded"
     is a provisional signal -- see the /respond endpoint's note in
-    docs/ROADMAP.md. Resuming with neither signal (a periodic external check,
-    not yet a real scheduler) just re-pauses if the deadline hasn't passed."""
+    docs/ROADMAP.md. Resuming with neither signal (the SLA timer or a manual
+    check, e.g. one firing a moment early) just re-pauses if the deadline
+    hasn't passed. The timer itself is scheduled by the send_notification node
+    (MM-122, SLA_SCHEDULER)."""
     if state.notification_sent_at is None:
         raise PricingError("await_sla_response requires notification_sent_at to already be set")
 
-    deadline = state.notification_sent_at + timedelta(minutes=settings.margin_call_sla_minutes)
+    deadline = sla_deadline(state, settings)
     log = logger.bind(correlation_id=state.correlation_id, counterparty_id=state.counterparty_id)
     while True:
         payload = {
@@ -412,7 +423,7 @@ def escalate(state: MarginCallState, settings: Settings) -> dict:
             "be set on state"
         )
 
-    deadline = state.notification_sent_at + timedelta(minutes=settings.margin_call_sla_minutes)
+    deadline = sla_deadline(state, settings)
     procedure_excerpt = retrieve_escalation_procedure(settings=settings)
     result = open_servicenow_incident(
         state.correlation_id,
@@ -525,6 +536,7 @@ def build_orchestrator_graph(
     market_feed: MarketFeed | None = None,
     settings: Settings | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
+    sla_scheduler: SlaScheduler | None = None,
 ) -> CompiledStateGraph:
     """Each DB-touching node opens its own short-lived session (matching
     persistence.batch_loader's convention) rather than holding one open across
@@ -554,6 +566,7 @@ def build_orchestrator_graph(
     settings = settings or get_settings()
     session_factory = session_factory or get_session_factory(settings)
     market_feed = market_feed or get_market_feed(settings)
+    sla_scheduler = sla_scheduler or get_sla_scheduler(settings)
     _db_write_lock = threading.Lock()
     checkpointer = checkpointer or SqlCheckpointSaver(session_factory, lock=_db_write_lock)
 
@@ -707,7 +720,28 @@ def build_orchestrator_graph(
             "send_notification_completed",
             slack_channel=result["notification_result"].slack_channel,
         )
+        _schedule_sla_check({**state.model_dump(), **result}, log)
         return result
+
+    def _schedule_sla_check(values: dict, log: structlog.typing.FilteringBoundLogger) -> None:
+        """MM-122: arm the SLA timer for the deadline. The notice is already
+        out, so a scheduling failure must not fail this node -- a retry would
+        send the client a second notice. It is logged and audited instead, and
+        the manual check (/check-sla) still works."""
+        state = MarginCallState.model_validate(values)
+        thread_id = thread_id_for(state.impact, state.counterparty_id)
+        deadline = sla_deadline(state, settings)
+        try:
+            sla_scheduler.schedule_check(thread_id, deadline)
+        except Exception as exc:  # see docstring: never fail after sending
+            log.exception("sla_check_schedule_failed", thread_id=thread_id)
+            with session_factory() as session:
+                _audit(
+                    session,
+                    state,
+                    "sla_check_schedule_failed",
+                    {"deadline": deadline.isoformat(), "error": str(exc)},
+                )
 
     def _await_sla_response_node(state: MarginCallState) -> dict:
         result = await_sla_response(state, settings)

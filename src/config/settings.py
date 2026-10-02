@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 768
     event_bus: str = "kafka"  # kafka | pubsub (MM-119; same topic names)
     client_notifier: str = "slack"
+    # MM-122: SLA timers. none = no timer (the check is called by hand);
+    # cloudtasks = one Cloud Tasks task per call, at its deadline, calling
+    # {internal_base_url}/internal/sla/{thread_id}/check as the invoker SA.
+    sla_scheduler: str = "none"
+    cloud_tasks_location: str = "us-central1"
+    cloud_tasks_queue: str = "sla-checks"
+    internal_base_url: str | None = None
 
     chroma_host: str = "localhost"
     chroma_port: int = 8100

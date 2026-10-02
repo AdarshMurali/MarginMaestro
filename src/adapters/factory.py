@@ -16,6 +16,7 @@ from ports.guardrail import Guardrail
 from ports.llm import LLMClient
 from ports.notifier import Notifier
 from ports.redactor import Redactor
+from ports.sla_scheduler import SlaScheduler
 from ports.vector_store import VectorStore
 
 RAG_COLLECTION = "csa_documents"
@@ -169,3 +170,32 @@ def get_notifier(settings: Settings) -> Notifier:
     from adapters.slack_adapter import SlackNotifier
 
     return SlackNotifier(settings)
+
+
+def get_sla_scheduler(settings: Settings) -> SlaScheduler:
+    """SLA_SCHEDULER=none|cloudtasks (MM-122). Cloud Tasks needs the project,
+    the API's base URL and the invoker identity; missing any fails loud."""
+    from adapters.cloud_tasks_sla import CloudTasksSlaScheduler, NoSlaScheduler
+
+    choice = _choice("SLA_SCHEDULER", settings.sla_scheduler, ("none", "cloudtasks"))
+    if choice == "none":
+        return NoSlaScheduler()
+    required = {
+        "GCP_PROJECT_ID": settings.gcp_project_id,
+        "INTERNAL_BASE_URL": settings.internal_base_url,
+        "INTERNAL_CALLER_SERVICE_ACCOUNT": settings.internal_caller_service_account,
+        "INTERNAL_CALLER_AUDIENCE": settings.internal_caller_audience,
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise ValueError(f"SLA_SCHEDULER=cloudtasks requires {', '.join(missing)}")
+    queue = (
+        f"projects/{settings.gcp_project_id}/locations/{settings.cloud_tasks_location}"
+        f"/queues/{settings.cloud_tasks_queue}"
+    )
+    return CloudTasksSlaScheduler(
+        queue_path=queue,
+        base_url=str(settings.internal_base_url),
+        invoker_service_account=str(settings.internal_caller_service_account),
+        audience=str(settings.internal_caller_audience),
+    )
