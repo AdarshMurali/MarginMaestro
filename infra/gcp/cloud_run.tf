@@ -141,6 +141,23 @@ resource "google_cloud_run_v2_service_iam_member" "api_public" {
   member   = "allUsers"
 }
 
+# CD (MM-126): GitHub Actions, as mm-ci-sa, may deploy new revisions of this
+# one service -- run.developer scoped to the service, not the project -- and
+# run them as mm-api-sa (actAs on that one account). It can't create other
+# services, change IAM, or act as any other identity.
+resource "google_cloud_run_v2_service_iam_member" "ci_deployer" {
+  name     = google_cloud_run_v2_service.api.name
+  location = google_cloud_run_v2_service.api.location
+  role     = "roles/run.developer"
+  member   = "serviceAccount:${google_service_account.component["ci"].email}"
+}
+
+resource "google_service_account_iam_member" "ci_acts_as_api" {
+  service_account_id = google_service_account.component["api"].name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.component["ci"].email}"
+}
+
 output "api_url" {
   description = "Stable HTTPS URL of the API on Cloud Run (BACKEND_API_URL for Vercel)"
   value       = local.api_base_url

@@ -236,23 +236,49 @@ jobs:
             adarshmurali/marginmaestro:latest
             adarshmurali/marginmaestro:${{ github.sha }}
 
-  # Proves keyless GitHub -> GCP login (Workload Identity Federation, MM-100).
-  # GCP only trusts this repo on main (infra/gcp/wif.tf); minting an access
-  # token for mm-ci-sa fails unless the provider, condition and IAM binding
-  # are all correct. The G5 Cloud Run deploy job (MM-G57) reuses this login.
-  gcp-auth:
+  # Continuous deployment to Cloud Run (MM-126, MM-G57): every merge to main
+  # deploys the image this run just pushed (tagged with the commit sha), then
+  # smoke-tests it. Keyless login as mm-ci-sa via Workload Identity Federation
+  # (MM-100); GCP only trusts this repo on main (infra/gcp/wif.tf). mm-ci-sa
+  # can deploy this one service and act as mm-api-sa -- nothing else
+  # (infra/gcp/cloud_run.tf). Only the image changes; env vars, scaling and
+  # the Cloud SQL mount stay as Terraform set them.
+  deploy-gcp:
     needs: build-and-push
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-gcp
+      cancel-in-progress: false # never cut a rollout short; queue the next one
     permissions:
       contents: read
       id-token: write # lets the job request GitHub's OIDC token
     steps:
-      - uses: actions/checkout@v7.0.1
-
       - name: Authenticate to GCP (Workload Identity Federation)
         uses: google-github-actions/auth@v3.0.0
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
-          token_format: access_token
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v3.0.1
+        with:
+          service: marginmaestro-api
+          region: us-central1
+          project_id: marginmaestro-demo
+          image: docker.io/adarshmurali/marginmaestro:${{ github.sha }}
+
+      - name: Smoke test
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          for path in health ready; do
+            for attempt in 1 2 3 4 5 6; do
+              code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 "$URL/$path") || code=000
+              echo "/$path attempt $attempt -> $code"
+              [ "$code" = "200" ] && break
+              [ "$attempt" = "6" ] && exit 1
+              sleep 10
+            done
+          done
