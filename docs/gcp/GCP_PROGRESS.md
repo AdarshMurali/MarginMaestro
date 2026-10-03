@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123, MM-124 done (API, event flow and SLA timers live on GCP); MM-126 (CD) in review. MM-125 (margin-call policy, G5b) follows G5; then G6 WhatsApp. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
+- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123, MM-124, MM-126 done (API, event flow, SLA timers and CD live on GCP); MM-127 (observability) in review. MM-125 (margin-call policy, G5b) follows G5; then G6 WhatsApp. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -32,7 +32,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | **Done** |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | **Done** (live run on GCP comes with G5) |
-| G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | In progress (MM-123, MM-124 done; MM-126 in review) |
+| G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | In progress (MM-123, 124, 126 done; MM-127 in review) |
 | G6 | MM-93 | WhatsApp client notifications | Prep done (Meta account, token, template approved, delivery verified at $0); MM-118 (G61) next |
 | G7 | MM-94 | BigQuery analytics & audit warehouse | Not started |
 | G8 | MM-95 | Data governance (Dataplex, classification, lineage, audit, retention) | Not started |
@@ -57,6 +57,18 @@ At the end of each story, prepend an entry to **Log** using this template:
 - **Known issues / tech debt:** Acknowledge taps currently go nowhere until MM-G62 (inbound webhook) exists. The token is still in AWS Secrets Manager.
 - **Next step:** MM-118 (G61), once MM-117 closes.
 
+### 2026-10-03 — MM-127: Observability on GCP (MM-G54)
+- **Done:**
+  - **Tracing.** `TRACE_EXPORTER=otlp|cloudtrace|none`. `cloudtrace` uses `opentelemetry-exporter-gcp-trace` (new, in the `observability` extra) as `mm-api-sa`, which already holds `cloudtrace.agent`. An empty OTLP endpoint still means no export.
+  - **One trace per run.** Every orchestrator invocation (start, and each resume) is wrapped in a root span `margin_call_run` with `margincall.thread_id` / `correlation_id` / `counterparty_id` / `phase`. Before this, each step was its own trace. A test confirms LangGraph carries the context into its worker threads, so all step spans nest under the run.
+  - **Span flushing.** `flush_spans()` runs at the end of every request (middleware, in the threadpool), because Cloud Run only gives the container CPU while a request is in flight.
+  - **Logs.** A structlog processor adds `severity` (Cloud Logging now shows ERROR as ERROR) and, inside a span, `logging.googleapis.com/trace` / `spanId` / `trace_sampled`, so each log line links to its trace.
+  - **Alerting** (`monitoring.tf`): log-based metric `mm-incidents` (labelled by `event`) counts SLA breaches, guardrail blocks and outages, dead letters and 5xx. One alert policy (one condition: any incident in a 5-minute window) emails `budget_alert_emails`, auto-closing after 30 minutes.
+- **Decisions:** one metric and one condition instead of one per incident type, because Cloud Monitoring bills alerting per condition and the `event` label still says which kind fired. SLA breaches alert too: in this demo they are the escalation path, and an operator should see them.
+- **Order:** merge first (CD deploys the image with the exporter), then apply `mm127.tfplan`: 3 to add (metric, alert, email channel), and Cloud Run updated with `TRACE_EXPORTER=cloudtrace`.
+- **Tests:** `tests/unit/test_observability_gcp.py` (14) covers exporter selection, one-trace-per-run through the real graph, flushing, and the logging fields. Suite 880 passed, coverage 98%.
+- **Cost impact:** Trace, Logging and the log-based metric are within free tiers; alerting is one condition (at most cents a month).
+
 ### 2026-10-03 — MM-126: Automated CD to Cloud Run (MM-G57)
 - **Done:**
   - **New job.** `deploy-gcp` replaces the `gcp-auth` proof job. It runs on push to `main` after `build-and-push`, in a `deploy-gcp` concurrency group (one rollout at a time, never cancelled midway).
@@ -66,6 +78,7 @@ At the end of each story, prepend an entry to **Log** using this template:
   - **Terraform** (`cloud_run.tf`): `roles/run.developer` for `mm-ci-sa` on the `marginmaestro-api` service only, and `roles/iam.serviceAccountUser` on `mm-api-sa` only.
 - **Decisions:** least privilege over the roadmap's "run.developer + serviceAccountUser on the runtime accounts". It is service-scoped and covers only the one account the service runs as, not project-wide or every runtime account.
 - **Order matters:** apply `mm126.tfplan` **before** merging. The first `deploy-gcp` run on `main` needs the grants.
+- **Verified (2026-10-03):** the user applied the grants; PR #93 merged. The first `deploy-gcp` run on `main` passed every job: it deployed revision `marginmaestro-api-00005` (image `083cb5b`), and the smoke test got `/health` 200 and `/ready` 200 on the first attempt.
 - **Cost impact:** none.
 
 ### 2026-10-02 — MM-124: Event flow switched on + live end-to-end run

@@ -90,6 +90,9 @@ class Settings(BaseSettings):
     # is appended by tracing.configure_tracing(), not stored here, so this
     # value doubles as the base for any future OTLP signal (metrics/logs).
     otel_exporter_otlp_endpoint: str = "http://localhost:4318"
+    # MM-127: where spans go. otlp = Jaeger locally (endpoint above);
+    # cloudtrace = Google Cloud Trace (needs GCP_PROJECT_ID); none = no export.
+    trace_exporter: str = "otlp"
     otel_service_name: str = "marginmaestro-api"
 
     # MM-104: mssql (Azure SQL / local SQL Edge, the AWS default) or postgres

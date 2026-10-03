@@ -1,9 +1,12 @@
 import uuid
 
 import structlog
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.types import ASGIApp
+
+from observability.tracing import flush_spans
 
 CORRELATION_ID_HEADER = "X-Request-ID"
 
@@ -28,4 +31,6 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
             path=request.url.path,
             status_code=response.status_code,
         )
+        # MM-127: export this request's spans before Cloud Run idles the CPU.
+        await run_in_threadpool(flush_spans)
         return response
