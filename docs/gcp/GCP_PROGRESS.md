@@ -33,7 +33,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | **Done** (live run on GCP comes with G5) |
 | G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | In progress (MM-123 done, MM-124 in progress) |
-| G6 | MM-93 | WhatsApp client notifications | Prep done (Meta account, token, template submitted); MM-118 created |
+| G6 | MM-93 | WhatsApp client notifications | Prep done (Meta account, token, template approved, delivery verified at $0); MM-118 (G61) next |
 | G7 | MM-94 | BigQuery analytics & audit warehouse | Not started |
 | G8 | MM-95 | Data governance (Dataplex, classification, lineage, audit, retention) | Not started |
 | G9 | MM-96 | Cut-over & AWS/Azure decommission | Not started |
@@ -48,6 +48,14 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-02 — MM-93 (G6 prep): `margin_call_notice` approved, template delivery verified
+- **Done:** Meta approved `margin_call_notice` (id `1601248854775468`, `UTILITY`) after about 25h in review. A template send with synthetic values (`MC-DEMO-001`, `Acme Capital (TEST)`, `USD 2,500,000.00`, `03 Oct 2026 17:00 UTC`) went `sent` → `delivered` to the verified test phone. It was business-initiated, with no prior "hi" needed. The Acknowledge quick-reply button renders.
+- **Decisions:** none new. This confirms ADR-0016's template-first design (amendment updated).
+- **Changed:** `docs/gcp/adr/0016-*.md`, `docs/gcp/GCP_ROADMAP.md` (G6 prep note), this log.
+- **Cost impact:** none. Webhook status events say `pricing: utility, billable: true`, but Insights → Message pricing shows **$0.00** total for test-number sends. Keep it that way: no real number and no payment method on the account.
+- **Known issues / tech debt:** Acknowledge taps currently go nowhere until MM-G62 (inbound webhook) exists. The token is still in AWS Secrets Manager.
+- **Next step:** MM-118 (G61), once MM-117 closes.
 
 ### 2026-10-02 — MM-124: Event flow switched on + live end-to-end run
 - **Done (Terraform):**
@@ -70,7 +78,10 @@ At the end of each story, prepend an entry to **Log** using this template:
 - **Follow-ups noted:**
   - The notice text says "next business day", while the enforced SLA is 60 minutes (`MARGIN_CALL_SLA_MINUTES`). The drafting step should quote the computed deadline.
   - `FRED_API_KEY` is not in the GCP secret yet (it wasn't in the AWS one either), so reference rates stay at bootstrap values until it's added.
-- **Next:** merge; deploy the new image to Cloud Run (CD is story 3, so this one is manual); apply `mm124b.tfplan` (the EOD job, the instance cap, and the resume of `price-refresh` — applied after today's close so HPE doesn't raise a new-id event today); watch the SLA task fire and escalate to ServiceNow.
+- **SLA leg verified live:** the Cloud Task fired at 18:35:58 UTC (200) → `sla_breached` → escalation opened **ServiceNow INC0010006** at 18:37:15. CP-1's call is `escalated`; the queue is empty. The whole chain ran on GCP: real shock → call → two-person approval → Slack → SLA timer → ServiceNow.
+- **Analysis (user question): why did one stock raise several calls?** HPE is 0.1–2.3% of each holder's book; its move changed exposure by only $150–$3.6k. The calls reflect standing breaches the event merely re-checked. This led to **MM-125 (Phase G5b, margin-call policy)**: a daily margin run, an intraday materiality gate, one open call per counterparty, and the enforced deadline quoted in the notice. It runs after G5, before G6 (user decision 2026-10-03).
+- The fix image `8e799b4` was deployed by the user (`gcloud run services update`).
+- **Next (from the 2026-10-02 plan):** merge; deploy the new image to Cloud Run (CD is story 3, so this one is manual); apply `mm124b.tfplan` (the EOD job, the instance cap, and the resume of `price-refresh` — applied after today's close so HPE doesn't raise a new-id event today); watch the SLA task fire and escalate to ServiceNow.
 
 ### 2026-10-02 — MM-123: API on Cloud Run
 - **G5 re-plan (user decisions, 2026-10-02):**

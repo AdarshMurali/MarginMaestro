@@ -136,6 +136,19 @@ ADRs: 0008, 0010
 
 **Exit:** the full lifecycle runs end to end on GCP from the public Cloud Run URL, with one trace per run in Cloud Trace.
 
+### Phase G5b — Margin-call policy (MM-125, under epic MM-92)
+Added 2026-10-02 after the first live run on GCP. Runs after G5, before G6 (user decision).
+
+**Why:** HPE's +7.4% move raised calls for CP-1, CP-3 and CP-7. But HPE is only 0.1–0.6% of those books, and moved their exposure by $1–4k. The calls ($250k, $162k, $3.75M) came from breaches that already existed; the HPE event only triggered a re-check of the whole portfolio. Real desks separate the two: a daily margin run catches standing exposure, and intraday calls are raised only when the event itself moves exposure materially.
+
+- **Daily margin run:** 16:30 New York, right after the EOD price load (MM-124). Every counterparty is evaluated, and standing breaches raise calls here.
+- **Intraday materiality gate:** an event raises a call only if *its own* impact on the counterparty's exposure exceeds the CSA minimum transfer amount. The call's rationale states that impact ("the HPE move increased your exposure by $X").
+- **One open call per counterparty:** a new trigger while a call is open re-evaluates and updates that call instead of issuing a second one.
+- **The notice quotes the enforced SLA deadline.** Today it says "next business day" while the timer is 60 minutes. G6's WhatsApp template fills the same deadline from code.
+- All amounts and the materiality test stay in deterministic Python (ADR-0005), with exhaustive unit tests.
+
+**Exit:** replaying 2026-10-02 raises no intraday HPE calls. The daily run raises the CP-1/3/7 calls once, each with its own exposure rationale. A second shock on a counterparty with an open call updates that call.
+
 ### Phase G6 — WhatsApp client notifications (Epic: MM-93)
 ADR: 0016
 
@@ -143,7 +156,7 @@ ADR: 0016
 - **MM-G62** Inbound webhook with `X-Hub-Signature-256` verification (handles both replies and delivery `statuses` events) → Pub/Sub → Model Armor → existing respond/dispute path.
 - **MM-G63** Slack kept for internal approvals, escalations and SLA alerts; tests on both adapters.
 
-**Prep done (2026-10-01):** Meta app, test number, token in Secret Manager and `margin_call_notice` template submitted; free-form delivery verified to the test phone. See the ADR-0016 amendment.
+**Prep done (2026-10-02):** Meta app, test number, token in Secret Manager; `margin_call_notice` template **approved**; both template and free-form sends delivered to the test phone at $0.00. See the ADR-0016 amendment.
 
 **Exit:** an approved call reaches a verified test phone on WhatsApp; the client's reply resolves the SLA.
 
