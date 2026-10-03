@@ -16,7 +16,8 @@
 resource "google_logging_metric" "incidents" {
   name        = "mm-incidents"
   description = "MarginMaestro API operational incidents, labelled by log event"
-  filter      = <<-EOT
+  # replace(): Windows checkouts add \r to heredocs, which would show as a diff.
+  filter = replace(<<-EOT
     resource.type="cloud_run_revision"
     resource.labels.service_name="${google_cloud_run_v2_service.api.name}"
     (
@@ -27,6 +28,7 @@ resource "google_logging_metric" "incidents" {
       OR httpRequest.status>=500
     )
   EOT
+  , "\r", "")
 
   metric_descriptor {
     metric_kind  = "DELTA"
@@ -88,7 +90,7 @@ resource "google_monitoring_alert_policy" "incidents" {
 
   documentation {
     mime_type = "text/markdown"
-    content   = <<-EOT
+    content = replace(<<-EOT
       An operational incident was logged by the MarginMaestro API. The `event`
       label says which: `sla_breached` (a margin call was escalated to
       ServiceNow), `guardrail_verdict` (an LLM call was blocked),
@@ -97,7 +99,16 @@ resource "google_monitoring_alert_policy" "incidents" {
       (a 5xx response). Logs: Cloud Logging, service marginmaestro-api; each
       line links to its trace in Cloud Trace.
     EOT
+    , "\r", "")
   }
 
   notification_channels = [for channel in google_monitoring_notification_channel.email : channel.id]
+}
+
+# Cloud Trace stores spans in an Observability bucket (`_Trace`) on newer
+# projects; without this API the bucket doesn't exist and the trace read API
+# returns "_Trace bucket not found" (found verifying MM-127). Free to enable.
+resource "google_project_service" "observability" {
+  service            = "observability.googleapis.com"
+  disable_on_destroy = false
 }

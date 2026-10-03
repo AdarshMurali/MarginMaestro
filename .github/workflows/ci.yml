@@ -268,6 +268,9 @@ jobs:
           region: us-central1
           project_id: marginmaestro-demo
           image: docker.io/adarshmurali/marginmaestro:${{ github.sha }}
+          # Keep Terraform's labels; without this the action adds its own
+          # (managed-by, commit-sha) and every plan shows a label diff.
+          skip_default_labels: true
 
       - name: Smoke test
         env:
