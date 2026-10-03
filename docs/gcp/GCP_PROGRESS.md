@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123 done (API live on Cloud Run, Vercel switched); MM-124 (event flow on GCP) in progress. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
+- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123, MM-124 done (API, event flow and SLA timers live on GCP); MM-126 (CD) in review. MM-125 (margin-call policy, G5b) follows G5; then G6 WhatsApp. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -32,7 +32,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | **Done** |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | **Done** (live run on GCP comes with G5) |
-| G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | In progress (MM-123 done, MM-124 in progress) |
+| G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | In progress (MM-123, MM-124 done; MM-126 in review) |
 | G6 | MM-93 | WhatsApp client notifications | Prep done (Meta account, token, template approved, delivery verified at $0); MM-118 (G61) next |
 | G7 | MM-94 | BigQuery analytics & audit warehouse | Not started |
 | G8 | MM-95 | Data governance (Dataplex, classification, lineage, audit, retention) | Not started |
@@ -56,6 +56,17 @@ At the end of each story, prepend an entry to **Log** using this template:
 - **Cost impact:** none. Webhook status events say `pricing: utility, billable: true`, but Insights → Message pricing shows **$0.00** total for test-number sends. Keep it that way: no real number and no payment method on the account.
 - **Known issues / tech debt:** Acknowledge taps currently go nowhere until MM-G62 (inbound webhook) exists. The token is still in AWS Secrets Manager.
 - **Next step:** MM-118 (G61), once MM-117 closes.
+
+### 2026-10-03 — MM-126: Automated CD to Cloud Run (MM-G57)
+- **Done:**
+  - **New job.** `deploy-gcp` replaces the `gcp-auth` proof job. It runs on push to `main` after `build-and-push`, in a `deploy-gcp` concurrency group (one rollout at a time, never cancelled midway).
+    - Login: keyless WIF as `mm-ci-sa` (`google-github-actions/auth@v3.0.0`).
+    - Deploy: `google-github-actions/deploy-cloudrun@v3.0.1` with `docker.io/adarshmurali/marginmaestro:<sha>`. It changes only the image; Terraform keeps owning env vars, scaling and the Cloud SQL mount (`ignore_changes` on the image).
+    - Smoke test: `/health` and `/ready`, with up to 6 retries each.
+  - **Terraform** (`cloud_run.tf`): `roles/run.developer` for `mm-ci-sa` on the `marginmaestro-api` service only, and `roles/iam.serviceAccountUser` on `mm-api-sa` only.
+- **Decisions:** least privilege over the roadmap's "run.developer + serviceAccountUser on the runtime accounts". It is service-scoped and covers only the one account the service runs as, not project-wide or every runtime account.
+- **Order matters:** apply `mm126.tfplan` **before** merging. The first `deploy-gcp` run on `main` needs the grants.
+- **Cost impact:** none.
 
 ### 2026-10-02 — MM-124: Event flow switched on + live end-to-end run
 - **Done (Terraform):**
@@ -81,7 +92,10 @@ At the end of each story, prepend an entry to **Log** using this template:
 - **SLA leg verified live:** the Cloud Task fired at 18:35:58 UTC (200) → `sla_breached` → escalation opened **ServiceNow INC0010006** at 18:37:15. CP-1's call is `escalated`; the queue is empty. The whole chain ran on GCP: real shock → call → two-person approval → Slack → SLA timer → ServiceNow.
 - **Analysis (user question): why did one stock raise several calls?** HPE is 0.1–2.3% of each holder's book; its move changed exposure by only $150–$3.6k. The calls reflect standing breaches the event merely re-checked. This led to **MM-125 (Phase G5b, margin-call policy)**: a daily margin run, an intraday materiality gate, one open call per counterparty, and the enforced deadline quoted in the notice. It runs after G5, before G6 (user decision 2026-10-03).
 - The fix image `8e799b4` was deployed by the user (`gcloud run services update`).
-- **Next (from the 2026-10-02 plan):** merge; deploy the new image to Cloud Run (CD is story 3, so this one is manual); apply `mm124b.tfplan` (the EOD job, the instance cap, and the resume of `price-refresh` — applied after today's close so HPE doesn't raise a new-id event today); watch the SLA task fire and escalate to ServiceNow.
+- **Closed 2026-10-03:** the user applied `mm124b.tfplan` (`eod-prices` created, `price-refresh` resumed, instance cap 2 → 4).
+  - A manual `eod-prices` run returned 200 in 9.3 s. HPE's history now ends with the official 2 Oct close ($69.33), so Monday's shock check compares against Friday.
+  - Reference rates were skipped as designed (`FRED_API_KEY` is not in the GCP secret yet).
+- **Earlier plan, for the record:** merge; deploy the new image to Cloud Run (CD is story 3, so this one is manual); apply `mm124b.tfplan` (the EOD job, the instance cap, and the resume of `price-refresh` — applied after today's close so HPE doesn't raise a new-id event today); watch the SLA task fire and escalate to ServiceNow.
 
 ### 2026-10-02 — MM-123: API on Cloud Run
 - **G5 re-plan (user decisions, 2026-10-02):**

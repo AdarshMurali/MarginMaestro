@@ -54,4 +54,4 @@ terraform -chdir=infra/gcp output -raw github_wif_provider        # -> GCP_WIF_P
 terraform -chdir=infra/gcp output -raw github_ci_service_account  # -> GCP_CI_SERVICE_ACCOUNT
 ```
 
-The `gcp-auth` CI job (push to `main` only) then mints a short-lived token for `mm-ci-sa`; it goes green only if the provider, condition and IAM binding are all correct. To revoke GitHub's access, delete the provider or the IAM binding — there is no key to rotate.
+The `deploy-gcp` CI job (push to `main` only; it replaced the `gcp-auth` proof job in MM-126) logs in this way, deploys the commit's image to Cloud Run and smoke-tests it. `mm-ci-sa` holds `roles/run.developer` on the `marginmaestro-api` service only, plus `roles/iam.serviceAccountUser` on `mm-api-sa` only (`cloud_run.tf`). To revoke GitHub's access, delete the provider or the IAM binding — there is no key to rotate.
