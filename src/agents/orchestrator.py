@@ -474,6 +474,24 @@ def thread_id_for(impact: ImpactSet, counterparty_id: str) -> str:
     return f"{impact.event_id}:{counterparty_id}"
 
 
+@contextmanager
+def _run_span(
+    phase: str, thread_id: str, correlation_id: str, counterparty_id: str
+) -> Iterator[None]:
+    """Root span for one orchestrator invocation. A paused run resumes hours
+    later as a new trace; `margincall.thread_id` ties them together."""
+    with tracer.start_as_current_span(
+        "margin_call_run",
+        attributes={
+            "margincall.phase": phase,
+            "margincall.thread_id": thread_id,
+            "margincall.correlation_id": correlation_id,
+            "margincall.counterparty_id": counterparty_id,
+        },
+    ):
+        yield
+
+
 def start_run(graph: CompiledStateGraph, state: MarginCallState) -> dict:
     thread_id = thread_id_for(state.impact, state.counterparty_id)
     # MM-117: bound the steps one invocation may take (loop / cost guard).
@@ -487,7 +505,10 @@ def start_run(graph: CompiledStateGraph, state: MarginCallState) -> dict:
         counterparty_id=state.counterparty_id,
     )
     log.info("orchestrator_run_started", event_id=state.impact.event_id)
-    result = graph.invoke(state, config=config)
+    # MM-127: one root span per invocation, so a run's steps share one trace
+    # (Cloud Trace / Jaeger) instead of each step being its own trace.
+    with _run_span("start", thread_id, state.correlation_id, state.counterparty_id):
+        result = graph.invoke(state, config=config)
     log.info(
         (
             "orchestrator_run_paused_for_approval"
@@ -506,7 +527,9 @@ def resume_run(graph: CompiledStateGraph, thread_id: str, resume_payload: dict) 
     }
     log = logger.bind(thread_id=thread_id)
     log.info("orchestrator_run_resume_requested", decision=resume_payload.get("decision"))
-    result = graph.invoke(Command(resume=resume_payload), config=config)
+    correlation_id, counterparty_id = thread_id.rsplit(":", 1)
+    with _run_span("resume", thread_id, correlation_id, counterparty_id):
+        result = graph.invoke(Command(resume=resume_payload), config=config)
     log.info("orchestrator_run_ended", approval_decision=result.get("approval_decision"))
     return result
 

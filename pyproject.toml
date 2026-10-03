@@ -44,6 +44,7 @@ observability = [
     "opentelemetry-api",
     "opentelemetry-sdk",
     "opentelemetry-exporter-otlp-proto-http",
+    "opentelemetry-exporter-gcp-trace",
     "prometheus-client",
 ]
 
@@ -94,7 +95,7 @@ module = "confluent_kafka.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["functions_framework.*", "cloudevents.*", "google.cloud.*", "google.genai.*", "google.api_core.*", "google.auth.*", "google.oauth2.*", "pgvector.*"]
+module = ["functions_framework.*", "cloudevents.*", "google.cloud.*", "google.genai.*", "google.api_core.*", "google.auth.*", "google.oauth2.*", "opentelemetry.exporter.cloud_trace.*", "pgvector.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

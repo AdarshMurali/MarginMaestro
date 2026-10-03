@@ -54,8 +54,8 @@ locals {
 
     CORS_ALLOWED_ORIGINS = var.frontend_origin
 
-    # No OTLP collector on Cloud Run until Cloud Trace is wired (G5 story 4).
-    OTEL_EXPORTER_OTLP_ENDPOINT = ""
+    # Traces go to Cloud Trace (MM-127); mm-api-sa has roles/cloudtrace.agent.
+    TRACE_EXPORTER = "cloudtrace"
   }
 }
 

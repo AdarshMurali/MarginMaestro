@@ -12,7 +12,7 @@ from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 
 from config.settings import Settings
 
@@ -38,16 +38,45 @@ def configure_tracing(settings: Settings) -> None:
     per process and silently ignores later ones, so calling this more than
     once (e.g. multiple test files importing api.main) is harmless."""
     provider = TracerProvider(resource=Resource.create({SERVICE_NAME: settings.otel_service_name}))
-    if not settings.otel_exporter_otlp_endpoint:
-        # MM-123: no collector (e.g. Cloud Run before Cloud Trace is wired):
-        # spans are still created for logs/metrics context, just not exported.
-        trace.set_tracer_provider(provider)
-        return
-    exporter = OTLPSpanExporter(
+    exporter = _exporter(settings)
+    if exporter is not None:
+        provider.add_span_processor(
+            BatchSpanProcessor(exporter, export_timeout_millis=_EXPORT_TIMEOUT_MILLIS)
+        )
+    # Without an exporter, spans are still created (log/trace correlation),
+    # just not exported.
+    trace.set_tracer_provider(provider)
+
+
+TRACE_EXPORTERS = ("otlp", "cloudtrace", "none")
+
+
+def _exporter(settings: Settings) -> SpanExporter | None:
+    """TRACE_EXPORTER=otlp|cloudtrace|none (MM-127). otlp with an empty
+    endpoint also means none (MM-123's switch)."""
+    choice = settings.trace_exporter.strip().lower()
+    if choice not in TRACE_EXPORTERS:
+        raise ValueError(f"TRACE_EXPORTER must be one of {TRACE_EXPORTERS}, got {choice!r}")
+    if choice == "cloudtrace":
+        if not settings.gcp_project_id:
+            raise ValueError("TRACE_EXPORTER=cloudtrace requires GCP_PROJECT_ID")
+        from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
+
+        return CloudTraceSpanExporter(project_id=settings.gcp_project_id)
+    if choice == "none" or not settings.otel_exporter_otlp_endpoint:
+        return None
+    return OTLPSpanExporter(
         endpoint=settings.otel_exporter_otlp_endpoint.rstrip("/") + _TRACES_PATH,
         timeout=_EXPORT_REQUEST_TIMEOUT_SECONDS,
     )
-    provider.add_span_processor(
-        BatchSpanProcessor(exporter, export_timeout_millis=_EXPORT_TIMEOUT_MILLIS)
-    )
-    trace.set_tracer_provider(provider)
+
+
+def flush_spans(timeout_millis: int = 2_000) -> None:
+    """Export spans now (MM-127). On Cloud Run the CPU is only allocated
+    while a request is being handled, so spans left in the batch queue at
+    the end of a request could wait until the next one; the API calls this
+    at the end of every request. Cheap when the queue is empty."""
+    provider = trace.get_tracer_provider()
+    force_flush = getattr(provider, "force_flush", None)
+    if force_flush is not None:
+        force_flush(timeout_millis)
