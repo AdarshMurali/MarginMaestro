@@ -9,9 +9,9 @@ listed: the notifiers (Slack, ServiceNow) are never reachable from an LLM
 over the network, so client contact stays behind the approval gate.
 """
 
-import importlib
 import os
 import sys
+from collections.abc import Callable
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
@@ -19,18 +19,39 @@ from starlette.applications import Starlette
 
 from api.logging_config import configure_logging
 
-SERVERS = {
-    "market-data": "mcp_servers.market_data",
-    "rag": "mcp_servers.rag_retriever",
-    "margin-status": "mcp_servers.margin_status",
+
+# Static imports, deferred so a service loads only its own server (the
+# margin-status one pulls in the orchestrator). No dynamic import by name.
+def _market_data() -> FastMCP:
+    from mcp_servers.market_data import mcp
+
+    return mcp
+
+
+def _rag() -> FastMCP:
+    from mcp_servers.rag_retriever import mcp
+
+    return mcp
+
+
+def _margin_status() -> FastMCP:
+    from mcp_servers.margin_status import mcp
+
+    return mcp
+
+
+SERVERS: dict[str, Callable[[], FastMCP]] = {
+    "market-data": _market_data,
+    "rag": _rag,
+    "margin-status": _margin_status,
 }
 
 
 def get_server(name: str) -> FastMCP:
-    if name not in SERVERS:
-        raise ValueError(f"Unknown MCP server {name!r}; expected one of: {', '.join(SERVERS)}")
-    server: FastMCP = importlib.import_module(SERVERS[name]).mcp
-    return server
+    loader = SERVERS.get(name)
+    if loader is None:
+        raise ValueError(f"Unknown MCP server; expected one of: {', '.join(SERVERS)}")
+    return loader()
 
 
 def build_app(name: str) -> Starlette:
