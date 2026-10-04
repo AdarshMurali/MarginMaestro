@@ -1,11 +1,11 @@
 from typing import Annotated
 
-from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
+from mcp_servers.base import new_server
 from streaming.market_feed import get_market_feed, get_price_history
 
-mcp = FastMCP("market-data")
+mcp = new_server("market-data")
 
 
 @mcp.tool()

@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123, 124, 126, 127 done (API, event flow, SLA timers, CD and observability live on GCP). Next: Agent Engine (cost check first). MM-125 (margin-call policy, G5b) follows G5; then G6 WhatsApp. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
+- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123, 124, 126, 127 done (API, event flow, SLA timers, CD and observability live on GCP). Re-planned 2026-10-04: Agent Platform hosts the ADK desk assistant (MM-128 … MM-132), and the orchestrator stays on Cloud Run. MM-128 (MCP servers on Cloud Run) in progress. MM-125 (margin-call policy, G5b) follows G5; then G6 WhatsApp. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -32,7 +32,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G2 | MM-89 | Gemini on Vertex AI + RAG on pgvector | **Done** |
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | **Done** (live run on GCP comes with G5) |
-| G5 | MM-92 | Agent Engine, Cloud Run deployment, observability | In progress (MM-123, 124, 126, 127 done) |
+| G5 | MM-92 | Agent Platform desk assistant, Cloud Run deployment, observability | In progress (MM-123, 124, 126, 127 done; MM-128 … 132 planned) |
 | G6 | MM-93 | WhatsApp client notifications | Prep done (Meta account, token, template approved, delivery verified at $0); MM-118 (G61) next |
 | G7 | MM-94 | BigQuery analytics & audit warehouse | Not started |
 | G8 | MM-95 | Data governance (Dataplex, classification, lineage, audit, retention) | Not started |
@@ -48,6 +48,28 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-04 — MM-128: Read-only MCP servers on Cloud Run (G5 re-plan)
+- **G5 re-plan (user decisions, 2026-10-04):**
+  - **Pricing check.** Agent Runtime (formerly Agent Engine) costs $0.085/vCPU-h and $0.009/GiB-h, with 50 vCPU-h and 100 GiB-h free each month. `min_instances` defaults to **1** but may be 0. The user's rule: no warm instance, a cold start is fine, stay as close to $0 as possible.
+  - **The orchestrator stays on Cloud Run.** It's a fixed pipeline with in-process tools, so moving it would be a forced fit. Agent Platform hosts the **desk assistant** instead, built on **Google ADK** (user choice): Runtime + Sessions, Memory Bank, Agent Identity, Gen AI evaluation. Stories MM-128 … MM-132.
+  - **Agent Gateway rejected again.** It uses alpha APIs, needs organization-level IAM (this project has no organization) and a VPC + Cloud NAT + PSC (about $30/month). Native Cloud Run IAM, with the agent as the only invoker of each MCP service, does the job.
+  - **Versions.** `google-adk` 2.11.0 requires `google-cloud-aiplatform` below 2 and accepts `mcp` from 1.24 up to (not including) 3, so `mcp` goes to 1.30 (latest 1.x) rather than 2.x.
+- **Done:**
+  - **`mcp_servers/base.py`.** Every server is stateless streamable HTTP with JSON responses (any instance answers any request, so services can scale to zero). FastMCP's DNS-rebinding check is off: it only accepts localhost Host headers and would answer 421 to `*.run.app`; Cloud Run IAM gates access instead. `GET /health` serves the startup probe.
+  - **`mcp_servers/caller.py`.** The analyst arrives in `X-MM-User`, trusted only because IAM restricts the invoker. The role comes from `users` and the scope from `scope_for`, the same rule as the API. An HTTP call without the header, or with an unknown user, fails loud. In-process calls (stdio, tests) run firm-wide, the existing convention.
+  - **RAG tool.** Analysts get a pgvector store whose sessions carry their scope, so the database enforces RLS. A code filter on top also covers Chroma, which has no RLS.
+  - **New `mcp_servers/margin_status.py`.** `list_margin_calls` (filter by counterparty and status, with a limit) and `get_margin_call`. It reuses the API's feed (`api.margin_calls`), so the status and amounts match the dashboard. The session is scoped, a code filter backs it up, and a call outside the analyst's scope looks exactly like a missing one. No write tools.
+  - **`mcp_servers/http.py`** serves `market-data`, `rag` and `margin-status` only; the notifiers are never served.
+  - **Terraform `mcp.tf`.** Three services `mcp-<name>` (API image, command `python -m mcp_servers.http <name>`, `mm-mcp-sa`, min 0 / max 2, 1 vCPU, 512 Mi; `margin-status` 1 Gi, Cloud SQL IAM login, `SECRETS_SOURCE=env`). `roles/run.invoker` goes to `mm-agent-sa` only, and CD gets roles on these services and on `mm-mcp-sa`. Output `mcp_urls`.
+  - **CD.** Three `deploy-cloudrun` steps, gated on the repo variable `MCP_CD_ENABLED`.
+- **Order:**
+  1. Merge, so that `latest` contains `mcp_servers.http`.
+  2. After CD finishes, plan and apply `mm128.tfplan`.
+  3. Set `MCP_CD_ENABLED=true`.
+- **Tests:** `tests/unit/test_mcp_http.py` (24): caller scoping, the RAG and status tools, and HTTP with a `*.run.app` Host header (header forwarding, a missing header is an error). Suite: 900 passed, coverage 98%. The 7 Kafka/Chroma contract tests need Docker, which wasn't running locally; CI runs them.
+- **Verified locally:** `python -m mcp_servers.http market-data` over real HTTP, called with the official MCP client: `initialize` → `tools/list` → `get_current_prices` returned live yfinance prices (HPE $69.33).
+- **Cost impact:** about $0. Scale to zero, CPU only during requests, inside the Cloud Run free tier; no VPC, NAT or load balancer.
 
 ### 2026-10-02 — MM-93 (G6 prep): `margin_call_notice` approved, template delivery verified
 - **Done:** Meta approved `margin_call_notice` (id `1601248854775468`, `UTILITY`) after about 25h in review. A template send with synthetic values (`MC-DEMO-001`, `Acme Capital (TEST)`, `USD 2,500,000.00`, `03 Oct 2026 17:00 UTC`) went `sent` → `delivered` to the verified test phone. It was business-initiated, with no prior "hi" needed. The Acknowledge quick-reply button renders.
