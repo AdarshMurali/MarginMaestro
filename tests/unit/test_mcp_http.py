@@ -29,7 +29,10 @@ def fresh_session_managers():
     """FastMCP's session manager runs once per server object; production
     builds one app per process, tests build several."""
     for name in http.SERVERS:
-        http.get_server(name)._session_manager = None
+        server = http.get_server(name)
+        server._session_manager = None
+        # As Terraform sets MCP_ALLOWED_HOSTS on Cloud Run (servers are built at import).
+        server.settings.transport_security.allowed_hosts = [HEADERS["Host"]]
 
 
 @pytest.fixture
@@ -249,8 +252,32 @@ def test_health_endpoint():
     assert response.json() == {"status": "ok", "server": "market-data"}
 
 
+def test_other_hosts_are_rejected():
+    """DNS-rebinding protection stays on: only the service's own hostname."""
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+    with TestClient(http.build_app("margin-status")) as client:
+        response = client.post("/mcp", json=body, headers={**HEADERS, "Host": "evil.example"})
+
+    assert response.status_code == 421
+
+
+def test_allowed_hosts_come_from_settings(monkeypatch):
+    from config.settings import get_settings
+    from mcp_servers.base import new_server
+
+    monkeypatch.setenv("MCP_ALLOWED_HOSTS", "a.run.app, b.run.app")
+    get_settings.cache_clear()
+    try:
+        security = new_server("x").settings.transport_security
+    finally:
+        get_settings.cache_clear()
+
+    assert security.enable_dns_rebinding_protection is True
+    assert security.allowed_hosts == ["a.run.app", "b.run.app"]
+
+
 def test_tools_list_over_http_accepts_the_cloud_run_host():
-    """FastMCP's default DNS-rebinding check would answer 421 to *.run.app."""
+    """The service's own *.run.app hostname is allowed."""
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
     with TestClient(http.build_app("margin-status")) as client:
         response = client.post("/mcp", json=body, headers=HEADERS)

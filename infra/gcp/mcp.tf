@@ -22,6 +22,14 @@ locals {
     "margin-status" = { memory = "1Gi" } # imports the orchestrator to read its checkpoints
   }
 
+  # Deterministic hostnames (like the API's, MM-124): known before the
+  # services exist, so each can allow only its own Host header
+  # (DNS-rebinding protection stays on). Callers must use these URLs.
+  mcp_hosts = {
+    for name in keys(local.mcp_servers) :
+    name => "mcp-${name}-${data.google_project.this.number}.${var.region}.run.app"
+  }
+
   mcp_env = {
     APP_ENV = var.environment
     # No secrets needed (IAM DB login, Vertex via the service account), so
@@ -88,7 +96,7 @@ resource "google_cloud_run_v2_service" "mcp" {
       }
 
       dynamic "env" {
-        for_each = local.mcp_env
+        for_each = merge(local.mcp_env, { MCP_ALLOWED_HOSTS = local.mcp_hosts[each.key] })
         content {
           name  = env.key
           value = env.value
@@ -146,5 +154,5 @@ resource "google_service_account_iam_member" "ci_acts_as_mcp" {
 
 output "mcp_urls" {
   description = "MCP endpoints (POST <url>/mcp) for the desk assistant, by server"
-  value       = { for name, service in google_cloud_run_v2_service.mcp : name => "${service.uri}/mcp" }
+  value       = { for name, host in local.mcp_hosts : name => "https://${host}/mcp" }
 }
