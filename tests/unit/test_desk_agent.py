@@ -265,7 +265,17 @@ def test_packaged_modules_import_nothing_outside_the_package():
 # --- entrypoint and deploy script -------------------------------------------------
 
 
-def test_app_wraps_the_agent_in_an_adk_app(monkeypatch):
+@pytest.fixture
+def offline_vertex(monkeypatch):
+    """AdkApp asks Vertex for a project and credentials; CI has neither."""
+    import vertexai
+    from google.auth.credentials import AnonymousCredentials
+
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "proj-x")
+    vertexai.init(project="proj-x", location="us-central1", credentials=AnonymousCredentials())
+
+
+def test_app_wraps_the_agent_in_an_adk_app(monkeypatch, offline_vertex):
     import importlib
     import sys
 
@@ -287,7 +297,7 @@ def test_app_wraps_the_agent_in_an_adk_app(monkeypatch):
     assert isinstance(module.app, AdkApp)
 
 
-def test_class_methods_include_the_chat_operations():
+def test_class_methods_include_the_chat_operations(offline_vertex):
     from vertexai.agent_engines import AdkApp
 
     app = AdkApp(agent=desk.build_agent(_settings(), guardrail=FakeGuardrail()))
