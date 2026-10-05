@@ -61,7 +61,7 @@ At the end of each story, prepend an entry to **Log** using this template:
   - `mm-agent-sa`'s MCP invoker is kept behind `mcp_legacy_sa_invoker` (default true) for a no-outage cutover: grant → redeploy → verify → set false and apply.
   - Output `desk_agent_principal`.
 - **MM-132 prep:** `roles/aiplatform.user` for `mm-ci-sa`, so the on-demand evaluation job can query the agent.
-- **Deploy UX:** `--env-file desk_assistant/deploy.prod.env` (committed and non-secret: project, MCP URLs). The loader refuses key names ending in TOKEN/SECRET/PASSWORD/API_KEY. This lets the deploy command match the user's allow rule.
+- **Deploy UX:** `--env prod` loads the committed, non-secret `desk_assistant/deploy.prod.env` (project, MCP URLs). It's a fixed choice; no file path comes from the command line, after SonarCloud rated a free `--env-file` path a C. The loader also refuses key names ending in TOKEN/SECRET/PASSWORD/API_KEY. This lets the deploy command match the user's allow rule.
 - **Verified locally (real Gemini, live MCP services, ADK's in-memory store):** session 1 "I mainly cover CP-3, prefer one-line answers" → session 2 got a one-line answer, with the amount still taken from `list_margin_calls`. `analyst2` sees none of `analyst1`'s memories.
 - **Tests:** `test_desk_memory.py` (new): amount filter (7 drop / 4 keep cases), recall into the system instruction, failure tolerance, saving, topics/TTL/model, identity, deploy config validated against the SDK types, env-file rules.
 - **Cutover (next):**

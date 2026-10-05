@@ -3,10 +3,11 @@
 Run by a person, not CI -- it creates a billable resource:
 
     cd src
-    ../.venv/Scripts/python.exe -m desk_assistant.deploy         --env-file desk_assistant/deploy.prod.env [--update <resource>]
+    ../.venv/Scripts/python.exe -m desk_assistant.deploy --env prod [--update <resource>]
 
-deploy.prod.env holds the non-secret settings (project, MCP URLs from
-Terraform's `mcp_urls` output); without --update a new agent is created. Deploys from source (no pickling, no staging bucket):
+`--env prod` loads deploy.prod.env, the committed non-secret settings
+(project, MCP URLs from Terraform's `mcp_urls` output); without --update a
+new agent is created. Deploys from source (no pickling, no staging bucket):
 only the packages the agent imports are uploaded.
 
 Cost settings (user rule: stay as close to $0 as possible):
@@ -79,6 +80,9 @@ def context_spec(settings: Settings) -> dict[str, Any]:
         }
     }
 
+
+# Committed settings files, by name: no path comes from the command line.
+ENV_FILES = {"prod": Path(__file__).with_name("deploy.prod.env")}
 
 # Env-file keys that name a secret (SECRETS_SOURCE is a setting, not one).
 SECRET_KEY = re.compile(r"(TOKEN|SECRET|PASSWORD|API_KEY)$")
@@ -166,11 +170,13 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--update", metavar="RESOURCE", help="existing reasoningEngines/... name")
     parser.add_argument(
-        "--env-file", metavar="PATH", help="KEY=VALUE settings (non-secret), e.g. deploy.prod.env"
+        "--env",
+        choices=sorted(ENV_FILES),
+        help="load the committed, non-secret settings file for this environment",
     )
     args = parser.parse_args(argv)
-    if args.env_file:
-        load_env_file(Path(args.env_file))
+    if args.env:
+        load_env_file(ENV_FILES[args.env])
 
     src = Path(__file__).resolve().parents[1]
     os.chdir(src)  # source_packages are relative to src/

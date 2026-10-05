@@ -230,3 +230,17 @@ def test_committed_prod_env_file_has_no_secrets():
     assert "GCP_PROJECT_ID" in keys
     assert "SECRETS_SOURCE" in keys  # a setting, allowed
     assert not any(deploy.SECRET_KEY.search(k) for k in keys)
+
+
+def test_env_choice_loads_only_the_committed_file(monkeypatch):
+    loaded = []
+    monkeypatch.setattr(deploy, "load_env_file", lambda path: loaded.append(path))
+    monkeypatch.setattr(deploy, "get_settings", lambda: (_ for _ in ()).throw(SystemExit(0)))
+    monkeypatch.setattr(deploy.os, "chdir", lambda path: None)
+
+    with pytest.raises(SystemExit):
+        deploy.main(["--env", "prod"])
+    with pytest.raises(SystemExit):
+        deploy.main(["--env", "../../etc/passwd"])  # argparse rejects anything else
+
+    assert loaded == [deploy.ENV_FILES["prod"]]
