@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     def cors_allowed_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
+    # MM-128: Host headers the MCP servers accept over HTTP (DNS-rebinding
+    # protection stays on). Locally any port on localhost; on Cloud Run the
+    # service's own deterministic hostname, set by Terraform.
+    mcp_allowed_hosts: str = "localhost:*,127.0.0.1:*"
+
+    @property
+    def mcp_allowed_hosts_list(self) -> list[str]:
+        return [host.strip() for host in self.mcp_allowed_hosts.split(",") if host.strip()]
+
     # MM-109: openai (default -- the pre-GCP stack, AWS unchanged) or vertex
     # (Gemini on Vertex AI). The old "ollama" default was never honoured by
     # the agents, which always used OpenAI.

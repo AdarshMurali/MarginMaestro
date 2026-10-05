@@ -285,3 +285,38 @@ jobs:
               sleep 10
             done
           done
+
+      # MM-128: the read-only MCP servers run the same image. They're private
+      # (IAM invoker: the desk assistant only), so there's no curl smoke test;
+      # Cloud Run's /health startup probe fails the rollout instead. Gated on
+      # MCP_CD_ENABLED, set once Terraform has created the services (their
+      # first image must already contain mcp_servers.http).
+      - name: Deploy MCP market-data
+        if: vars.MCP_CD_ENABLED == 'true'
+        uses: google-github-actions/deploy-cloudrun@v3.0.1
+        with:
+          service: mcp-market-data
+          region: us-central1
+          project_id: marginmaestro-demo
+          image: docker.io/adarshmurali/marginmaestro:${{ github.sha }}
+          skip_default_labels: true
+
+      - name: Deploy MCP rag
+        if: vars.MCP_CD_ENABLED == 'true'
+        uses: google-github-actions/deploy-cloudrun@v3.0.1
+        with:
+          service: mcp-rag
+          region: us-central1
+          project_id: marginmaestro-demo
+          image: docker.io/adarshmurali/marginmaestro:${{ github.sha }}
+          skip_default_labels: true
+
+      - name: Deploy MCP margin-status
+        if: vars.MCP_CD_ENABLED == 'true'
+        uses: google-github-actions/deploy-cloudrun@v3.0.1
+        with:
+          service: mcp-margin-status
+          region: us-central1
+          project_id: marginmaestro-demo
+          image: docker.io/adarshmurali/marginmaestro:${{ github.sha }}
+          skip_default_labels: true
