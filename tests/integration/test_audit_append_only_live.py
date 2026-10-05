@@ -53,6 +53,7 @@ def row_id(factory) -> int:
             select(AuditLogORM.id)
             .where(AuditLogORM.correlation_id == CORRELATION)
             .order_by(AuditLogORM.id.desc())
+            .limit(1)
         ).scalar_one()
 
 
