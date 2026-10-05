@@ -133,10 +133,10 @@ ADRs: 0008, 0010
 | 4 | MM-127 | MM-G54 | Observability (Trace, Logging, alert) | Done |
 | 5 | MM-128 | MM-G60 | Read-only MCP servers on Cloud Run | Done |
 | 6 | MM-129 | MM-G51 + MM-G58 | ADK desk assistant on Agent Runtime + Sessions | Live; billing check 2026-10-06 |
-| 7 | MM-130 | MM-G61 | Memory Bank | In progress |
-| 8 | MM-131 | MM-G56 | Agent Identity + per-tool IAM | In progress |
-| 9 | MM-132 | MM-G55 | Gen AI evaluation (golden set) | In progress |
-| 10 | MM-125 | G5b | Margin-call policy | In progress (parallel) |
+| 7 | MM-130 | MM-G61 | Memory Bank | Done |
+| 8 | MM-131 | MM-G56 | Agent Identity + per-tool IAM | Done (IAM per tool; Agent Identity deferred, ADR-0019) |
+| 9 | MM-132 | MM-G55 | Gen AI evaluation (golden set) | Done (12/12; 0.94 / 0.90) |
+| 10 | MM-125 | G5b | Margin-call policy | Done (verified live) |
 
 - **Re-plan 2026-10-04 (user decisions).** The pricing check found Agent Runtime (formerly Agent Engine) costs $0.085/vCPU-h and $0.009/GiB-h, with 50 vCPU-h and 100 GiB-h free each month. `min_instances` defaults to 1, but 0 is allowed. The **orchestrator stays on Cloud Run**: it's a fixed pipeline with in-process tools, so moving it would be a forced fit. Agent Platform hosts the **desk assistant** (MM-G58) instead, where every feature solves a real need: Runtime + Sessions for multi-turn chat, Memory Bank for analyst/counterparty memory, Agent Identity for per-agent audit, Gen AI evaluation for checking tool choices. The assistant is built on **Google ADK** (`google-adk`; the orchestrator stays LangGraph). **Agent Gateway is rejected again:** it uses alpha APIs, needs organization-level IAM (our project has no organization) and a VPC + Cloud NAT + PSC (about $30/month). Native Cloud Run IAM, with the agent as the only invoker of each MCP service, enforces tool access instead. Stories: MM-128 … MM-132.
 - **MM-G60** (MM-128) **Read-only MCP servers on Cloud Run:** `mcp-market-data`, `mcp-rag`, `mcp-margin-status` (new). One service each, so IAM grants per tool set. Private (invoker: `mm-agent-sa`, later the agent principal), streamable HTTP, scale to zero. The analyst arrives in `X-MM-User`; the role and scope are read from the database and reads run under RLS. Notifier servers are never deployed.

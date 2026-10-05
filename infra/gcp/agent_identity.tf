@@ -5,13 +5,20 @@
 # the audit log names the agent itself. The project has no organization, so
 # the trust domain is project-level (agents.global.proj-<number>...).
 #
-# Cutover order (no outage): 1) apply this with mcp_legacy_sa_invoker = true
-# (both identities may call the MCP services), 2) redeploy the agent with
-# identity_type=AGENT_IDENTITY, 3) verify, 4) set mcp_legacy_sa_invoker = false
-# and apply again, so only the agent principal can call the tools.
+# Cutover order if re-enabled (no outage): 1) desk_agent_identity = true and
+# apply (both identities may call the MCP services), 2) redeploy the agent with
+# identity_type=AGENT_IDENTITY, 3) verify, 4) mcp_legacy_sa_invoker = false and
+# apply, so only the agent principal can call the tools.
+
+# Status (2026-10-05): OFF (desk_agent_identity = false). Agent Identity
+# tokens are certificate-bound and only accepted over mTLS; Model Armor has no
+# regional mTLS endpoint for our regional template, so under Agent Identity
+# every guardrail call got 401 and chat went down (rolled back within
+# minutes). The agent runs as mm-agent-sa, still the only MCP invoker. Turn
+# this on again once Model Armor offers a regional mTLS endpoint.
 
 locals {
-  desk_agent_principal = var.desk_agent_resource == "" ? "" : (
+  desk_agent_principal = (!var.desk_agent_identity || var.desk_agent_resource == "") ? "" : (
     "principal://agents.global.proj-${data.google_project.this.number}.system.id.goog/resources/aiplatform/${var.desk_agent_resource}"
   )
 

@@ -69,8 +69,8 @@ MEMORY_TTL = f"{90 * 24 * 3600}s"  # 90 days: data minimisation
 
 def context_spec(settings: Settings) -> dict[str, Any]:
     model = (
-        f"projects/{settings.gcp_project_id}/locations/{settings.gcp_location}"
-        f"/publishers/google/models/{settings.gemini_model}"
+        f"projects/{settings.gcp_project_id}/locations/{settings.desk_memory_model_location}"
+        f"/publishers/google/models/{settings.desk_memory_model}"
     )
     return {
         "memory_bank_config": {
@@ -127,10 +127,14 @@ def deploy_config(settings: Settings, class_methods: list[dict[str, Any]]) -> di
         "requirements_file": "desk_assistant/requirements.txt",
         "agent_framework": "google-adk",
         "class_methods": class_methods,
-        # MM-131: the agent runs as its own Agent Identity principal, not a
-        # shared service account; "" clears the old mm-agent-sa on update.
-        "identity_type": "AGENT_IDENTITY",
-        "service_account": "",
+        # MM-131 (2026-10-05): stays on its own service account. Agent
+        # Identity tokens are certificate-bound (mTLS only), and Model Armor
+        # has no regional mTLS endpoint for our regional template: under
+        # Agent Identity every screening call got 401 and chat went down.
+        # Keeping Model Armor outweighs per-agent attribution; mm-agent-sa is
+        # still the only MCP invoker (per-tool IAM holds). See ADR-0019.
+        "identity_type": "SERVICE_ACCOUNT",
+        "service_account": f"mm-agent-sa@{settings.gcp_project_id}.iam.gserviceaccount.com",
         "env_vars": runtime_env(settings),
         "context_spec": context_spec(settings),
         **RUNTIME,
