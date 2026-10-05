@@ -130,9 +130,10 @@ resource "google_cloud_run_v2_service" "mcp" {
   depends_on = [google_project_service.run]
 }
 
-# The desk assistant's identity is the only invoker.
+# mm-agent-sa, the desk assistant's identity before Agent Identity (MM-131).
+# Kept only during the cutover; agent_identity.tf grants the agent principal.
 resource "google_cloud_run_v2_service_iam_member" "mcp_agent_invoker" {
-  for_each = google_cloud_run_v2_service.mcp
+  for_each = var.mcp_legacy_sa_invoker ? google_cloud_run_v2_service.mcp : {}
 
   name     = each.value.name
   location = each.value.location
