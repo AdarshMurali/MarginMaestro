@@ -564,3 +564,32 @@ def test_reply_text_is_withheld_when_masking_fails(run, session_factory):
     process_webhook(_text("call me on 4111", context=None), deps)
 
     assert "(text withheld)" in posts[0] and "4111" not in posts[0]
+
+
+@pytest.mark.parametrize("payload", ["Acknowledge", ""])
+def test_acknowledge_without_our_payload_is_matched_by_the_quoted_notice(
+    run, session_factory, payload
+):
+    """Found live (2026-10-05): Meta delivered the template button tap
+    without the `ack:<thread>` payload; the quoted notice identifies the call."""
+    graph, _ = run["make"]()
+    _to_sla_step(graph)
+    deps = _deps(graph, session_factory, run["posts"])
+    message = _ack(payload="x")
+    message.entry[0].changes[0].value.messages[0].button.payload = payload
+
+    assert process_webhook(message, deps) == ["acknowledged"]
+    values = graph.get_state({"configurable": {"thread_id": THREAD}}).values
+    assert values["sla_outcome"] == "met"
+
+
+def test_button_quoting_an_unknown_message_is_still_just_a_reply(run, session_factory):
+    graph, _ = run["make"]()
+    _to_sla_step(graph)
+    message = _ack(payload="x", context="wamid.someone-else")
+    message.entry[0].changes[0].value.messages[0].button.payload = "Acknowledge"
+
+    assert process_webhook(message, _deps(graph, session_factory, [])) == ["reply_flagged"]
+    assert (
+        graph.get_state({"configurable": {"thread_id": THREAD}}).values.get("sla_outcome") is None
+    )

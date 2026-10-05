@@ -279,9 +279,33 @@ def _ack_thread(message: Message) -> str | None:
     return thread_from_ack_payload(payload) if payload else None
 
 
+def _is_button_press(message: Message) -> bool:
+    return (message.type == "button" and message.button is not None) or (
+        message.type == "interactive"
+        and message.interactive is not None
+        and message.interactive.button_reply is not None
+    )
+
+
 def _handle_message(message: Message, deps: WebhookDeps) -> str:
     thread_id = _ack_thread(message)
-    if thread_id is not None:
+    if thread_id is None and _is_button_press(message) and message.context and message.context.id:
+        # Found live (2026-10-05): Meta delivered the template's quick-reply
+        # tap without our `ack:<thread>` payload. The tap still quotes the
+        # notice it answers, so the notice's message id names the call. The
+        # usual checks in _handle_ack (registered sender, latest notice, call
+        # at the SLA step) still decide whether it counts.
+        with deps.session_factory() as session:
+            thread_id = thread_for_message(session, message.context.id)
+    logger.info(
+        "whatsapp_message_received",
+        message_id=message.id,
+        type=message.type,
+        button_press=_is_button_press(message),
+        ack_payload=_ack_thread(message) is not None,
+        quotes_notice=thread_id is not None,
+    )
+    if thread_id is not None and _is_button_press(message):
         return _handle_ack(message, thread_id, deps)
     return _handle_reply(message, deps)
 
