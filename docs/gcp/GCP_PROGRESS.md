@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123, 124, 126, 127 done (API, event flow, SLA timers, CD and observability live on GCP). Re-planned 2026-10-04: Agent Platform hosts the ADK desk assistant (MM-128 … MM-132), and the orchestrator stays on Cloud Run. MM-128 done (MCP servers live on Cloud Run); MM-129 (ADK desk assistant) code done, deploy pending approval. MM-125 (margin-call policy, G5b) follows G5; then G6 WhatsApp. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
+- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123, 124, 126, 127 done (API, event flow, SLA timers, CD and observability live on GCP). Re-planned 2026-10-04: Agent Platform hosts the ADK desk assistant (MM-128 … MM-132), and the orchestrator stays on Cloud Run. MM-128 done (MCP servers live on Cloud Run); MM-129 (ADK desk assistant) code done, deploy pending approval. MM-125 (margin-call policy, G5b, ADR-0020) code done, `daily-margin-run` job apply pending; then G6 WhatsApp. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -48,6 +48,46 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-05 — MM-125: Margin-call policy (Phase G5b) (code done; Terraform apply pending approval)
+- **Done:**
+  - **Daily margin run.** `POST /internal/margin/daily-run` (OIDC internal caller) evaluates every counterparty with a book, as one impact set per day (`daily-margin-run:<date>`).
+    - Standing breaches raise calls, each paused at the approval gate.
+    - A retry the same day skips counterparties already done.
+    - Another trigger holding a counterparty gives a 503, so Scheduler retries.
+    - Cloud Scheduler job `daily-margin-run`: 16:45 New York, Mon–Fri, 15 minutes after `eod-prices`; paused by `demo_online`.
+  - **Intraday materiality gate** (`calc/materiality.py`, deterministic, ADR-0005). The event's own impact is the VM change + IM change over the moved tickers, from the move the event carries (`ImpactSet.price_moves`, set by the Event Agent: prior close → tick).
+    - It must be greater than the CSA MTA. A move that reduces exposure never passes.
+    - Below the gate the run ends with the new status `below_materiality`: no call, impact logged and audited.
+    - `/simulate` is gated the same way and now shows the reason.
+  - **One open call per counterparty** (`agents/margin_policy.dispatch_trigger`, the single path for Pub/Sub impacts, `/simulate` and the daily run).
+    - A call **awaiting its first approval** is re-evaluated in place (`orchestrator.reevaluate_run`). LangGraph `update_state(as_node=START)` re-runs exposure → CSA → breach, and the approval gate re-arms with the new amount.
+    - A call **already signed or sent** is never changed; the trigger is audited on it.
+    - An intraday trigger on an open call is gated first, with the MTA taken from the open call's CSA terms (no LLM call).
+    - A per-counterparty lease (`processed_events` row, 15-minute expiry) serialises triggers across instances.
+  - **Rationale from code** on every evaluation (`call_rationale`), e.g. "The NVDA move (USD 180.00 to USD 198.00) increased your exposure by USD 207,000.00, more than the minimum transfer amount of USD 19,000.00. Your exposure of … is due." It appears in the feed (`rationale`, `updated_by`), the MCP status tool and the trace ("Re-evaluated by a later trigger", "Below materiality").
+  - **The notice quotes the enforced deadline.** `send_notification` fixes the send time, then drafts with `{DEADLINE}` = `notification_sent_at + MARGIN_CALL_SLA_MINUTES` (e.g. "18:35 UTC on 5 October 2026") and `{RATIONALE}`. Both are required placeholders filled by code; the model is told to state no other timeframe.
+  - **UI (thin):** `below_materiality` status pill, and the simulate panel shows each counterparty's reason / "updated the open call".
+- **Decisions:** **ADR-0020.** Signed or sent calls are never altered: the amount a human approved, or a client was told, stays fixed. Re-arming the approval was rejected because it would cancel a human decision on an automated trigger. A growing shortfall is called at the next daily run after the current call resolves. `disputed` counts as closed (the run has ended), along with rejected, sla_met, escalated, no_breach and below_materiality.
+- **Exit criteria (tests, `tests/unit/test_margin_policy.py`, real graph on SQLite, seeded HPE quantities and real MTAs):**
+  - The HPE $65.07 → $69.88 replay through the Event Agent's price path raises **no** calls for CP-1/3/7; CP-7's impact is USD 4,104.37 < MTA 47,000.
+  - The daily run raises each standing breach once, with a "Daily margin run: Your exposure …" rationale; a same-day rerun does nothing.
+  - A second material shock **updates** the open call (same thread, new amount, `updated_by`, gate re-armed).
+  - Replaying the same event is a no-op.
+  - Also tested: signed calls (elite, awaiting manager) and notified calls are unchanged; an updated call approves at its new amount; the daily run withdraws an unapproved call no longer in breach; leases.
+- **Tests:** 994 unit tests passed; coverage 98% (`margin_policy` 100%, `materiality` 100%). The 7 Kafka/Chroma contract tests need Docker. ruff, black, mypy clean; frontend `tsc` + eslint clean; `terraform fmt`/`validate` clean.
+- **Changed:** `src/calc/{materiality,models}.py`, `src/agents/{margin_policy,orchestrator,communication}.py`, `src/streaming/{impact_consumer,event_agent,schemas,simulate_cli}.py`, `src/api/{main,schemas,simulate,margin_calls,margin_call_trace}.py`, `src/mcp_servers/margin_status.py`, `frontend/src/{lib/api.ts,components/lifecycle-status-light.tsx,app/simulate/page.tsx}`, `infra/gcp/scheduler.tf` (+1 resource `google_cloud_scheduler_job.daily_margin_run`), ADR-0020.
+- **Cost impact:** one more Cloud Scheduler job (the third; three per billing account are free). One CSA extraction (Gemini) per counterparty per weekday, a fraction of a cent.
+- **Known issues / tech debt:**
+  - "SLA met" doesn't book collateral, so the next daily run may call the same standing shortfall again; collateral booking is a separate story.
+  - Legacy duplicate open calls (pre-policy) remain; the newest one is the one updated.
+  - The daily run's date is the UTC date (same calendar day at 16:45 New York).
+- **Next step:**
+  1. Merge; CD deploys the image.
+  2. Plan `infra/gcp` (expect 1 to add: `daily-margin-run`) after CD, verify the Cloud Run image sha, and apply with approval.
+  3. Trigger the job once by hand and check the calls and rationale in the UI.
+  4. Jira MM-125 → Done.
+  5. Then G6 (WhatsApp, MM-118), whose template fills the same `{DEADLINE}`.
 
 ### 2026-10-05 — MM-129: "Ask the margin desk" ADK assistant (code done; deploy pending approval)
 - **Done:**
