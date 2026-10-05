@@ -1,7 +1,7 @@
 """CI security gates (MM-G88, ADR-0018) over scanner JSON output.
 
-    python -m ops.security_gates pip-audit audit.json
-    python -m ops.security_gates licences licences.json
+    python -m ops.security_gates pip-audit   # reads ./pip-audit.json
+    python -m ops.security_gates licences    # reads ./licences.json
 
 - `pip-audit`: fails when a dependency has a known vulnerability **with a fix
   available** -- something a version bump resolves. Vulnerabilities with no
@@ -22,8 +22,11 @@ from typing import Any
 
 # GPL / AGPL in SPDX ids, classifiers or free text -- not LGPL / "Lesser".
 _STRONG_COPYLEFT = re.compile(
-    r"(?<![A-Za-z])A?GPL|GNU (Affero )?General Public License", re.IGNORECASE
+    r"(?<![a-z])A?GPL|GNU (Affero )?General Public License", re.IGNORECASE
 )
+
+# gate -> the report file it reads (written by the CI step before it).
+REPORTS = {"pip-audit": "pip-audit.json", "licences": "licences.json"}
 
 # package name (lowercase) -> why it is acceptable despite the match.
 LICENCE_EXCEPTIONS: dict[str, str] = {}
@@ -53,12 +56,14 @@ def forbidden_licences(packages: list[dict[str, Any]]) -> list[str]:
     return found
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) != 2 or argv[0] not in ("pip-audit", "licences"):
-        print("usage: python -m ops.security_gates {pip-audit|licences} <report.json>")
+def main(argv: list[str], reports_dir: Path | None = None) -> int:
+    """The report is read from a fixed file name in the working directory
+    (REPORTS), never from a path given on the command line."""
+    if len(argv) != 1 or argv[0] not in REPORTS:
+        print(f"usage: python -m ops.security_gates {{{'|'.join(REPORTS)}}}")
         return 2
-    gate, path = argv
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    gate = argv[0]
+    data = json.loads(((reports_dir or Path.cwd()) / REPORTS[gate]).read_text(encoding="utf-8"))
     if gate == "pip-audit":
         fixable, unfixed = fixable_vulnerabilities(data)
         for line in unfixed:

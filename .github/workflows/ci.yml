@@ -258,19 +258,23 @@ jobs:
       # pyproject.toml is unpinned, so this is what the next build would ship.
       - name: Install the app's runtime dependencies
         if: always()
-        run: pip install ".[db,llm,streaming,rag,aws,gcp,data,notify,auth,observability]" pip-audit pip-licenses
+        # pip/setuptools first: the runner's preinstalled setuptools can carry a
+        # fixed CVE that pip-audit would (rightly) flag.
+        run: |
+          pip install --upgrade pip setuptools
+          pip install ".[db,llm,streaming,rag,aws,gcp,data,notify,auth,observability]" pip-audit pip-licenses
 
       - name: pip-audit (fail on fixable vulnerabilities)
         if: always()
         run: |
           pip-audit -f json -o pip-audit.json --skip-editable --progress-spinner off || true
-          PYTHONPATH=src python -m ops.security_gates pip-audit pip-audit.json
+          PYTHONPATH=src python -m ops.security_gates pip-audit
 
       - name: Licence allow-list (fail on GPL/AGPL)
         if: always()
         run: |
           pip-licenses --from=mixed --format=json --output-file licences.json
-          PYTHONPATH=src python -m ops.security_gates licences licences.json
+          PYTHONPATH=src python -m ops.security_gates licences
 
       - name: Trivy -- Terraform and Dockerfile misconfiguration
         if: always()

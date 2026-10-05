@@ -93,14 +93,7 @@ class DataCatalog(_Strict):
     @model_validator(mode="after")
     def _references_resolve(self) -> "DataCatalog":
         for table_name, table in self.tables.items():
-            for column_name, column in table.columns.items():
-                if column.pseudonym and column.pseudonym not in table.columns:
-                    raise ValueError(
-                        f"{table_name}.{column_name}: pseudonym column {column.pseudonym!r} "
-                        "is not in the table"
-                    )
-                for ref in column.contains:
-                    self._pseudonymized(ref, f"{table_name}.{column_name}")
+            self._check_table_references(table_name, table)
         for family_name, family in self.documents.items():
             for ref in family.contains:
                 self._pseudonymized(ref, f"documents.{family_name}")
@@ -108,6 +101,16 @@ class DataCatalog(_Strict):
             for ref in exception.fields:
                 self.column(ref)
         return self
+
+    def _check_table_references(self, table_name: str, table: TableEntry) -> None:
+        for column_name, column in table.columns.items():
+            if column.pseudonym and column.pseudonym not in table.columns:
+                raise ValueError(
+                    f"{table_name}.{column_name}: pseudonym column {column.pseudonym!r} "
+                    "is not in the table"
+                )
+            for ref in column.contains:
+                self._pseudonymized(ref, f"{table_name}.{column_name}")
 
     def column(self, ref: str) -> ColumnEntry:
         """`table.column` -> its entry; unknown references raise."""

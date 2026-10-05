@@ -53,22 +53,30 @@ def test_exceptions_allow_a_dual_licensed_package(monkeypatch):
 
 
 def test_main_exit_codes(tmp_path, capsys):
-    audit = tmp_path / "audit.json"
+    audit = tmp_path / "pip-audit.json"
     audit.write_text(json.dumps(AUDIT), encoding="utf-8")
-    assert security_gates.main(["pip-audit", str(audit)]) == 1
+    assert security_gates.main(["pip-audit"], reports_dir=tmp_path) == 1
     assert "FIXABLE: pyjwt" in capsys.readouterr().out
 
-    clean = tmp_path / "clean.json"
-    clean.write_text(json.dumps({"dependencies": [AUDIT["dependencies"][1]]}), encoding="utf-8")
-    assert security_gates.main(["pip-audit", str(clean)]) == 0
+    audit.write_text(json.dumps({"dependencies": [AUDIT["dependencies"][1]]}), encoding="utf-8")
+    assert security_gates.main(["pip-audit"], reports_dir=tmp_path) == 0
 
     licences = tmp_path / "licences.json"
     licences.write_text(
         json.dumps([{"Name": "x", "Version": "1", "License": "GPLv3"}]), encoding="utf-8"
     )
-    assert security_gates.main(["licences", str(licences)]) == 1
+    assert security_gates.main(["licences"], reports_dir=tmp_path) == 1
     licences.write_text(json.dumps([{"Name": "x", "Version": "1", "License": "MIT"}]), "utf-8")
-    assert security_gates.main(["licences", str(licences)]) == 0
+    assert security_gates.main(["licences"], reports_dir=tmp_path) == 0
     assert "1 packages checked, 0 under GPL/AGPL" in capsys.readouterr().out
 
-    assert security_gates.main(["unknown"]) == 2
+
+def test_main_reads_fixed_report_names_from_the_working_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "licences.json").write_text("[]", encoding="utf-8")
+    assert security_gates.main(["licences"]) == 0
+
+
+@pytest.mark.parametrize("argv", [["unknown"], ["pip-audit", "../../etc/passwd"], []])
+def test_main_rejects_anything_but_a_gate_name(argv):
+    assert security_gates.main(argv) == 2

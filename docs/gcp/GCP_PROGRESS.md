@@ -88,7 +88,7 @@ At the end of each story, prepend an entry to **Log** using this template:
   - The retention policy is unlocked (locking is irreversible).
   - pgaudit is off (per-query logs).
   - Scanner binaries are pinned and checksum-verified instead of `trivy-action`.
-- **Tests:** 1371 pass (`tests/unit`). New suites:
+- **Tests:** 1375 pass (`tests/unit`). New suites:
   - `test_data_catalog.py`: sync and rules;
   - `test_data_class_filter.py`: names, masking, deny, fail closed, DB source and TTL, GuardedLLM wiring, reconciliation, every seeded name;
   - `test_lineage.py`: the full call on the real graph (SQLite), escalation, no amounts or names, export failure doesn't fail the call, the exporter's REST call;
