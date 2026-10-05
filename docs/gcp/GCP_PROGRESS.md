@@ -63,6 +63,9 @@ At the end of each story, prepend an entry to **Log** using this template:
   - `deploy.py` pins `SERVICE_ACCOUNT`, and `desk_agent_identity` (default false) removes the 10 unused agent-principal grants (`mm131off.tfplan`, applied after merge).
   - The Model Armor adapter now turns API errors into `GuardrailUnavailable` (fail closed with a refusal, not a crash).
 - **MM-131 outcome:** per-tool IAM delivered (`mm-agent-sa` is the only MCP invoker, notifiers not exposed); per-agent identity deferred.
+- **Memory Bank, second fix.** No memories were being created. Memory Bank's extraction failed with `404`, because `gemini-3.5-flash` is served only from the **global** location. `DESK_MEMORY_MODEL_LOCATION=global` fixes it, applied live with a config-only update.
+  - **Direct generate test:** from "I cover CP-3, prefer one-line answers, CP-3's last call was USD 161,716.66", Memory Bank stored the coverage and the preference and **dropped the amount** (topic config working).
+  - **Live chat:** session A as `analyst1` stated the coverage and preference; a **new** session B answered "You mainly cover CP-3. You prefer very short one-line answers." `analyst2` sees nothing. Test memories were deleted afterwards.
 
 ### 2026-10-05 — MM-125: Margin-call policy (Phase G5b) (code done; Terraform apply pending approval)
 - **Done:**

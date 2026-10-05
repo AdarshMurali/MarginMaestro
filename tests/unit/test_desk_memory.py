@@ -172,7 +172,7 @@ def test_context_spec_sets_topics_ttl_and_extraction_model():
     assert spec["customization_configs"][0]["memory_topics"] == deploy.MEMORY_TOPICS
     assert spec["ttl_config"] == {"default_ttl": "7776000s"}
     assert spec["generation_config"]["model"] == (
-        "projects/proj-x/locations/us-central1/publishers/google/models/gemini-test"
+        "projects/proj-x/locations/global/publishers/google/models/gemini-test"
     )
 
 
@@ -253,4 +253,4 @@ def test_memory_extraction_defaults_to_a_model_memory_bank_accepts():
     spec = deploy.context_spec(_settings(gemini_model="gemini-2.5-flash"))
     model = spec["memory_bank_config"]["generation_config"]["model"]
 
-    assert model.endswith("/models/gemini-3.5-flash")
+    assert model == "projects/proj-x/locations/global/publishers/google/models/gemini-3.5-flash"

@@ -69,7 +69,7 @@ MEMORY_TTL = f"{90 * 24 * 3600}s"  # 90 days: data minimisation
 
 def context_spec(settings: Settings) -> dict[str, Any]:
     model = (
-        f"projects/{settings.gcp_project_id}/locations/{settings.gcp_location}"
+        f"projects/{settings.gcp_project_id}/locations/{settings.desk_memory_model_location}"
         f"/publishers/google/models/{settings.desk_memory_model}"
     )
     return {
