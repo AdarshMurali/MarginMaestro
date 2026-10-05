@@ -1,0 +1,6 @@
+google-adk==2.11.0
+google-cloud-aiplatform[agent-engines]>=1.148.1,<2
+mcp>=1.30,<2.0
+pydantic-settings
+structlog
+google-cloud-modelarmor

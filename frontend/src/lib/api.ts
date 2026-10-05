@@ -319,3 +319,22 @@ export interface MarketUniverseResponse {
 export function getMarketUniverse(): Promise<MarketUniverseResponse> {
   return getJson<MarketUniverseResponse>("/market-universe");
 }
+
+// MM-129: "Ask the margin desk" -- one chat turn with the ADK agent on Agent
+// Runtime, answered as the signed-in analyst (the API forwards the identity).
+export interface DeskChatResponse {
+  session_id: string;
+  answer: string;
+  tools_used: string[];
+}
+
+export function postDeskChat(
+  token: string,
+  message: string,
+  sessionId: string | null,
+): Promise<DeskChatResponse> {
+  return postJson<DeskChatResponse>("/desk/chat", token, {
+    message,
+    session_id: sessionId,
+  });
+}

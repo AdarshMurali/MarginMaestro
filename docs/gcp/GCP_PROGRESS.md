@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123, 124, 126, 127 done (API, event flow, SLA timers, CD and observability live on GCP). Re-planned 2026-10-04: Agent Platform hosts the ADK desk assistant (MM-128 … MM-132), and the orchestrator stays on Cloud Run. MM-128 (MCP servers on Cloud Run) in progress. MM-125 (margin-call policy, G5b) follows G5; then G6 WhatsApp. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
+- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123, 124, 126, 127 done (API, event flow, SLA timers, CD and observability live on GCP). Re-planned 2026-10-04: Agent Platform hosts the ADK desk assistant (MM-128 … MM-132), and the orchestrator stays on Cloud Run. MM-128 done (MCP servers live on Cloud Run); MM-129 (ADK desk assistant) code done, deploy pending approval. MM-125 (margin-call policy, G5b) follows G5; then G6 WhatsApp. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -49,6 +49,31 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Log
 
+### 2026-10-05 — MM-129: "Ask the margin desk" ADK assistant (code done; deploy pending approval)
+- **Done:**
+  - **`desk_assistant/agent.py`.** An ADK `LlmAgent` (Gemini, temperature 0) with one `McpToolset` per read-only MCP server.
+    - A `header_provider` adds `X-MM-User` (the session's `user_id`) to every tool call. On GCP it also adds a Google ID token for that service (cached per audience, refreshed after 50 minutes), which is what Cloud Run IAM checks.
+    - The guardrail pipeline (Model Armor + in-code) screens each analyst message in `before_model_callback` and each answer in `after_model_callback`. A block or an unavailable screen gives a refusal and never an unscreened answer.
+    - The instruction forbids computing amounts; they must be quoted from tools (golden rule 1).
+  - **`desk_assistant/app.py`** (`AdkApp`: Sessions on Agent Runtime) and **`desk_assistant/deploy.py`**, run by a person.
+    - Source deploy: no pickling, no staging bucket. It ships only `desk_assistant`, `config`, `ports` and the guardrail adapters, and a test fails if the agent starts importing anything else.
+    - Settings: `min_instances=0`, max 2, 1 vCPU / 2 GiB, runs as `mm-agent-sa`.
+  - **`get_guardrail`** moved to `adapters/guardrail_factory.py` (re-exported from `factory`), so the agent avoids the OpenAI/Chroma imports.
+  - **API `POST /desk/chat`** (`require_user`, its own per-user rate limit). It calls Agent Runtime over REST (`:query` to create a session, `:streamQuery` for a turn) as the authenticated analyst, so the app image needs no ADK. Someone else's session id → 404; agent errors → 502; chat off → 503.
+  - **UI:** `/desk` "Ask the Desk" page, with suggested questions and a chip for each tool used, plus a nav tab.
+  - **Terraform:** variable `desk_agent_resource`; the API gets `DESK_ASSISTANT` / `DESK_AGENT_RESOURCE`, and chat stays off while the variable is empty.
+  - **ADR-0019** (Agent Platform + ADK for the assistant; the orchestrator stays LangGraph; Agent Gateway rejected). New `adk` extra, installed in CI.
+- **Bug caught by tests:** the ID-token audience split the URL on `/mcp`, which also matches `https://mcp-rag…`. It's now parsed as scheme + host.
+- **Verified locally (real Gemini on Vertex + the local market-data MCP server over HTTP):** "What is HPE trading at right now?" → the agent called `get_current_prices` and answered "69.33 USD", the exact tool value. A prompt-injection attempt was refused by the guardrail before reaching the model. A packaging check (only `SOURCE_PACKAGES` plus `requirements.txt` in a clean venv) builds the app and generates its class methods.
+- **Tests:** `test_desk_agent.py` (24), `test_desk_api.py` (19). Suite: 939 passed (the 7 Kafka/Chroma contract tests need Docker, which isn't running locally; CI runs them), coverage 98%.
+- **Remaining (needs the user's approval: creates a billable resource):**
+  1. Merge.
+  2. `cd src; python -m desk_assistant.deploy`, with `GCP_PROJECT_ID`, `GUARDRAIL_PROVIDER=modelarmor` and the `DESK_MCP_*_URL` values from `terraform output mcp_urls`.
+  3. Set `desk_agent_resource` in tfvars; plan/apply after CD.
+  4. Live chat check.
+  5. Billing check 24 hours later.
+- **Cost impact:** about $0 idle (`min_instances=0`); a Gemini + Model Armor call per turn costs fractions of a cent.
+
 ### 2026-10-04 — MM-128: Read-only MCP servers on Cloud Run (G5 re-plan)
 - **G5 re-plan (user decisions, 2026-10-04):**
   - **Pricing check.** Agent Runtime (formerly Agent Engine) costs $0.085/vCPU-h and $0.009/GiB-h, with 50 vCPU-h and 100 GiB-h free each month. `min_instances` defaults to **1** but may be 0. The user's rule: no warm instance, a cold start is fine, stay as close to $0 as possible.
@@ -70,6 +95,13 @@ At the end of each story, prepend an entry to **Log** using this template:
 - **Tests:** `tests/unit/test_mcp_http.py` (24): caller scoping, the RAG and status tools, and HTTP with a `*.run.app` Host header (header forwarding, a missing header is an error). Suite: 900 passed, coverage 98%. The 7 Kafka/Chroma contract tests need Docker, which wasn't running locally; CI runs them.
 - **Verified locally:** the market-data server over real HTTP, called with the official MCP client: `initialize` → `tools/list` → `get_current_prices` returned live yfinance prices (HPE $69.33).
 - **Cost impact:** about $0. Scale to zero, CPU only during requests, inside the Cloud Run free tier; no VPC, NAT or load balancer.
+- **SonarCloud** failed the first pushes with Security Rating E. Three changes: DNS-rebinding protection back on with a host allow-list; static imports instead of `importlib` by name; and the all-interfaces bind moved out of Python into the `uvicorn` command. That last one was the blocker; the gate then passed.
+- **Applied and verified live (2026-10-05).** The user applied `mm128.tfplan` (10 added). All three services are Ready on image `d6eecd6`; `mm-agent-sa` is the only invoker.
+  - No token → 403. The non-allow-listed `*-uc.a.run.app` URL → 421. No `X-MM-User` → tool error.
+  - `list_margin_calls`: `analyst1` → 18 calls on CP-1…CP-4 only; `approver` → 30 calls on all 7 counterparties.
+  - RAG "CP-6 threshold and MTA": `analyst1` gets only shared policy/dispute documents; `approver` gets CP-6's CSA (MTA, Threshold, Rating Triggers).
+  - `get_current_prices(HPE)` → live yfinance 69.33.
+  - `MCP_CD_ENABLED=true` set. Jira MM-128 → Done.
 
 ### 2026-10-02 — MM-93 (G6 prep): `margin_call_notice` approved, template delivery verified
 - **Done:** Meta approved `margin_call_notice` (id `1601248854775468`, `UTILITY`) after about 25h in review. A template send with synthetic values (`MC-DEMO-001`, `Acme Capital (TEST)`, `USD 2,500,000.00`, `03 Oct 2026 17:00 UTC`) went `sent` → `delivered` to the verified test phone. It was business-initiated, with no prior "hi" needed. The Acknowledge quick-reply button renders.

@@ -23,6 +23,7 @@ from api.auth import (
     require_user,
     verify_credentials,
 )
+from api.desk import AgentRuntimeDesk, DeskChatRequest, DeskChatResponse, get_desk
 from api.exposure import (
     build_exposure_board,
     get_counterparty_exposure,
@@ -38,7 +39,7 @@ from api.margin_calls import (
     list_margin_calls_for_counterparty,
 )
 from api.middleware import CorrelationIdMiddleware
-from api.rate_limit import ACTION_LIMITER
+from api.rate_limit import ACTION_LIMITER, DESK_LIMITER
 from api.schemas import (
     ApprovalRequest,
     ApprovalResponse,
@@ -116,6 +117,12 @@ def get_orchestrator_graph() -> CompiledStateGraph:
 @lru_cache
 def get_db_session_factory() -> sessionmaker[Session]:
     return get_session_factory()
+
+
+@lru_cache
+def get_desk_client() -> AgentRuntimeDesk:
+    """One authorized HTTP session to Agent Runtime per process (MM-129)."""
+    return get_desk(get_settings())
 
 
 @lru_cache
@@ -381,6 +388,17 @@ async def public_stats() -> PublicStatsResponse:
 @app.get("/market-universe", response_model=MarketUniverseResponse)
 async def market_universe() -> MarketUniverseResponse:
     return MarketUniverseResponse(tickers=get_settings().market_universe_list)
+
+
+@app.post("/desk/chat", response_model=DeskChatResponse)
+def desk_chat(
+    body: DeskChatRequest, identity: Identity = Depends(require_user)
+) -> DeskChatResponse:
+    """'Ask the margin desk' (MM-129): one chat turn with the ADK agent, as
+    the signed-in analyst. Sync endpoint: the call to Agent Runtime blocks,
+    so FastAPI runs it in the threadpool. Rate limited per user (LLM cost)."""
+    DESK_LIMITER.check(identity.username, get_settings().rate_limit_per_minute)
+    return get_desk_client().chat(identity.username, body.message, body.session_id)
 
 
 @app.post("/simulate", response_model=SimulateEventResponse)
