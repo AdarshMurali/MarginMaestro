@@ -167,7 +167,7 @@ def test_memory_topics_are_qualitative_only():
 
 
 def test_context_spec_sets_topics_ttl_and_extraction_model():
-    spec = deploy.context_spec(_settings(gemini_model="gemini-test"))["memory_bank_config"]
+    spec = deploy.context_spec(_settings(desk_memory_model="gemini-test"))["memory_bank_config"]
 
     assert spec["customization_configs"][0]["memory_topics"] == deploy.MEMORY_TOPICS
     assert spec["ttl_config"] == {"default_ttl": "7776000s"}
@@ -244,3 +244,11 @@ def test_env_choice_loads_only_the_committed_file(monkeypatch):
         deploy.main(["--env", "../../etc/passwd"])  # argparse rejects anything else
 
     assert loaded == [deploy.ENV_FILES["prod"]]
+
+
+def test_memory_extraction_defaults_to_a_model_memory_bank_accepts():
+    """Memory Bank rejected gemini-2.5-flash on the first redeploy."""
+    spec = deploy.context_spec(_settings(gemini_model="gemini-2.5-flash"))
+    model = spec["memory_bank_config"]["generation_config"]["model"]
+
+    assert model.endswith("/models/gemini-3.5-flash")
