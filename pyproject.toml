@@ -14,6 +14,8 @@ dependencies = [
     "pydantic-settings",
     "structlog",
     "httpx",
+    # MM-135: the data catalog (docs/data_catalog.yaml) drives the LLM data-class filter.
+    "pyyaml",
 ]
 
 [project.optional-dependencies]
@@ -74,6 +76,10 @@ explicit_package_bases = true
 
 [[tool.mypy.overrides]]
 module = "boto3.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "yaml.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     # regex (default: strict, no network, post-trial fallback) | sdp
     # (Sensitive Data Protection, us-central1) | none (local only).
     redactor_provider: str = "regex"
+    # MM-135 (ADR-0015): the catalog-driven LLM data-class filter. none
+    # (default: AWS/local unchanged) | catalog (confidential values from
+    # docs/data_catalog.yaml are pseudonymized or blocked before any prompt;
+    # needs the database for the counterparty names).
+    llm_data_class_filter: str = "none"
+    # MM-136: per-margin-call lineage. none (default) | datalineage (Dataplex
+    # Data Lineage API, OpenLineage events; best effort, never fails a call).
+    lineage_exporter: str = "none"
+    lineage_location: str = "us-central1"
     # MM-117: cost / loop bounds. Per run: <= max_agent_steps graph steps, each
     # LLM call <= llm_max_prompt_chars in and llm_max_output_tokens out.
     max_agent_steps: int = 25

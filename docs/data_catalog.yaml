@@ -1,0 +1,289 @@
+# MarginMaestro data catalog (MM-135, ADR-0015) -- the source of truth.
+#
+# Every Cloud SQL table and every GCS document family, with its owner,
+# description, classification, freshness expectation and source. Three uses:
+#
+# 1. Dataplex Universal Catalog: infra/gcp/dataplex.tf reads this file and
+#    registers one custom entry per table / document family, each carrying the
+#    "marginmaestro-governance" aspect (owner, class, freshness, source).
+# 2. The LLM data-class filter (src/governance/classification.py): every
+#    `confidential` column declares how it is handled before text reaches a
+#    model (`llm`), and the filter applies it.
+# 3. tests/unit/test_data_catalog.py fails if a SQLAlchemy table, a column or a
+#    document family is missing here (or listed here but gone from the code).
+#
+# Classes (lowest to highest): public < internal < confidential. A table's class
+# is at least the highest class of its columns.
+#
+# `llm` (confidential columns only; public/internal data passes unchanged):
+#   pseudonymize -- replaced by the row's `pseudonym` column before the model
+#                   sees it (e.g. a counterparty's legal name -> CP-3); free
+#                   text that `contains` such a column is pseudonymized the same way
+#   mask         -- replaced by [CONFIDENTIAL] when the field is sent to a model
+#   deny         -- must never be sent; a prompt that contains it is blocked
+#                   (`pattern` is how the filter recognises it in free text)
+#
+# Freshness is the expectation, not a measured SLA. Data is synthetic except
+# market data (yfinance, FRED), which is real.
+
+version: 1
+
+tables:
+  counterparties:
+    owner: margin-operations
+    description: Counterparty master -- legal name, type, country and service tier.
+    class: confidential
+    freshness: Reference data; changes only when the book is re-seeded.
+    source: Synthetic (persistence.generators.counterparties, faker, seed 42).
+    columns:
+      id: {class: internal}
+      name: {class: confidential, llm: pseudonymize, pseudonym: id}
+      type: {class: internal}
+      country: {class: internal}
+      tier: {class: internal}
+
+  portfolios:
+    owner: margin-operations
+    description: One portfolio per counterparty, with its base currency.
+    class: internal
+    freshness: Reference data; changes only when the book is re-seeded.
+    source: Synthetic (persistence.generators.portfolios).
+    columns:
+      id: {class: internal}
+      counterparty_id: {class: internal}
+      currency: {class: internal}
+
+  positions:
+    owner: margin-operations
+    description: Trade positions per portfolio -- the book the exposure is computed on.
+    class: confidential
+    freshness: Reference data; changes only when the book is re-seeded.
+    source: Synthetic (persistence.generators.portfolios) over real tickers (MARKET_UNIVERSE).
+    columns:
+      id: {class: internal}
+      portfolio_id: {class: internal}
+      ticker: {class: public}
+      asset_class: {class: internal}
+      quantity: {class: confidential, llm: mask}
+      trade_date: {class: internal}
+
+  ratings:
+    owner: credit-risk
+    description: Counterparty credit-rating history (drives CSA rating triggers).
+    class: internal
+    freshness: Reference data; changes only when the book is re-seeded.
+    source: Synthetic (persistence.generators.ratings).
+    columns:
+      id: {class: internal}
+      counterparty_id: {class: internal}
+      grade: {class: internal}
+      rating_date: {class: internal}
+
+  collateral_items:
+    owner: collateral-management
+    description: Collateral held per counterparty, with value and haircut.
+    class: confidential
+    freshness: Reference data; changes only when the book is re-seeded.
+    source: Synthetic (persistence.generators.collateral, calibrated to each book).
+    columns:
+      id: {class: internal}
+      counterparty_id: {class: internal}
+      collateral_type: {class: internal}
+      ticker: {class: public}
+      value_usd: {class: confidential, llm: mask}
+      haircut_pct: {class: internal}
+
+  audit_log:
+    owner: compliance
+    description: Append-only audit trail of every margin-call lifecycle step (UPDATE/DELETE revoked from mm_app).
+    class: confidential
+    freshness: Written in real time by every orchestrator step.
+    source: Application (persistence.audit.record_audit_event).
+    columns:
+      id: {class: internal}
+      correlation_id: {class: internal}
+      counterparty_id: {class: internal}
+      event_type: {class: internal}
+      payload: {class: confidential, llm: deny}
+      created_at: {class: internal}
+
+  processed_events:
+    owner: platform-engineering
+    description: Idempotency claims -- an event, status or post recorded here was already handled.
+    class: internal
+    freshness: Written in real time.
+    source: Application (event agent, webhook, internal notifications).
+    columns:
+      event_id: {class: internal}
+      processed_at: {class: internal}
+
+  price_history:
+    owner: market-data
+    description: Daily end-of-day close per ticker.
+    class: public
+    freshness: Daily, after the 16:30 New York EOD job (Mon-Fri).
+    source: Real market data (yfinance).
+    columns:
+      ticker: {class: public}
+      price_date: {class: public}
+      price: {class: public}
+      currency: {class: public}
+      source: {class: public}
+
+  latest_prices:
+    owner: market-data
+    description: Most recent price per ticker (read by /exposure and the price chart).
+    class: public
+    freshness: Every 5 minutes during New York market hours (price-refresh job).
+    source: Real market data (yfinance).
+    columns:
+      ticker: {class: public}
+      price: {class: public}
+      currency: {class: public}
+      source: {class: public}
+      as_of: {class: public}
+      updated_at: {class: public}
+
+  reference_rates:
+    owner: market-data
+    description: Daily FRED reference rates, yields and the VIX (initial-margin input).
+    class: public
+    freshness: Daily, with the EOD job.
+    source: Real market data (FRED).
+    columns:
+      series_id: {class: public}
+      rate_date: {class: public}
+      value: {class: public}
+
+  orchestrator_checkpoints:
+    owner: platform-engineering
+    description: LangGraph checkpoints -- a paused margin call (exposure, call amount, approval state) survives a restart.
+    class: confidential
+    freshness: Written in real time at every orchestrator step.
+    source: Application (persistence.db.checkpoint_saver).
+    columns:
+      thread_id: {class: internal}
+      checkpoint_ns: {class: internal}
+      checkpoint_id: {class: internal}
+      parent_checkpoint_id: {class: internal}
+      checkpoint_type: {class: internal}
+      checkpoint_blob: {class: confidential, llm: deny}
+      metadata_type: {class: internal}
+      metadata_blob: {class: confidential, llm: deny}
+      created_at: {class: internal}
+
+  orchestrator_checkpoint_writes:
+    owner: platform-engineering
+    description: Pending writes for an orchestrator checkpoint.
+    class: confidential
+    freshness: Written in real time at every orchestrator step.
+    source: Application (persistence.db.checkpoint_saver).
+    columns:
+      thread_id: {class: internal}
+      checkpoint_ns: {class: internal}
+      checkpoint_id: {class: internal}
+      task_id: {class: internal}
+      idx: {class: internal}
+      channel: {class: internal}
+      write_type: {class: internal}
+      write_blob: {class: confidential, llm: deny}
+      task_path: {class: internal}
+
+  tickets:
+    owner: margin-operations
+    description: Escalation tickets (ServiceNow incident references).
+    class: internal
+    freshness: Written when a call escalates.
+    source: Application (agents.escalation).
+    columns:
+      id: {class: internal}
+      counterparty_id: {class: internal}
+      status: {class: internal}
+      external_ref: {class: internal}
+      created_at: {class: internal}
+      resolved_at: {class: internal}
+
+  users:
+    owner: platform-engineering
+    description: Demo logins and their roles.
+    class: confidential
+    freshness: Seeded once; changes only on re-seed.
+    source: Application (persistence.seed_users; bcrypt hashes).
+    columns:
+      username: {class: internal}
+      password_hash:
+        class: confidential
+        llm: deny
+        pattern: '\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}'
+      role: {class: internal}
+
+  user_counterparty_access:
+    owner: platform-engineering
+    description: Which counterparties a scoped user (margin analyst) may see -- the row-level security source.
+    class: internal
+    freshness: Seeded once; changes when coverage changes.
+    source: Application (persistence.seed_users).
+    columns:
+      username: {class: internal}
+      counterparty_id: {class: internal}
+
+  rag_chunks:
+    owner: margin-operations
+    description: Embedded document chunks for RAG (pgvector, Postgres only). A derived, rebuildable index of the GCS documents.
+    class: confidential
+    freshness: Rebuilt on re-ingestion (python -m rag.ingest).
+    source: Derived from the GCS documents bucket (rag.ingest).
+    migration_only: true # created by migration d4e1b9c2a7f5, no SQLAlchemy model
+    columns:
+      id: {class: internal}
+      counterparty_id: {class: internal}
+      doc_type: {class: internal}
+      text: {class: confidential, llm: pseudonymize, contains: [counterparties.name]}
+      metadata: {class: internal}
+      embedding: {class: internal}
+
+# GCS documents bucket (`<project>-documents`), one family per top-level folder.
+documents:
+  csa:
+    owner: legal
+    description: Credit Support Annexes, one per counterparty -- threshold, MTA, eligible collateral, haircuts, rating triggers.
+    class: confidential
+    freshness: On change (a new CSA or an amendment).
+    source: Synthetic (rag.csa_corpus), uploaded with python -m rag.gcs_documents.
+    contains: [counterparties.name]
+  policy:
+    owner: risk-management
+    description: The firm's margin policy.
+    class: internal
+    freshness: On change; reviewed yearly.
+    source: Synthetic, hand-written.
+    contains: []
+  disputes:
+    owner: margin-operations
+    description: Historical dispute notes (precedent for the reconciliation agent).
+    class: confidential
+    freshness: Append-only; a note per resolved dispute.
+    source: Synthetic, hand-written.
+    contains: [counterparties.name]
+  exceptions:
+    owner: margin-operations
+    description: Exception rules for reconciliation breaks.
+    class: internal
+    freshness: On change; reviewed yearly.
+    source: Synthetic, hand-written.
+    contains: []
+  escalation:
+    owner: margin-operations
+    description: Escalation procedures used when an SLA is breached.
+    class: internal
+    freshness: On change; reviewed yearly.
+    source: Synthetic, hand-written.
+    contains: []
+
+# Paths where confidential data reaches a model on purpose. Each one is a
+# decision recorded in ADR-0015 (amendment 2026-10-05), not a gap.
+llm_exceptions:
+  - path: desk_assistant.margin_status
+    fields: [orchestrator_checkpoints.checkpoint_blob]
+    exposes: Call amount, status and rationale of calls in the asking analyst's own scope (row-level security).
+    reason: Answering "what is CP-3's call?" is the assistant's job. The amount comes from code, rounded, and the model is told to quote it, never recompute it; legal names are still pseudonymized and other books stay invisible.

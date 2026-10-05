@@ -17,6 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+# MM-G88: the venv's bundled pip/setuptools vendor old wheel/jaraco.context
+# with known CVEs (found by Trivy); take the current releases.
+RUN pip install --no-cache-dir --upgrade pip setuptools
 
 COPY pyproject.toml ./
 COPY src ./src
@@ -49,8 +52,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -sSL https://packages.microsoft.com/config/debian/12/prod.list | tee /etc/apt/sources.list.d/mssql-release.list \
     && apt-get update \
     && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
+    && apt-get upgrade -y \
     && apt-get purge -y --auto-remove curl gnupg \
     && rm -rf /var/lib/apt/lists/*
+# MM-G88: `apt-get upgrade` above takes Debian security fixes newer than the
+# base image (Trivy found fixable perl/pcre2 CVEs); the base image's own
+# pip/setuptools are upgraded for the same reason as the venv's.
+RUN pip install --no-cache-dir --upgrade pip setuptools
 
 RUN useradd --create-home --shell /bin/bash appuser
 
@@ -58,6 +66,9 @@ COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
+# MM-135: the data catalog drives the LLM data-class filter (governance.catalog).
+COPY docs/data_catalog.yaml /app/docs/data_catalog.yaml
+ENV DATA_CATALOG_PATH=/app/docs/data_catalog.yaml
 USER appuser
 
 EXPOSE 8000

@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session, sessionmaker
 
     from agents.internal_notifications import InternalNotifier
+    from governance.classification import DataClassFilter
 
 RAG_COLLECTION = "csa_documents"
 
@@ -41,7 +42,39 @@ def get_llm(settings: Settings, openai_client: OpenAI | None = None) -> LLMClien
         get_guardrail(settings),
         get_redactor(settings),
         max_prompt_chars=settings.llm_max_prompt_chars,
+        data_filter=get_data_class_filter(settings),
     )
+
+
+def get_data_class_filter(
+    settings: Settings, session_factory: "sessionmaker[Session] | None" = None
+) -> "DataClassFilter | None":
+    """MM-135: the catalog-driven LLM data-class filter, or None
+    (LLM_DATA_CLASS_FILTER=none, the default: AWS/local unchanged). `catalog`
+    pseudonymizes counterparty legal names and blocks `deny` values in every
+    prompt, reading the names from the application database.
+
+    Without an explicit session factory the filter is built once per process
+    and reused: get_llm() runs per agent call, and each build would otherwise
+    open a new engine and drop the pseudonym cache."""
+    choice = _choice("LLM_DATA_CLASS_FILTER", settings.llm_data_class_filter, ("none", "catalog"))
+    if choice == "none":
+        return None
+    from governance.catalog import get_catalog
+    from governance.classification import DataClassFilter, DbPseudonymSource
+
+    if session_factory is not None:
+        return DataClassFilter(get_catalog(), DbPseudonymSource(session_factory))
+    if "default" not in _PROCESS_DATA_FILTER:
+        from persistence.db.engine import get_session_factory
+
+        _PROCESS_DATA_FILTER["default"] = DataClassFilter(
+            get_catalog(), DbPseudonymSource(get_session_factory(settings))
+        )
+    return _PROCESS_DATA_FILTER["default"]
+
+
+_PROCESS_DATA_FILTER: dict[str, "DataClassFilter"] = {}
 
 
 def get_redactor(settings: Settings) -> Redactor:

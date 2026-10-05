@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from adapters.factory import get_llm
 from calc.trade_diff import BreakItem, reconcile
 from config.settings import Settings, get_settings
+from governance.catalog import get_catalog
+from governance.classification import static_filter
 from persistence.models import Position
 from ports.llm import LLMClient
 from rag.models import Citation
@@ -38,9 +40,20 @@ class ReconciliationAgentResult(BaseModel):
 
 
 def _build_break_summary(break_items: list[BreakItem]) -> str:
+    """MM-135: position quantities are `confidential` (mask) in the data
+    catalog, so the model sees the ticker and the break type, never the sizes
+    -- the deterministic diff keeps the numbers. A missing side stays `None`:
+    that absence *is* the break."""
+    data_filter = static_filter(get_catalog())
+
+    def shown(quantity: float | None) -> object:
+        if quantity is None:
+            return None
+        return data_filter.mask_record("positions", {"quantity": quantity})["quantity"]
+
     return "\n".join(
         f"- {b.ticker}: {b.break_type.value} "
-        f"(ours={b.our_quantity}, counterparty={b.counterparty_quantity})"
+        f"(ours={shown(b.our_quantity)}, counterparty={shown(b.counterparty_quantity)})"
         for b in break_items
     )
 

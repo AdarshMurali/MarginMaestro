@@ -50,6 +50,10 @@ locals {
     LLM_PROVIDER       = "vertex"
     EMBEDDING_PROVIDER = "vertex"
     VECTOR_STORE       = "pgvector"
+
+    # MM-135: retrieved chunks are pseudonymized (legal names -> CP ids)
+    # before they reach the desk assistant's model.
+    LLM_DATA_CLASS_FILTER = "catalog"
   }
 }
 

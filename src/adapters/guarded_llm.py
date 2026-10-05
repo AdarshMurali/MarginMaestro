@@ -5,9 +5,13 @@ the margin call is held rather than sent on unscreened text. Every verdict is
 logged and counted (marginmaestro_guardrail_verdicts_total).
 
 The system prompt is ours, so it isn't screened.
+
+MM-135: an optional data-class filter (governance.classification) runs first,
+so confidential values from the data catalog are pseudonymized -- or the call
+blocked -- before masking, screening and the model.
 """
 
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 import structlog
 from pydantic import BaseModel
@@ -23,6 +27,9 @@ from ports.guardrail import (
 from ports.llm import LLMClient
 from ports.redactor import Redactor
 
+if TYPE_CHECKING:
+    from governance.classification import DataClassFilter
+
 T = TypeVar("T", bound=BaseModel)
 logger = structlog.get_logger(__name__)
 
@@ -34,11 +41,13 @@ class GuardedLLM:
         guardrail: Guardrail,
         redactor: Redactor | None = None,
         max_prompt_chars: int | None = None,
+        data_filter: "DataClassFilter | None" = None,
     ) -> None:
         self._llm = llm
         self._guardrail = guardrail
         self._redactor = redactor
         self._max_prompt_chars = max_prompt_chars
+        self._data_filter = data_filter
 
     def _prepare(self, user: str) -> str:
         """Mask personal/account data (MM-115), then screen the masked text --
@@ -52,6 +61,8 @@ class GuardedLLM:
             )
             GUARDRAIL_VERDICTS_TOTAL.labels("limits", "prompt", "blocked").inc()
             raise GuardrailBlocked("prompt", verdict)
+        if self._data_filter is not None:
+            user = self._apply_data_filter(user)
         if self._redactor is not None:
             masked = self._redactor.redact(user)
             if masked != user:
@@ -59,6 +70,28 @@ class GuardedLLM:
             user = masked
         self._check(user, "prompt")
         return user
+
+    def _apply_data_filter(self, user: str) -> str:
+        """Confidential values out (MM-135). A blocked prompt or an unavailable
+        filter is counted like any other guardrail outcome, then raised."""
+        assert self._data_filter is not None
+        name = self._data_filter.name
+        try:
+            return self._data_filter.redact(user)
+        except GuardrailBlocked as exc:
+            GUARDRAIL_VERDICTS_TOTAL.labels(name, "prompt", "blocked").inc()
+            logger.warning(
+                "guardrail_verdict",
+                guardrail=name,
+                stage="prompt",
+                outcome="blocked",
+                reasons=exc.verdict.reasons,
+            )
+            raise
+        except GuardrailUnavailable:
+            GUARDRAIL_VERDICTS_TOTAL.labels(name, "prompt", "unavailable").inc()
+            logger.error("guardrail_unavailable", guardrail=name, stage="prompt")
+            raise
 
     def _check(self, text: str, stage: Stage) -> None:
         try:
