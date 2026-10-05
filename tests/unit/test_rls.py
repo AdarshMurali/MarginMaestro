@@ -115,6 +115,10 @@ PUBLIC_GET_PATHS = {
     "/metrics",
     "/market-universe",
     "/public/stats",
+    # MM-133: Meta's webhook verification handshake. Meta can't sign in; the
+    # endpoint only echoes Meta's challenge when the verify token matches and
+    # returns no data.
+    "/webhooks/whatsapp",
     "/openapi.json",
     "/docs",
     "/docs/oauth2-redirect",

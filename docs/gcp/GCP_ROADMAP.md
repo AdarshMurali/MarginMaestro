@@ -178,13 +178,26 @@ Added 2026-10-02 after the first live run on GCP. Runs after G5, before G6 (user
 ### Phase G6 — WhatsApp client notifications (Epic: MM-93)
 ADR: 0016
 
-- **MM-G61** (MM-118) `whatsapp_notifier` MCP server (Cloud Run): approved `margin_call_notice` template, variables from calc output; `CLIENT_NOTIFIER=whatsapp|slack`.
-- **MM-G62** Inbound webhook with `X-Hub-Signature-256` verification (handles both replies and delivery `statuses` events) → Pub/Sub → Model Armor → existing respond/dispute path.
-- **MM-G63** Slack kept for internal approvals, escalations and SLA alerts; tests on both adapters.
+- **MM-G61** (MM-118) ~~`whatsapp_notifier` MCP server (Cloud Run)~~ in-process WhatsApp notifier (re-planned 2026-10-05, see "As built"): approved `margin_call_notice` template, variables from calc output; `CLIENT_NOTIFIER=whatsapp|slack`.
+- **MM-G62** (MM-133) Inbound webhook with `X-Hub-Signature-256` verification (handles both replies and delivery `statuses` events) → Pub/Sub → Model Armor → existing respond/dispute path.
+- **MM-G63** (MM-134) Slack kept for internal approvals, escalations and SLA alerts; tests on both adapters.
 
 **Prep done (2026-10-02):** Meta app, test number, token in Secret Manager; `margin_call_notice` template **approved**; both template and free-form sends delivered to the test phone at $0.00. See the ADR-0016 amendment.
 
 **Exit:** an approved call reaches a verified test phone on WhatsApp; the client's reply resolves the SLA.
+
+**As built (2026-10-05, ADR-0016 amendment), one PR for MM-118 / MM-133 / MM-134:**
+- **MM-G61 re-planned (MM-118):** an **in-process `WhatsAppNotifier`** behind the `Notifier` port, not an MCP server. MCP servers are read-only (MM-128), and no LLM may reach a client-messaging tool.
+  - Code formats the template's four variables (`MC-…` reference, counterparty + `(TEST)`, `USD 2,500,000.00`, the enforced deadline) and the Acknowledge payload `ack:<thread_id>`. No LLM is involved on the WhatsApp path.
+  - A `200` is recorded as `accepted`. A rejected send escalates at once (ServiceNow "notice undelivered"), with no Slack fallback.
+  - Settings: `CLIENT_NOTIFIER=slack|whatsapp`, `WHATSAPP_PHONE_NUMBER_ID/TEMPLATE_NAME/TEMPLATE_LANGUAGE/GRAPH_VERSION`; secrets `WHATSAPP_TOKEN/RECIPIENT`.
+- **MM-G62 (MM-133):** `GET /webhooks/whatsapp` (verify-token handshake) and `POST /webhooks/whatsapp` (`X-Hub-Signature-256` with `WHATSAPP_APP_SECRET`).
+  - **Inline, not Pub/Sub.** Each status and message is claimed once in `processed_events`, and an unexpected error releases the claim so Meta retries.
+  - **Statuses** are audited. `failed` escalates the call.
+  - **Acknowledge** = `/respond` (SLA met), only if it comes from the contact's number, for the latest notice, while the call is at the SLA step.
+  - **Free text** is screened by the guardrail (fail closed), masked, audited and flagged to Slack. "Dispute" is flagged; no client-dispute path exists, so a person handles it.
+- **MM-G63 (MM-134):** `INTERNAL_NOTIFIER=slack` posts once each: approval requested (+ manager second signature), client notified, client acknowledged, delivery failed, escalated (incident number), flagged replies, and the daily run summary. Defaults to `none` (AWS/local unchanged); Terraform sets `slack` on GCP.
+- **Terraform:** `var.client_notifier` (default `slack`, flip to `whatsapp` after the hand-off), `var.internal_notifier` (default `slack`), and the WhatsApp non-secret settings. Output `whatsapp_webhook_url`. Secrets via `scripts/gcp_whatsapp_secrets.ps1` (merges into `marginmaestro-prod`).
 
 ### Phase G7 — BigQuery analytics & audit warehouse (Epic: MM-94)
 ADR: 0013

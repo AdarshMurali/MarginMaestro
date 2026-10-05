@@ -33,7 +33,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | **Done** (live run on GCP comes with G5) |
 | G5 | MM-92 | Agent Platform desk assistant, Cloud Run deployment, observability | In progress (MM-123, 124, 126, 127 done; MM-128 … 132 planned) |
-| G6 | MM-93 | WhatsApp client notifications | Prep done (Meta account, token, template approved, delivery verified at $0); MM-118 (G61) next |
+| G6 | MM-93 | WhatsApp client notifications | Code done (MM-118, MM-133, MM-134; one PR). Then: secrets script, Meta webhook setup, flip `client_notifier` |
 | G7 | MM-94 | BigQuery analytics & audit warehouse | Not started |
 | G8 | MM-95 | Data governance (Dataplex, classification, lineage, audit, retention) | Not started |
 | G9 | MM-96 | Cut-over & AWS/Azure decommission | Not started |
@@ -48,6 +48,49 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-05 — MM-118 / MM-133 / MM-134: WhatsApp client notices, inbound webhook, Slack for internal traffic (Phase G6) (code done; secrets, Meta setup and Terraform apply pending)
+- **Done:**
+  - **MM-118, WhatsApp notifier.** `adapters/whatsapp_adapter.py` sends the approved `margin_call_notice` template over httpx.
+    - Body variables in order: reference, counterparty + `(TEST)`, amount (`USD 2,500,000.00`), deadline (`format_deadline`, the instant the SLA timer enforces). All are built by code in `agents/client_notice.py`; no LLM on this path.
+    - The Acknowledge quick-reply carries `ack:<thread_id>`, and `biz_opaque_callback_data` is the thread id.
+    - Receipt status is `accepted`. Free-form text only when `WHATSAPP_TEMPLATE_NAME` is empty.
+    - `Notifier` port gains `ClientNotice`, `send_notice` and `ClientDeliveryError`. `NotificationResult` becomes channel-neutral (`channel`, `message_id`, `delivery_status`, `reference`); the Slack fields stay for old checkpoints.
+    - `CLIENT_NOTIFIER=whatsapp` routes `send_notification` through it. `slack` (default) is unchanged.
+  - **Failure path.** A rejected or unconfigured send records a failed result, sets `delivery_failure` and `sla_outcome=breached`, and routes straight to `escalate`. ServiceNow "Margin call notice undelivered" carries Meta's error; Slack gets an internal post. No retry, no Slack fallback.
+  - **MM-133, webhook.** `GET /webhooks/whatsapp` is the verify-token handshake (public, added to the MM-106 allow-list and to CLAUDE.md's rule). `POST /webhooks/whatsapp` checks the HMAC first (401 bad, 503 unconfigured, 400 malformed).
+    - **Statuses** sent/delivered/read/failed go on the call's audit trail (`client_delivery_status`). `failed` for the current notice while the call waits resumes the run with `delivery_failed` → escalation. A `failed` for an older notice or after resolution is only audited.
+    - **Acknowledge** resumes `{"responded": true}` (SLA met), only if it comes from the contact's number, quotes the latest notice, and the call is at the SLA step. Otherwise it is `client_acknowledgement_ignored` with the reason.
+    - **Free text and other messages** are screened by the guardrail (fail closed), masked by the redactor, audited (`client_reply_received`) and flagged to Slack. Blocked text is withheld. "dispute" is flagged as a possible dispute for a person.
+    - Exactly once per status id + status and per message id (`processed_events` claims); an unexpected error releases the claim and returns 500, so Meta redelivers.
+  - **MM-134, internal Slack** (`agents/internal_notifications.py`, `INTERNAL_NOTIFIER=none|slack`). Code-built posts, each claimed once:
+    - approval requested (per thread and trigger, so a re-evaluation posts the new amount), manager second signature, client notified, client acknowledged (replaces the LLM SLA-met draft in WhatsApp mode), delivery failed, escalated with the incident number, flagged replies;
+    - the daily run summary (`daily_run_summary:<run id>`, from `/internal/margin/daily-run`).
+    - A failed post is logged, never fails the call, and is not retried (no stale "approval requested" after the approval).
+  - Trace summaries show "WhatsApp notice MC-… accepted / failed -- escalating".
+- **Decisions:** ADR-0016 amendment (2026-10-05).
+  - WhatsApp is an in-process notifier behind the approval gate, not an MCP server.
+  - WhatsApp is for clients, Slack for the firm.
+  - The webhook is processed inline with `processed_events` claims instead of via Pub/Sub. A Meta timeout during a slow escalation only causes a skipped duplicate.
+  - A delivery failure counts as an SLA breach and escalates.
+  - Demo: every counterparty maps to `WHATSAPP_RECIPIENT`. Production needs a contact table.
+  - Replies are linked to a call through the `send_notification` audit row (it now records `thread_id` for WhatsApp sends), so no new table or migration is needed.
+- **Tests:** 1129 pass (`tests/unit` + the notifier contract test) (new: `test_whatsapp_adapter.py`, `test_whatsapp_flow.py` (real graph on SQLite: send, ack, replay, statuses, failure → escalation, replies, claim release), `test_whatsapp_webhook.py`, `test_internal_notifications.py`, plus daily-summary, trace and escalation cases). The notifier contract test now runs on both adapters. Coverage 98% (`whatsapp_adapter`, `whatsapp_webhook`, `client_notice`, `internal_notifications`, `claims` 100%). ruff, black, mypy clean; `terraform fmt`/`validate` clean.
+- **Changed:** `src/ports/notifier.py`; `src/adapters/{whatsapp_adapter,slack_adapter,factory}.py`; `src/agents/{client_notice,internal_notifications,communication,orchestrator,escalation}.py`; `src/api/{whatsapp_webhook,main,margin_call_trace}.py`; `src/persistence/claims.py`; `src/config/settings.py`; `infra/gcp/{variables,cloud_run}.tf`; `scripts/gcp_whatsapp_secrets.ps1` (new) and a note in `scripts/gcp_secret_from_aws.ps1`; `.env.example`, `CLAUDE.md`, ADR-0016, `GCP_ROADMAP.md`.
+- **Terraform (not applied):** API env gains `CLIENT_NOTIFIER = var.client_notifier` (default `slack`), `INTERNAL_NOTIFIER = var.internal_notifier` (default `slack`, so internal posts start on apply), and `WHATSAPP_PHONE_NUMBER_ID` (`1382503808268641`), `WHATSAPP_TEMPLATE_NAME` (`margin_call_notice`), `WHATSAPP_TEMPLATE_LANGUAGE` (`en_US`), `WHATSAPP_GRAPH_VERSION` (`v23.0`). New output `whatsapp_webhook_url`. No new resources.
+- **Cost impact:** none. Test-number template sends are $0 (verified in prep), and the webhook runs on the existing Cloud Run service.
+- **Known issues / tech debt:**
+  - One verified recipient for every counterparty (demo).
+  - Free-text replies are linked to a call only when they quote the notice (WhatsApp "reply"). Otherwise they are flagged as "no call identified".
+  - The reply → call lookup scans the latest 500 `send_notification` audit rows. Fine at demo volume; a `client_messages` table would replace it at scale.
+  - The daily summary lists the outcomes of the request that completes first (a 503-then-retry day lists only the retry's dispatches).
+  - `en_US` is assumed as the template language; if Meta approved it as `en`, set `whatsapp_template_language`.
+- **Next step (user):**
+  1. Run `scripts\gcp_whatsapp_secrets.ps1`: it copies `whatsapptoken` from AWS and prompts for the app secret, verify token and recipient.
+  2. Merge, so CD deploys the image, then apply Terraform with `client_notifier` still `slack`.
+  3. In the Meta app dashboard (WhatsApp → Configuration), set the callback URL `https://marginmaestro-api-793928354019.us-central1.run.app/webhooks/whatsapp` and the same verify token, then subscribe to the `messages` field.
+  4. Flip `client_notifier = "whatsapp"` and apply.
+  5. Run one demo call: approve, tap Acknowledge, check SLA met and the Slack posts.
 
 ### 2026-10-05 — MM-125: Margin-call policy (Phase G5b) (code done; Terraform apply pending approval)
 - **Done:**

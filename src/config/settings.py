@@ -96,7 +96,14 @@ class Settings(BaseSettings):
     gemini_embedding_location: str = "us-central1"
     embedding_dimensions: int = 768
     event_bus: str = "kafka"  # kafka | pubsub (MM-119; same topic names)
+    # G6 (MM-118): who receives client-facing margin-call notices. slack
+    # (default: the pre-GCP behaviour, AWS/local unchanged) | whatsapp (the
+    # approved `margin_call_notice` template over the WhatsApp Cloud API).
     client_notifier: str = "slack"
+    # G6 (MM-134): internal firm traffic (approval requests, client
+    # acknowledgements, delivery failures, escalations, the daily run
+    # summary). none (default: tests and AWS unchanged) | slack.
+    internal_notifier: str = "none"
     # MM-122: SLA timers. none = no timer (the check is called by hand);
     # cloudtasks = one Cloud Tasks task per call, at its deadline, calling
     # {internal_base_url}/internal/sla/{thread_id}/check as the invoker SA.
@@ -169,6 +176,26 @@ class Settings(BaseSettings):
 
     slack_bot_token: str | None = None
     slack_channel_id: str | None = None
+
+    # G6 (MM-118/MM-133, ADR-0016): WhatsApp Cloud API. Non-secret settings
+    # come from env (Terraform); the token, the recipient, the app secret
+    # (webhook signatures) and the webhook verify token are keys in the JSON
+    # secret. Demo: every counterparty maps to the one verified test phone
+    # (WHATSAPP_RECIPIENT); production would read a per-counterparty contact
+    # table instead.
+    whatsapp_phone_number_id: str | None = None
+    # Empty = free-form text, which Meta only delivers inside the 24-hour
+    # customer-service window; business-initiated calls use the template.
+    whatsapp_template_name: str = "margin_call_notice"
+    whatsapp_template_language: str = "en_US"
+    whatsapp_graph_version: str = "v23.0"
+    whatsapp_token: str | None = None
+    whatsapp_recipient: str | None = None
+    whatsapp_app_secret: str | None = None
+    whatsapp_verify_token: str | None = None
+    # ADR-0016: every client-facing send of synthetic data carries a label.
+    # Production (real counterparties) would set this to "".
+    client_notice_label: str = "(TEST)"
 
     jira_base_url: str | None = None
     jira_email: str | None = None

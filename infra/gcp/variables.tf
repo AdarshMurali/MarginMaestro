@@ -105,3 +105,51 @@ variable "mcp_legacy_sa_invoker" {
   type        = bool
   default     = true
 }
+
+# --- G6: WhatsApp client notices, Slack for internal traffic (ADR-0016) ------
+
+variable "client_notifier" {
+  description = "Who receives client-facing margin-call notices (MM-118): slack (until the WhatsApp secrets and the Meta webhook are set up) or whatsapp."
+  type        = string
+  default     = "slack"
+
+  validation {
+    condition     = contains(["slack", "whatsapp"], var.client_notifier)
+    error_message = "client_notifier must be \"slack\" or \"whatsapp\"."
+  }
+}
+
+variable "internal_notifier" {
+  description = "Internal firm traffic on Slack (MM-134): approval requests, client acknowledgements, delivery failures, escalations, the daily run summary. none turns it off."
+  type        = string
+  default     = "slack"
+
+  validation {
+    condition     = contains(["none", "slack"], var.internal_notifier)
+    error_message = "internal_notifier must be \"none\" or \"slack\"."
+  }
+}
+
+variable "whatsapp_phone_number_id" {
+  description = "WhatsApp Cloud API sender: the Meta test number's phone_number_id (not a secret)."
+  type        = string
+  default     = "1382503808268641"
+}
+
+variable "whatsapp_template_name" {
+  description = "Approved utility template for business-initiated notices (empty = free-form text, 24-hour window only)."
+  type        = string
+  default     = "margin_call_notice"
+}
+
+variable "whatsapp_template_language" {
+  description = "Language code the template was approved in."
+  type        = string
+  default     = "en_US"
+}
+
+variable "whatsapp_graph_version" {
+  description = "Meta Graph API version for /messages."
+  type        = string
+  default     = "v23.0"
+}

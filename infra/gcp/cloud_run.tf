@@ -40,7 +40,17 @@ locals {
     DOCUMENT_STORE       = "gcs"
     GCS_DOCUMENTS_BUCKET = google_storage_bucket.documents.name
     EVENT_BUS            = "pubsub"
-    CLIENT_NOTIFIER      = "slack"
+
+    # G6 (ADR-0016): client notices on WhatsApp once var.client_notifier is
+    # flipped; Slack carries internal traffic. The token, recipient, app
+    # secret and verify token are keys in the JSON secret, not env vars.
+    # Meta calls POST {api_base_url}/webhooks/whatsapp (public, HMAC-signed).
+    CLIENT_NOTIFIER            = var.client_notifier
+    INTERNAL_NOTIFIER          = var.internal_notifier
+    WHATSAPP_PHONE_NUMBER_ID   = var.whatsapp_phone_number_id
+    WHATSAPP_TEMPLATE_NAME     = var.whatsapp_template_name
+    WHATSAPP_TEMPLATE_LANGUAGE = var.whatsapp_template_language
+    WHATSAPP_GRAPH_VERSION     = var.whatsapp_graph_version
 
     # Internal callers (Pub/Sub push, Cloud Scheduler, Cloud Tasks) sign as
     # mm-invoker-sa, with the service's own URL as the audience (MM-124).
@@ -168,4 +178,9 @@ resource "google_service_account_iam_member" "ci_acts_as_api" {
 output "api_url" {
   description = "Stable HTTPS URL of the API on Cloud Run (BACKEND_API_URL for Vercel)"
   value       = local.api_base_url
+}
+
+output "whatsapp_webhook_url" {
+  description = "Callback URL to register in the Meta app dashboard (WhatsApp > Configuration), MM-133"
+  value       = "${local.api_base_url}/webhooks/whatsapp"
 }
