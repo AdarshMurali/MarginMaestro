@@ -40,7 +40,7 @@ auth = ["bcrypt", "pyjwt"]
 # adk: the desk assistant (MM-129) -- deployed to Agent Runtime, not in the app image.
 # gcp-ops: tooling outside the app (billing kill-switch function), CI only.
 gcp = ["google-cloud-secret-manager", "google-genai", "google-cloud-storage", "google-cloud-modelarmor", "google-cloud-dlp", "google-cloud-pubsub", "google-cloud-tasks"]
-adk = ["google-adk>=2.11,<3", "google-cloud-aiplatform[agent-engines]>=1.148.1,<2"]
+adk = ["google-adk>=2.11,<3", "google-cloud-aiplatform[agent-engines,evaluation]>=1.148.1,<2"]
 gcp-ops = ["google-cloud-billing", "functions-framework"]
 observability = [
     "opentelemetry-api",

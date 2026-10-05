@@ -123,15 +123,30 @@ ADR: 0012
 ### Phase G5 — Agent Platform, Cloud Run deployment, observability (Epic: MM-92)
 ADRs: 0008, 0010
 
+**G5 at a glance (order of work, 2026-10-05).** Jira key, then roadmap id:
+
+| # | Jira | Roadmap id | Story | Status |
+|---|---|---|---|---|
+| 1 | MM-123 | MM-G52 | API on Cloud Run | Done |
+| 2 | MM-124 | MM-G59 | Event flow switched on + live E2E | Done |
+| 3 | MM-126 | MM-G57 | Automated CD to Cloud Run | Done |
+| 4 | MM-127 | MM-G54 | Observability (Trace, Logging, alert) | Done |
+| 5 | MM-128 | MM-G60 | Read-only MCP servers on Cloud Run | Done |
+| 6 | MM-129 | MM-G51 + MM-G58 | ADK desk assistant on Agent Runtime + Sessions | Live; billing check 2026-10-06 |
+| 7 | MM-130 | MM-G61 | Memory Bank | In progress |
+| 8 | MM-131 | MM-G56 | Agent Identity + per-tool IAM | In progress |
+| 9 | MM-132 | MM-G55 | Gen AI evaluation (golden set) | In progress |
+| 10 | MM-125 | G5b | Margin-call policy | In progress (parallel) |
+
 - **Re-plan 2026-10-04 (user decisions).** The pricing check found Agent Runtime (formerly Agent Engine) costs $0.085/vCPU-h and $0.009/GiB-h, with 50 vCPU-h and 100 GiB-h free each month. `min_instances` defaults to 1, but 0 is allowed. The **orchestrator stays on Cloud Run**: it's a fixed pipeline with in-process tools, so moving it would be a forced fit. Agent Platform hosts the **desk assistant** (MM-G58) instead, where every feature solves a real need: Runtime + Sessions for multi-turn chat, Memory Bank for analyst/counterparty memory, Agent Identity for per-agent audit, Gen AI evaluation for checking tool choices. The assistant is built on **Google ADK** (`google-adk`; the orchestrator stays LangGraph). **Agent Gateway is rejected again:** it uses alpha APIs, needs organization-level IAM (our project has no organization) and a VPC + Cloud NAT + PSC (about $30/month). Native Cloud Run IAM, with the agent as the only invoker of each MCP service, enforces tool access instead. Stories: MM-128 … MM-132.
-- **MM-128** **Read-only MCP servers on Cloud Run:** `mcp-market-data`, `mcp-rag`, `mcp-margin-status` (new). One service each, so IAM grants per tool set. Private (invoker: `mm-agent-sa`, later the agent principal), streamable HTTP, scale to zero. The analyst arrives in `X-MM-User`; the role and scope are read from the database and reads run under RLS. Notifier servers are never deployed.
+- **MM-G60** (MM-128) **Read-only MCP servers on Cloud Run:** `mcp-market-data`, `mcp-rag`, `mcp-margin-status` (new). One service each, so IAM grants per tool set. Private (invoker: `mm-agent-sa`, later the agent principal), streamable HTTP, scale to zero. The analyst arrives in `X-MM-User`; the role and scope are read from the database and reads run under RLS. Notifier servers are never deployed.
 - **MM-G51** (MM-129) **Desk assistant on Agent Runtime + Sessions** (ADK, `min_instances=0`, 1 vCPU / 2 GiB; 24h billing check after deploy). Absorbs MM-G58's UI chat.
-- **MM-130** **Memory Bank:** memories per analyst and per counterparty, qualitative behaviour only (amounts always come from SQL / calc).
+- **MM-G61** (MM-130) **Memory Bank:** memories per analyst and per counterparty, qualitative behaviour only (amounts always come from SQL / calc).
 - **MM-G56** (MM-131) **Agent Identity** for the desk assistant (GA on Agent Runtime; project-level trust domain, no organization needed) + `roles/run.invoker` for the agent principal on each read-only MCP service. *History: Agent Gateway was dropped on 2026-10-02 because nothing called the MCP servers; on 2026-10-04 it was rejected again on cost and organization grounds (see the re-plan above).*
 - **MM-G52** (MM-123) API on **Cloud Run** (min-instances 0), connected to Cloud SQL (IAM database login), Secret Manager and Pub/Sub; RAG corpus re-ingested into Cloud SQL. *MCP servers stay out of Cloud Run until MM-G58 gives them a consumer (done in MM-128).*
 - ~~**MM-G53** Frontend on Cloud Run~~ — *dropped 2026-10-02: once the API has an HTTPS Cloud Run URL, the Vercel frontend works as is (free), so moving it buys nothing.*
 - **MM-G54** (MM-127) OTel → **Cloud Trace**, JSON logs → **Cloud Logging**, metrics + alerts in **Cloud Monitoring** (SLA breaches, guardrail blocks, error rate). *As built: `TRACE_EXPORTER=otlp|cloudtrace|none`; one root span `margin_call_run` per orchestrator invocation; spans flushed at the end of each request; log lines carry `severity` and trace/span ids; one log-based metric + one email alert.*
-- **MM-G55** (MM-132) **Gen AI evaluation** of the desk assistant (tool trajectory, grounding) on a golden question set, run from CI on demand.
+- **MM-G55** (MM-132) **Gen AI evaluation** of the desk assistant (tool trajectory, grounding) on a golden question set, run from CI on demand. *As built: 12 golden cases run against the deployed agent as their users; deterministic checks (expected tool called, no tool for action requests, no out-of-scope counterparty, and every amount in an answer must match a tool result to the cent) plus Vertex AI rubrics (hallucination ≥ 0.75, final response quality ≥ 0.7). On-demand `desk-eval` workflow. The managed tool-use rubric rejected our traces, so tool choice is scored by the deterministic checks.*
 - **MM-G59** (MM-124) **Switch on the event flow:** Pub/Sub push subscriptions → `/internal/pubsub/push`, Cloud Scheduler price refresh (every 5 min, market hours, paused with `demo_online`), `SLA_SCHEDULER=cloudtasks`, OIDC audience = the API URL; then the live end-to-end run on GCP.
 - **MM-G57** (MM-126) **Automated CD:** `deploy-gcp` job in `ci.yml` after `build-and-push` — WIF login (MM-100), then `google-github-actions/deploy-cloudrun` with `docker.io/adarshmurali/marginmaestro:<sha>` for each Cloud Run service; `mm-ci-sa` gets `roles/run.developer` + `iam.serviceAccountUser` on the runtime accounts only. Every merge to `main` goes live with no manual step (the AWS EC2 deploy needed a manual `docker compose pull` over SSM). *As built: the roles are scoped to the one service and the one runtime account, not granted project-wide; the job smoke-tests `/health` and `/ready` and never runs two deploys at once.*
 

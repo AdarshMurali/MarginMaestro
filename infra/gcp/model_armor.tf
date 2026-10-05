@@ -25,12 +25,22 @@ resource "google_model_armor_template" "llm_traffic" {
     }
 
     # Responsible-AI content filters, on both prompts and responses.
+    # DANGEROUS is HIGH only: at MEDIUM it blocked a desk-assistant answer
+    # quoting CP-6's CSA terms (thresholds, rating triggers, default events)
+    # -- found by the MM-132 evaluation. Contract language about defaults
+    # and termination isn't dangerous content; the other filters and prompt
+    # injection stay at MEDIUM_AND_ABOVE.
     rai_settings {
       dynamic "rai_filters" {
-        for_each = ["HATE_SPEECH", "HARASSMENT", "SEXUALLY_EXPLICIT", "DANGEROUS"]
+        for_each = {
+          HATE_SPEECH       = "MEDIUM_AND_ABOVE"
+          HARASSMENT        = "MEDIUM_AND_ABOVE"
+          SEXUALLY_EXPLICIT = "MEDIUM_AND_ABOVE"
+          DANGEROUS         = "HIGH"
+        }
         content {
-          filter_type      = rai_filters.value
-          confidence_level = "MEDIUM_AND_ABOVE"
+          filter_type      = rai_filters.key
+          confidence_level = rai_filters.value
         }
       }
     }

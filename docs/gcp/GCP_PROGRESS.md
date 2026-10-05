@@ -89,6 +89,22 @@ At the end of each story, prepend an entry to **Log** using this template:
   4. Jira MM-125 → Done.
   5. Then G6 (WhatsApp, MM-118), whose template fills the same `{DEADLINE}`.
 
+### 2026-10-05 — MM-132: Evaluation of the desk assistant (code done; CI run pending the grant)
+- **Done:**
+  - **`src/evaluation/golden.py`.** 12 golden cases that don't depend on market data: pending approvals as an analyst; escalations as manager; call status; live price; price history; CSA terms in scope (approver) and out of scope (analyst1, no amounts allowed); policy search; refusing to approve or notify (no tool call allowed); prompt injection (no out-of-scope counterparty); a hypothetical that must not be calculated.
+  - **`src/evaluation/checks.py`.** Deterministic checks: expected tool called; forbidden or any tool not called; must-mention and whole-token must-not-mention; no amounts; **grounding**, where every amount in the answer must equal a number some tool returned in that turn (to the cent; years, dates, small counts and CP ids excluded). That's golden rule 1 as a test.
+  - **`src/evaluation/desk_eval.py`.** Runs each case in a fresh session as its user, through the same REST client the API uses (`AgentRuntimeDesk.run_turn`, split out of `chat`). Then Vertex AI Gen AI evaluation rubrics: hallucination ≥ 0.75, final response quality ≥ 0.7. It writes a JSON report and a GitHub step summary, and exits 1 on any failure.
+  - **`.github/workflows/desk-eval.yml`.** `workflow_dispatch` only (each run costs cents), WIF as `mm-ci-sa`, the agent from repo variable `DESK_AGENT_RESOURCE` (set), report uploaded as an artifact.
+  - The `adk` extra now includes `google-cloud-aiplatform[evaluation]`.
+- **Found by the first live run.** As approver, "CP-6's threshold and MTA?" called the RAG tool correctly, but Model Armor's `rai:dangerous` filter (MEDIUM) **blocked the answer**: contract language about defaults and rating triggers was read as dangerous. `DANGEROUS` is now `HIGH`; prompt injection and the other content filters stay at `MEDIUM_AND_ABOVE`, and the in-code guardrail still runs. The prompt-injection case was correctly blocked by `pi_and_jailbreak`.
+- **Live results before the fix (deployed agent, 2026-10-05):** deterministic 11/12 (the 1 failure is the Model Armor block above); rubrics hallucination 0.94 and final response quality 0.82.
+- **Decision:** the managed `tool_use_quality` rubric rejected our agent traces ("tool_usage is required") even with tool calls in `intermediate_events` and tool declarations in `agent_info`. It's dropped; tool choice is scored by the stricter deterministic trajectory checks.
+- **Tests:** `test_desk_evaluation.py` (25). They cover grounding edge cases, every check type, golden-set integrity, **tool declarations kept in sync with the real MCP servers' tool lists**, the runner (per-user fresh sessions, failures recorded not raised), rubric name parsing (`_v2`), the report/markdown and `main`.
+- **Next:**
+  - The `mm-ci-sa` `aiplatform.user` grant (in `agent_identity.tf`) and the Model Armor change ship in the batch apply.
+  - Then run `desk-eval` from Actions and expect 12/12.
+- **Cost impact:** a run is about 12 agent turns plus about 24 rubric judgements, cents. Manual only.
+
 ### 2026-10-05 — MM-130 + MM-131: Memory Bank and Agent Identity for the desk assistant (code done; cutover pending)
 - **Batch approval (user, 2026-10-05):** MM-130, MM-131, MM-132 and MM-125 were approved at once; MM-125 is being built in parallel in its own worktree. The user added Claude Code allow rules for `terraform -chdir=infra/gcp plan/apply` and `../.venv/Scripts/python.exe -m desk_assistant.deploy`.
 - **MM-130 — Memory Bank:**
