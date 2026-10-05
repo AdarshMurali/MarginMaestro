@@ -38,6 +38,7 @@ from agents.escalation import (
     open_servicenow_incident,
     retrieve_escalation_procedure,
 )
+from agents.state_serde import checkpoint_serializer
 from calc.breach import effective_threshold, evaluate_breach
 from calc.im import compute_initial_margin
 from calc.materiality import (
@@ -878,7 +879,11 @@ def build_orchestrator_graph(
     market_feed = market_feed or get_market_feed(settings)
     sla_scheduler = sla_scheduler or get_sla_scheduler(settings)
     _db_write_lock = threading.Lock()
-    checkpointer = checkpointer or SqlCheckpointSaver(session_factory, lock=_db_write_lock)
+    checkpointer = checkpointer or SqlCheckpointSaver(
+        session_factory,
+        lock=_db_write_lock,
+        serde=checkpoint_serializer(MarginCallState),
+    )
     # MM-134: internal Slack traffic, each post once (claimed in processed_events).
     internal_notifier = internal_notifier or get_internal_notifier(settings, session_factory)
 
