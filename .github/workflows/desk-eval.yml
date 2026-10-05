@@ -1,0 +1,56 @@
+# MM-132: on-demand evaluation of the desk assistant on Agent Runtime.
+# Runs the golden question set against the deployed agent: deterministic
+# checks (tool choice, refusals, scope, grounding of every amount) plus
+# Vertex AI Gen AI evaluation rubrics. Fails on any regression.
+# Manual only: each run costs a few cents of Gemini tokens.
+name: Desk assistant evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      rubrics:
+        description: "Also score Vertex AI rubrics (hallucination, response quality)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # keyless login to GCP (WIF, MM-100)
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: pip install -e ".[adk,rag]"
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
+
+      - name: Evaluate
+        env:
+          PYTHONPATH: src
+          AGENT: ${{ vars.DESK_AGENT_RESOURCE }}
+          RUBRICS: ${{ inputs.rubrics }}
+        run: |
+          flags=""
+          [ "$RUBRICS" = "true" ] || flags="--no-rubrics"
+          python -m evaluation.desk_eval --agent "$AGENT" --out desk-eval-report.json $flags
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desk-eval-report
+          path: desk-eval-report.json

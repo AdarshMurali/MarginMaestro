@@ -49,6 +49,16 @@ class AgentRuntimeDesk:
         self._http = http
 
     def chat(self, username: str, message: str, session_id: str | None) -> DeskChatResponse:
+        session_id, events = self.run_turn(username, message, session_id)
+        answer, tools = summarize_events(events)
+        logger.info("desk_chat_turn", username=username, session_id=session_id, tools=tools)
+        return DeskChatResponse(session_id=session_id, answer=answer, tools_used=tools)
+
+    def run_turn(
+        self, username: str, message: str, session_id: str | None
+    ) -> tuple[str, list[dict]]:
+        """One turn's raw events (model text, tool calls and tool results) --
+        what the evaluation job (MM-132) scores; chat() summarizes them."""
         session_id = session_id or self._create_session(username)
         response = self._http.post(
             f"{self._base}:streamQuery?alt=sse",
@@ -60,9 +70,7 @@ class AgentRuntimeDesk:
             timeout=120,
         )
         _raise_for_status(response)
-        answer, tools = summarize_events(_events(response.iter_lines()))
-        logger.info("desk_chat_turn", username=username, session_id=session_id, tools=tools)
-        return DeskChatResponse(session_id=session_id, answer=answer, tools_used=tools)
+        return session_id, list(_events(response.iter_lines()))
 
     def _create_session(self, username: str) -> str:
         response = self._http.post(
