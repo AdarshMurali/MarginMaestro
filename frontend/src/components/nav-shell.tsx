@@ -24,12 +24,13 @@ const TABS: { href: string; label: string; isActive: (pathname: string) => boole
   },
   { href: "/approvals", label: "Approvals & SLA", isActive: (p) => p === "/approvals" },
   { href: "/simulate", label: "Simulate Event", isActive: (p) => p === "/simulate" },
+  { href: "/desk", label: "Ask the Desk", isActive: (p) => p === "/desk" },
 ];
 
 const NO_CHROME_ROUTES = new Set(["/", "/login", "/landing", "/landing-v3", "/logo-preview"]);
 
 /** Persistent nav shell (MM-58) -- wraps every authenticated page with the
- * brand mark, the six Phase 8 tabs, and the session bar. Renders nothing but
+ * brand mark, the nav tabs, and the session bar. Renders nothing but
  * `children` on "/" (public landing page, promoted from landing-v2 on
  * 2026-08-06 -- has its own header, no session yet), /login (own centered
  * layout, no session yet), /landing* (earlier standalone design-exploration

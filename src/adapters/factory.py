@@ -8,11 +8,15 @@ from typing import Any
 from openai import OpenAI
 
 from adapters.chroma_adapter import ChromaVectorStore
+
+# get_guardrail lives in its own light module so the desk assistant (MM-129,
+# Agent Runtime) can use it without the OpenAI/Chroma imports; re-exported.
+from adapters.guardrail_factory import get_guardrail
 from adapters.openai_adapter import OpenAIChat, OpenAIEmbedder
+from adapters.selection import choose as _choice
 from config.settings import Settings
 from ports.embedder import Embedder
 from ports.event_bus import EventBus
-from ports.guardrail import Guardrail
 from ports.llm import LLMClient
 from ports.notifier import Notifier
 from ports.redactor import Redactor
@@ -20,13 +24,6 @@ from ports.sla_scheduler import SlaScheduler
 from ports.vector_store import VectorStore
 
 RAG_COLLECTION = "csa_documents"
-
-
-def _choice(name: str, value: str, allowed: tuple[str, ...]) -> str:
-    choice = value.strip().lower()
-    if choice not in allowed:
-        raise ValueError(f"{name} must be one of {allowed}, got {value!r}")
-    return choice
 
 
 def get_llm(settings: Settings, openai_client: OpenAI | None = None) -> LLMClient:
@@ -62,34 +59,6 @@ def get_redactor(settings: Settings) -> Redactor:
             ]
         )
     return NoRedactor() if choice == "none" else RegexRedactor()
-
-
-def get_guardrail(settings: Settings) -> Guardrail:
-    choice = _choice(
-        "GUARDRAIL_PROVIDER", settings.guardrail_provider, ("incode", "modelarmor", "none")
-    )
-    if choice == "modelarmor":
-        from adapters.model_armor_guardrail import ModelArmorGuardrail, model_armor_client
-
-        if not settings.gcp_project_id:
-            raise ValueError("GUARDRAIL_PROVIDER=modelarmor requires GCP_PROJECT_ID")
-        template = (
-            f"projects/{settings.gcp_project_id}/locations/{settings.model_armor_location}"
-            f"/templates/{settings.model_armor_template_id}"
-        )
-        from adapters.composite_guardrail import CompositeGuardrail
-        from adapters.incode_guardrail import InCodeGuardrail
-
-        # Defence in depth: Model Armor plus the in-code checks; either blocks.
-        return CompositeGuardrail(
-            [
-                ModelArmorGuardrail(template, model_armor_client(settings.model_armor_location)),
-                InCodeGuardrail(),
-            ]
-        )
-    from adapters.incode_guardrail import InCodeGuardrail, NoGuardrail
-
-    return NoGuardrail() if choice == "none" else InCodeGuardrail()
 
 
 def _get_model(settings: Settings, openai_client: OpenAI | None = None) -> LLMClient:

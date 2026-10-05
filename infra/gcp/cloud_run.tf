@@ -56,6 +56,12 @@ locals {
 
     # Traces go to Cloud Trace (MM-127); mm-api-sa has roles/cloudtrace.agent.
     TRACE_EXPORTER = "cloudtrace"
+
+    # "Ask the margin desk" (MM-129): chat is on once the agent is deployed
+    # and its resource name is set. mm-api-sa's aiplatform.user covers the
+    # reasoningEngines query/streamQuery calls.
+    DESK_ASSISTANT      = var.desk_agent_resource == "" ? "none" : "agent_runtime"
+    DESK_AGENT_RESOURCE = var.desk_agent_resource
   }
 }
 

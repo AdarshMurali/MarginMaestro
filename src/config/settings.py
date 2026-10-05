@@ -58,6 +58,19 @@ class Settings(BaseSettings):
     # golden regression. Gemini 3.x is served only from `global`.
     gemini_model: str = "gemini-2.5-flash"
     gemini_location: str = "us-central1"
+
+    # MM-129: "Ask the margin desk" (ADK agent on Agent Runtime). The API
+    # talks to it when DESK_ASSISTANT=agent_runtime; "none" turns chat off.
+    desk_assistant: str = "none"
+    # projects/<p>/locations/<l>/reasoningEngines/<id>, printed by the deploy script.
+    desk_agent_resource: str = ""
+    # The agent's MCP endpoints (Terraform output mcp_urls) and how it signs
+    # calls to them: "google" = an ID token per service (Cloud Run IAM),
+    # "none" = local servers.
+    desk_mcp_market_data_url: str = ""
+    desk_mcp_rag_url: str = ""
+    desk_mcp_margin_status_url: str = ""
+    desk_mcp_auth: str = "none"
     # Gemini 3.x: thinking level (low | high); Gemini 2.5: thinking budget in
     # tokens (0 = off). Extraction/drafting don't need thinking. "" / None =
     # the model default.

@@ -93,3 +93,9 @@ variable "frontend_origin" {
   type        = string
   default     = "https://marginmaestro.vercel.app"
 }
+
+variable "desk_agent_resource" {
+  description = "The desk assistant on Agent Runtime (projects/<p>/locations/<l>/reasoningEngines/<id>), printed by `python -m desk_assistant.deploy` (MM-129). Empty keeps chat off."
+  type        = string
+  default     = ""
+}

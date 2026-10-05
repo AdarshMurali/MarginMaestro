@@ -40,3 +40,6 @@ class SlidingWindowLimiter:
 
 
 ACTION_LIMITER = SlidingWindowLimiter()
+# MM-129: desk assistant chat turns (each one calls Gemini), counted separately
+# so chatting can't use up an approver's action budget.
+DESK_LIMITER = SlidingWindowLimiter()
