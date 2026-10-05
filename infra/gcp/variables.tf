@@ -154,6 +154,36 @@ variable "whatsapp_graph_version" {
   default     = "v23.0"
 }
 
+# --- G8: data governance (ADR-0015) -------------------------------------------
+
+variable "lineage_exporter" {
+  description = "Per-margin-call lineage (MM-136): datalineage (OpenLineage events to the Data Lineage API, best effort) or none."
+  type        = string
+  default     = "datalineage"
+
+  validation {
+    condition     = contains(["none", "datalineage"], var.lineage_exporter)
+    error_message = "lineage_exporter must be \"none\" or \"datalineage\"."
+  }
+}
+
+variable "documents_retention_days" {
+  description = "GCS retention policy on the documents bucket (MM-137): an object can't be deleted or replaced until it is this old. Not locked -- a locked policy can never be shortened or removed."
+  type        = number
+  default     = 30
+}
+
+variable "sdp_scan_period_days" {
+  description = "How often the Sensitive Data Protection inspection job re-scans the documents bucket (MM-137). 1-60 days."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.sdp_scan_period_days >= 1 && var.sdp_scan_period_days <= 60
+    error_message = "sdp_scan_period_days must be between 1 and 60."
+  }
+}
+
 variable "desk_agent_identity" {
   description = "Grant the desk assistant's Agent Identity principal its roles (MM-131). Off: Agent Identity's mTLS-bound tokens can't reach Model Armor's regional endpoint, so the agent runs as mm-agent-sa."
   type        = bool

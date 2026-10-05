@@ -72,6 +72,13 @@ locals {
     # reasoningEngines query/streamQuery calls.
     DESK_ASSISTANT      = var.desk_agent_resource == "" ? "none" : "agent_runtime"
     DESK_AGENT_RESOURCE = var.desk_agent_resource
+
+    # Data governance (G8, ADR-0015): confidential catalog values never reach
+    # the model unmasked (MM-135), and every margin call emits lineage to the
+    # Data Lineage API (MM-136; mm-api-sa has roles/datalineage.producer).
+    LLM_DATA_CLASS_FILTER = "catalog"
+    LINEAGE_EXPORTER      = var.lineage_exporter
+    LINEAGE_LOCATION      = var.region
   }
 }
 
