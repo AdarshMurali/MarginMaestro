@@ -68,7 +68,7 @@ At the end of each story, prepend an entry to **Log** using this template:
   2. After CD finishes, plan and apply `mm128.tfplan`.
   3. Set `MCP_CD_ENABLED=true`.
 - **Tests:** `tests/unit/test_mcp_http.py` (24): caller scoping, the RAG and status tools, and HTTP with a `*.run.app` Host header (header forwarding, a missing header is an error). Suite: 900 passed, coverage 98%. The 7 Kafka/Chroma contract tests need Docker, which wasn't running locally; CI runs them.
-- **Verified locally:** `python -m mcp_servers.http market-data` over real HTTP, called with the official MCP client: `initialize` → `tools/list` → `get_current_prices` returned live yfinance prices (HPE $69.33).
+- **Verified locally:** the market-data server over real HTTP, called with the official MCP client: `initialize` → `tools/list` → `get_current_prices` returned live yfinance prices (HPE $69.33).
 - **Cost impact:** about $0. Scale to zero, CPU only during requests, inside the Cloud Run free tier; no VPC, NAT or load balancer.
 
 ### 2026-10-02 — MM-93 (G6 prep): `margin_call_notice` approved, template delivery verified

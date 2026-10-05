@@ -12,7 +12,8 @@
 #   never deployed, so no LLM can reach a client outside the approval gate.
 # - Scale to zero, CPU only during requests: $0 while idle, demo traffic
 #   stays inside the Cloud Run free tier.
-# - Same Docker Hub image as the API; only the command differs. CD (MM-126)
+# - Same Docker Hub image as the API; only the command (uvicorn on
+#   mcp_servers.http:create_app) and MCP_SERVER differ. CD (MM-126)
 #   rolls the image, so Terraform ignores later image changes.
 
 locals {
@@ -79,8 +80,8 @@ resource "google_cloud_run_v2_service" "mcp" {
 
     containers {
       image   = var.api_image
-      command = ["python", "-m", "mcp_servers.http"]
-      args    = [each.key]
+      command = ["uvicorn"]
+      args    = ["--factory", "mcp_servers.http:create_app", "--host", "0.0.0.0", "--port", "8080"]
 
       ports {
         container_port = 8080
@@ -96,7 +97,10 @@ resource "google_cloud_run_v2_service" "mcp" {
       }
 
       dynamic "env" {
-        for_each = merge(local.mcp_env, { MCP_ALLOWED_HOSTS = local.mcp_hosts[each.key] })
+        for_each = merge(local.mcp_env, {
+          MCP_SERVER        = each.key
+          MCP_ALLOWED_HOSTS = local.mcp_hosts[each.key]
+        })
         content {
           name  = env.key
           value = env.value

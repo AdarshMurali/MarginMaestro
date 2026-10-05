@@ -1,19 +1,17 @@
 """Serves one MCP server over streamable HTTP (MM-128) -- the Cloud Run
 entrypoint. Each read-only server is its own service, so IAM can grant the
-desk assistant access per tool set:
+desk assistant access per tool set. Started by the uvicorn CLI, like the
+API's container (the bind address lives in the command, not in code):
 
-    python -m mcp_servers.http market-data
+    MCP_SERVER=market-data uvicorn --factory mcp_servers.http:create_app         --host 0.0.0.0 --port 8080
 
-The server name can also come from MCP_SERVER. Only read-only servers are
-listed: the notifiers (Slack, ServiceNow) are never reachable from an LLM
+Only read-only servers are listed: the notifiers (Slack, ServiceNow) are never reachable from an LLM
 over the network, so client contact stays behind the approval gate.
 """
 
 import os
-import sys
 from collections.abc import Callable
 
-import uvicorn
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
 
@@ -59,13 +57,7 @@ def build_app(name: str) -> Starlette:
     return get_server(name).streamable_http_app()
 
 
-def main(argv: list[str] | None = None) -> None:
-    args = sys.argv[1:] if argv is None else argv
-    name = args[0] if args else os.environ.get("MCP_SERVER", "")
+def create_app() -> Starlette:
+    """uvicorn --factory entrypoint: the server named by MCP_SERVER."""
     configure_logging()
-    host = "0.0.0.0"  # NOSONAR -- the container listens on all interfaces
-    uvicorn.run(build_app(name), host=host, port=int(os.environ.get("PORT", "8080")))
-
-
-if __name__ == "__main__":
-    main()
+    return build_app(os.environ.get("MCP_SERVER", ""))

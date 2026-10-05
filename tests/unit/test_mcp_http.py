@@ -324,22 +324,20 @@ def test_http_call_without_a_user_is_an_error(session_factory):
     retrieve.assert_not_called()
 
 
-def test_main_serves_the_named_server_on_port(monkeypatch):
-    monkeypatch.setenv("PORT", "9090")
-    with (
-        patch.object(http, "configure_logging"),
-        patch.object(http.uvicorn, "run") as run,
-    ):
-        http.main(["rag"])
+def test_create_app_serves_the_server_named_in_the_environment(monkeypatch):
+    monkeypatch.setenv("MCP_SERVER", "market-data")
+    with patch.object(http, "configure_logging") as configure:
+        app = http.create_app()
 
-    assert run.call_args.kwargs["port"] == 9090
-    assert run.call_args.kwargs["host"] == "0.0.0.0"
+    configure.assert_called_once()
+    with TestClient(app) as client:
+        assert client.get("/health").json()["server"] == "market-data"
 
 
-def test_main_reads_the_server_name_from_the_environment(monkeypatch):
-    monkeypatch.setenv("MCP_SERVER", "unknown")
+def test_create_app_rejects_an_unknown_server(monkeypatch):
+    monkeypatch.setenv("MCP_SERVER", "slack-notifier")
     with patch.object(http, "configure_logging"), pytest.raises(ValueError):
-        http.main([])
+        http.create_app()
 
 
 def test_caller_module_logs_without_leaking_headers(session_factory):
