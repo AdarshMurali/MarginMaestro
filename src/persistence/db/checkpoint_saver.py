@@ -33,7 +33,7 @@ removes the race entirely rather than relying on backend-specific luck."""
 import threading
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (
@@ -51,10 +51,16 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from persistence.db.models import CheckpointORM, CheckpointWriteORM
 
+if TYPE_CHECKING:
+    from langgraph.checkpoint.serde.base import SerializerProtocol
+
 
 class SqlCheckpointSaver(BaseCheckpointSaver[int]):
     def __init__(
-        self, session_factory: sessionmaker[Session], lock: "threading.Lock | None" = None
+        self,
+        session_factory: sessionmaker[Session],
+        lock: "threading.Lock | None" = None,
+        serde: "SerializerProtocol | None" = None,
     ) -> None:
         """`lock` is injectable so a caller that also writes to the same
         underlying connection from outside this class (e.g. the
@@ -63,8 +69,12 @@ class SqlCheckpointSaver(BaseCheckpointSaver[int]):
         put()/put_writes() calls -- see this module's docstring for why any
         concurrent write against a single shared connection is a real risk,
         not just a theoretical one. Defaults to a private lock when not
-        given, matching this class's original (pre-MM-91) behavior."""
-        super().__init__()
+        given, matching this class's original (pre-MM-91) behavior.
+
+        `serde`: the orchestrator passes a serializer whose msgpack allow-list
+        names every type its state can hold (agents.state_serde), so saved
+        runs stay readable once LangGraph blocks unregistered types."""
+        super().__init__(serde=serde)
         self._session_factory = session_factory
         self._lock = lock or threading.Lock()
 
