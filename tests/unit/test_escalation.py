@@ -90,6 +90,29 @@ class TestOpenServiceNowIncident:
         assert "474,000.00 USD" in body["description"]
         assert "mock procedure" in body["description"]
 
+    def test_undelivered_notice_says_so_instead_of_sla_missed(self) -> None:
+        """G6: a WhatsApp notice that never reached the client escalates too."""
+        client = self._mock_http_client()
+
+        open_servicenow_incident(
+            "corr-1",
+            "CP-1",
+            474_000.0,
+            "USD",
+            100_000.0,
+            datetime(2026, 8, 1, 12, 0, tzinfo=UTC),
+            datetime(2026, 8, 1, 13, 0, tzinfo=UTC),
+            "procedure",
+            settings=_configured_settings(),
+            http_client=client,
+            delivery_failure="WhatsApp reported the notice failed (131026)",
+        )
+
+        body = client.post.call_args.kwargs["json"]
+        assert body["short_description"] == "Margin call notice undelivered -- CP-1"
+        assert "131026" in body["description"]
+        assert "SLA deadline missed" not in body["description"]
+
     def test_high_urgency_past_5x_threshold(self) -> None:
         client = self._mock_http_client()
 

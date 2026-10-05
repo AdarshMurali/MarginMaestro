@@ -94,3 +94,33 @@ def test_rejects_a_missing_or_wrong_token(client, headers):
 
     assert response.status_code == 401
     handle_impact.assert_not_called()
+
+
+def test_posts_one_internal_summary_when_slack_is_on(client):
+    """MM-134: the daily run summary goes to Slack, keyed by the run id."""
+    outcomes = [
+        TriggerOutcome(
+            counterparty_id="CP-1",
+            action=TriggerAction.STARTED,
+            thread_id="daily-margin-run:2026-10-05:CP-1",
+            breached=True,
+            call_amount=250_785.91,
+        )
+    ]
+    notifier = MagicMock(enabled=True)
+    with patch("api.main.get_api_internal_notifier", return_value=notifier):
+        response, *_ = _post(client, AUTH, {"return_value": outcomes})
+
+    assert response.status_code == 200
+    key, text = notifier.post_once.call_args.args
+    assert key == "daily_run_summary:daily-margin-run:2026-10-05"
+    assert "2 counterparties evaluated, 1 call(s) raised" in text
+
+
+def test_no_summary_when_internal_notifier_is_off(client):
+    notifier = MagicMock(enabled=False)
+    with patch("api.main.get_api_internal_notifier", return_value=notifier):
+        response, *_ = _post(client, AUTH, {"return_value": []})
+
+    assert response.status_code == 200
+    notifier.post_once.assert_not_called()

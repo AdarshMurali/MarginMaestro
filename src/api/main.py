@@ -1,19 +1,25 @@
 import base64
 import binascii
+import hmac
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from functools import lru_cache
 
-from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from pydantic import ValidationError
 from sqlalchemy.orm import Session, sessionmaker
 
-from adapters.factory import get_event_bus
+from adapters.factory import get_event_bus, get_guardrail, get_internal_notifier, get_redactor
 from adapters.pubsub_admin import topic_for_subscription
+from agents import internal_notifications as internal
+from agents.internal_notifications import InternalNotifier
 from agents.margin_policy import CounterpartyBusyError
 from agents.orchestrator import build_orchestrator_graph, resume_run
 from api.audit_log import get_margin_call_audit_log
@@ -71,6 +77,7 @@ from api.schemas import (
     SlaResponse,
 )
 from api.simulate import trigger_simulation
+from api.whatsapp_webhook import WebhookDeps, WebhookPayload, process_webhook, verify_signature
 from config.settings import get_settings
 from observability.tracing import configure_tracing
 from persistence.daily_close import load_daily_closes, refresh_reference_rates
@@ -134,6 +141,28 @@ def get_desk_client() -> AgentRuntimeDesk:
 def get_push_event_bus() -> EventBus:
     """One publisher per process for the push endpoint (impact sets, dead letters)."""
     return get_event_bus(get_settings())
+
+
+@lru_cache
+def get_api_internal_notifier() -> InternalNotifier:
+    """Internal Slack posts made by the API itself (MM-134): the daily run
+    summary and flagged client replies."""
+    return get_internal_notifier(get_settings(), get_db_session_factory())
+
+
+@lru_cache
+def get_whatsapp_webhook_deps() -> WebhookDeps:
+    """One guardrail/redactor client per process for the webhook (MM-133)."""
+    settings = get_settings()
+    return WebhookDeps(
+        graph=get_orchestrator_graph(),
+        session_factory=get_db_session_factory(),
+        settings=settings,
+        guardrail=get_guardrail(settings),
+        redactor=get_redactor(settings),
+        internal_notifier=get_api_internal_notifier(),
+        resume=resume_run,
+    )
 
 
 def approver_action(approver: str = Depends(require_approver)) -> str:
@@ -319,10 +348,9 @@ async def manager_approve_margin_call(
 async def respond_to_margin_call(
     thread_id: str, _approver: str = Depends(approver_action)
 ) -> SlaResponse:
-    """PROVISIONAL (MM-42): stands in for a real counterparty-facing response
-    channel, which doesn't exist in this demo -- simulates the counterparty
-    fulfilling the call within the SLA window. See docs/ROADMAP.md's Phase 6
-    note; revisit before treating as final."""
+    """An approver records the counterparty's response by hand (MM-42). Since
+    G6 the client can also acknowledge on WhatsApp, which resolves the SLA
+    the same way via POST /webhooks/whatsapp (MM-133)."""
     graph = get_orchestrator_graph()
     _require_pending_node(graph, thread_id, "await_sla_response")
     result = resume_run(graph, thread_id, {"responded": True})
@@ -489,6 +517,18 @@ def daily_margin_run() -> DailyMarginRunResponse:
         raise HTTPException(
             status_code=503, detail=str(exc), headers={"Retry-After": "60"}
         ) from exc
+    # MM-134: one internal summary per day -- the first request that
+    # completes posts it; a same-day retry or rerun is a no-op (claimed).
+    notifier = get_api_internal_notifier()
+    if notifier.enabled:
+        notifier.post_once(
+            f"daily_run_summary:{impact.event_id}",
+            internal.daily_run_summary(
+                impact.event_id,
+                len(impact.counterparty_ids),
+                [o.model_dump(mode="json") for o in outcomes],
+            ),
+        )
     return DailyMarginRunResponse(
         event_id=impact.event_id,
         counterparties=len(impact.counterparty_ids),
@@ -553,6 +593,47 @@ def internal_sla_check(thread_id: str) -> SlaResponse:
             status_code=503, detail="SLA deadline not reached yet", headers={"Retry-After": "30"}
         )
     return SlaResponse(thread_id=thread_id, sla_outcome=result["sla_outcome"])
+
+
+@app.get("/webhooks/whatsapp", response_class=PlainTextResponse)
+async def whatsapp_webhook_verify(
+    hub_mode: str | None = Query(None, alias="hub.mode"),
+    hub_verify_token: str | None = Query(None, alias="hub.verify_token"),
+    hub_challenge: str | None = Query(None, alias="hub.challenge"),
+) -> PlainTextResponse:
+    """Meta's one-time subscription check (MM-133). Public by necessity --
+    Meta can't sign in -- and it reveals nothing: it echoes Meta's own
+    challenge only when the shared verify token matches (constant time)."""
+    expected = get_settings().whatsapp_verify_token
+    if not expected:
+        raise HTTPException(status_code=503, detail="WhatsApp webhook is not configured")
+    if (
+        hub_mode == "subscribe"
+        and hub_verify_token is not None
+        and hmac.compare_digest(hub_verify_token.encode("utf-8"), expected.encode("utf-8"))
+    ):
+        return PlainTextResponse(hub_challenge or "")
+    raise HTTPException(status_code=403, detail="Verification failed")
+
+
+@app.post("/webhooks/whatsapp")
+async def whatsapp_webhook(request: Request) -> dict:
+    """Delivery statuses and client replies from Meta (MM-133). Nothing is
+    parsed before the X-Hub-Signature-256 check. Processed inline, each item
+    exactly once (api.whatsapp_webhook); 200 tells Meta not to redeliver, a
+    500 (unexpected error, claim released) makes it retry."""
+    app_secret = get_settings().whatsapp_app_secret
+    if not app_secret:
+        raise HTTPException(status_code=503, detail="WhatsApp webhook is not configured")
+    raw = await request.body()
+    if not verify_signature(raw, request.headers.get("X-Hub-Signature-256"), app_secret):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+    try:
+        payload = WebhookPayload.model_validate_json(raw)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail="Malformed webhook payload") from exc
+    outcomes = await run_in_threadpool(process_webhook, payload, get_whatsapp_webhook_deps())
+    return {"status": "ok", "processed": len(outcomes)}
 
 
 @app.get("/margin-calls/{thread_id}/trace", response_model=MarginCallTraceResponse)

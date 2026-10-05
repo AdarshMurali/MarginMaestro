@@ -53,7 +53,11 @@ def open_servicenow_incident(
     procedure_excerpt: str,
     settings: Settings | None = None,
     http_client: httpx.Client | None = None,
+    delivery_failure: str | None = None,
 ) -> IncidentResult:
+    """`delivery_failure` (G6, MM-118): the client notice never reached the
+    client (WhatsApp rejected it or reported it failed). The incident says so
+    instead of "SLA deadline missed" -- the client never had the chance."""
     settings = settings or get_settings()
     if not (
         settings.servicenow_instance_url
@@ -68,13 +72,27 @@ def open_servicenow_incident(
     urgency = (
         "1" if threshold <= 0 or call_amount / threshold > HIGH_URGENCY_THRESHOLD_MULTIPLE else "2"
     )
+    if delivery_failure:
+        summary = f"Margin call notice undelivered -- {counterparty_id}"
+        what = (
+            f"Margin call notice for counterparty {counterparty_id} was not delivered.\n"
+            f"Delivery failure: {delivery_failure}\n"
+            f"Call amount: {call_amount:,.2f} {currency}\n"
+            f"Send attempted: {notification_sent_at.isoformat()}\n"
+            f"SLA deadline: {deadline.isoformat()}\n"
+        )
+    else:
+        summary = f"Margin call SLA breach -- {counterparty_id}"
+        what = (
+            f"Margin call SLA breach for counterparty {counterparty_id}.\n"
+            f"Call amount: {call_amount:,.2f} {currency}\n"
+            f"Notified: {notification_sent_at.isoformat()}\n"
+            f"SLA deadline missed: {deadline.isoformat()}\n"
+        )
     description = (
-        f"Margin call SLA breach for counterparty {counterparty_id}.\n"
-        f"Call amount: {call_amount:,.2f} {currency}\n"
-        f"Notified: {notification_sent_at.isoformat()}\n"
-        f"SLA deadline missed: {deadline.isoformat()}\n"
-        f"Correlation id: {correlation_id}\n\n"
-        f"Escalation procedure:\n{procedure_excerpt}"
+        what
+        + f"Correlation id: {correlation_id}\n\n"
+        + f"Escalation procedure:\n{procedure_excerpt}"
     )
 
     # httpx's default 5s timeout is too short for a real ServiceNow PDI --
@@ -90,7 +108,7 @@ def open_servicenow_incident(
         response = client.post(
             "/api/now/table/incident",
             json={
-                "short_description": f"Margin call SLA breach -- {counterparty_id}",
+                "short_description": summary,
                 "description": description,
                 "urgency": urgency,
             },

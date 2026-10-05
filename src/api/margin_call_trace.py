@@ -101,11 +101,13 @@ def _summarize_step(node: str, values: dict) -> str:
 
     if node == "send_notification":
         result = values.get("notification_result")
-        return (
-            f"Slack notice sent to {result.slack_channel}"
-            if result is not None
-            else "Notification sent"
-        )
+        if result is None:
+            return "Notification sent"
+        if result.channel == "whatsapp":
+            if result.delivery_status == "failed":
+                return f"WhatsApp notice {result.reference} failed -- escalating"
+            return f"WhatsApp notice {result.reference} accepted"
+        return f"Slack notice sent to {result.slack_channel}"
 
     if node == "await_sla_response":
         outcome = values.get("sla_outcome")
@@ -113,11 +115,11 @@ def _summarize_step(node: str, values: dict) -> str:
 
     if node == "send_sla_met_notification":
         result = values.get("sla_met_notification_result")
-        return (
-            f"Slack confirmation sent to {result.slack_channel}"
-            if result is not None
-            else "SLA-met confirmation sent"
-        )
+        if result is None:
+            return "SLA-met confirmation sent"
+        if result.slack_channel is None:
+            return "Client acknowledgement posted internally"
+        return f"Slack confirmation sent to {result.slack_channel}"
 
     if node == "escalate":
         result = values.get("escalation_result")

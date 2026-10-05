@@ -1,5 +1,5 @@
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -16,11 +16,20 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from adapters.factory import get_sla_scheduler
+from adapters.factory import (
+    client_channel,
+    get_internal_notifier,
+    get_notifier,
+    get_sla_scheduler,
+)
+from agents import internal_notifications as internal
+from agents.client_notice import build_client_notice, call_reference
 from agents.communication import (
     NotificationResult,
     draft_margin_call_notice,
     draft_sla_met_notice,
+    format_deadline,
+    money,
     send_slack_notice,
 )
 from agents.csa_rag import answer_csa_terms
@@ -69,6 +78,7 @@ from persistence.db.models import (
 )
 from persistence.models import AssetClass, CounterpartyTier, Position, RatingGrade
 from ports.guardrail import GuardrailError
+from ports.notifier import ClientDeliveryError, Notifier
 from ports.sla_scheduler import SlaScheduler
 from rag.models import Citation
 from streaming.event_agent import latest_close_before
@@ -119,6 +129,11 @@ class MarginCallState(BaseModel):
     # confirmation and never getting one.
     sla_met_notification_result: NotificationResult | None = None
     escalation_result: IncidentResult | None = None
+    # G6 (MM-118): why the client notice never reached the client -- the
+    # WhatsApp send was rejected, or the webhook reported `failed`. Set
+    # together with sla_outcome="breached" (the client can't meet a call it
+    # never received) and the run escalates; no other channel is tried.
+    delivery_failure: str | None = None
 
     # MM-125 (margin-call policy). `trigger` is the event behind the latest
     # evaluation when a later trigger re-evaluated this open call (None: the
@@ -413,11 +428,24 @@ def _effective_call_amount(state: MarginCallState) -> float:
     return state.breach_result.call_amount
 
 
-def send_notification(state: MarginCallState, settings: Settings) -> dict:
+def send_notification(
+    state: MarginCallState,
+    settings: Settings,
+    *,
+    client_notifier: Notifier | None = None,
+    counterparty_name: str | None = None,
+) -> dict:
     """Communication Agent (MM-41, docs/AGENTS.md #6): only reached after
     await_approval when the decision is "approved"/"adjusted" -- routing
     (_route_after_approval) keeps "rejected" from ever calling this, matching
-    AGENTS.md's "never sends before/without approval" note."""
+    AGENTS.md's "never sends before/without approval" note.
+
+    CLIENT_NOTIFIER=slack (default): the LLM drafts around placeholders that
+    code fills (MM-116) and the notice is posted to Slack, as before G6.
+    CLIENT_NOTIFIER=whatsapp (G6, MM-118): no LLM at all -- the approved
+    template's four variables are formatted by code (agents.client_notice).
+    A WhatsApp send that fails is not retried and not re-routed to Slack: the
+    result records the failure and the run goes straight to escalation."""
     if state.breach_result is None or state.csa_terms is None:
         raise PricingError(
             "send_notification requires breach_result and csa_terms to already be set on state"
@@ -428,24 +456,70 @@ def send_notification(state: MarginCallState, settings: Settings) -> dict:
     # time is fixed before drafting, so the quoted deadline and the timer's
     # (sla_deadline: notification_sent_at + SLA minutes) are the same instant.
     sent_at = datetime.now(UTC)
-    notice_text = draft_margin_call_notice(
-        state.counterparty_id,
-        call_amount,
-        state.csa_terms.currency,
-        state.csa_terms,
-        deadline=sent_at + timedelta(minutes=settings.margin_call_sla_minutes),
-        rationale=state.call_rationale,
-        settings=settings,
+    deadline = sent_at + timedelta(minutes=settings.margin_call_sla_minutes)
+    if client_channel(settings) == "slack":
+        notice_text = draft_margin_call_notice(
+            state.counterparty_id,
+            call_amount,
+            state.csa_terms.currency,
+            state.csa_terms,
+            deadline=deadline,
+            rationale=state.call_rationale,
+            settings=settings,
+        )
+        result = send_slack_notice(notice_text, settings=settings)
+        return {"notification_result": result, "notification_sent_at": sent_at}
+
+    notice = build_client_notice(
+        thread_id=thread_id_for(state.impact, state.counterparty_id),
+        counterparty_id=state.counterparty_id,
+        counterparty_name=counterparty_name or state.counterparty_id,
+        call_amount=call_amount,
+        currency=state.csa_terms.currency,
+        deadline=deadline,
+        label=settings.client_notice_label,
     )
-    result = send_slack_notice(notice_text, settings=settings)
-    return {"notification_result": result, "notification_sent_at": sent_at}
+    notifier = client_notifier or get_notifier(settings)
+    try:
+        receipt = notifier.send_notice(notice)
+    except ClientDeliveryError as exc:
+        return {
+            "notification_result": NotificationResult(
+                notice_text=notice.text,
+                channel="whatsapp",
+                delivery_status="failed",
+                reference=notice.reference,
+            ),
+            "notification_sent_at": sent_at,
+            "delivery_failure": str(exc),
+            "sla_outcome": "breached",
+        }
+    return {
+        "notification_result": NotificationResult(
+            notice_text=receipt.text,
+            channel=receipt.channel,
+            message_id=receipt.message_id,
+            delivery_status=receipt.status,
+            reference=notice.reference,
+        ),
+        "notification_sent_at": sent_at,
+    }
 
 
-def send_sla_met_notification(state: MarginCallState, settings: Settings) -> dict:
+def send_sla_met_notification(
+    state: MarginCallState,
+    settings: Settings,
+    internal_notifier: internal.InternalNotifier | None = None,
+    counterparty_name: str | None = None,
+) -> dict:
     """Communication Agent follow-up (only reached when the SLA was met,
     _route_after_sla): confirms in Slack that the counterparty fulfilled its
     obligation, using the same effective call amount send_notification and
-    escalate already agree on."""
+    escalate already agree on.
+
+    With CLIENT_NOTIFIER=whatsapp the client is on WhatsApp and Slack is
+    internal (MM-134): the confirmation is a code-built internal post
+    ("client acknowledged"), sent once; no LLM is involved."""
     if state.breach_result is None or state.csa_terms is None:
         raise PricingError(
             "send_sla_met_notification requires breach_result and csa_terms to already "
@@ -453,6 +527,24 @@ def send_sla_met_notification(state: MarginCallState, settings: Settings) -> dic
         )
 
     call_amount = _effective_call_amount(state)
+    if client_channel(settings) == "whatsapp":
+        thread_id = thread_id_for(state.impact, state.counterparty_id)
+        reference = call_reference(thread_id)
+        text = internal.client_acknowledged(
+            reference,
+            counterparty_name or state.counterparty_id,
+            money(call_amount, state.csa_terms.currency),
+        )
+        notifier = internal_notifier or internal.disabled()
+        posted = notifier.post_once(f"client_acknowledged:{thread_id}", text)
+        return {
+            "sla_met_notification_result": NotificationResult(
+                notice_text=text,
+                channel="slack-internal" if posted else "none",
+                delivery_status="sent" if posted else "skipped",
+                reference=reference,
+            )
+        }
     notice_text = draft_sla_met_notice(
         state.counterparty_id, call_amount, state.csa_terms.currency, settings=settings
     )
@@ -493,8 +585,15 @@ def await_sla_response(state: MarginCallState, settings: Settings) -> dict:
         # confirmed by a direct repro before relying on this pattern.
         resume = interrupt(payload)
         if resume.get("responded"):
-            log.info("sla_met")
+            log.info("sla_met", via=resume.get("via"))
             return {"sla_outcome": "met"}
+        if resume.get("delivery_failed"):
+            # G6 (MM-133): the WhatsApp webhook reported the notice `failed`.
+            # The client never received it, so the SLA can't be met: escalate
+            # now rather than wait out the deadline.
+            reason = str(resume.get("reason") or "the client channel reported a failure")
+            log.warning("client_delivery_failed", reason=reason)
+            return {"sla_outcome": "breached", "delivery_failure": reason}
         if datetime.now(UTC) >= deadline:
             log.info("sla_breached", deadline=deadline.isoformat())
             return {"sla_outcome": "breached"}
@@ -523,6 +622,7 @@ def escalate(state: MarginCallState, settings: Settings) -> dict:
         deadline,
         procedure_excerpt,
         settings=settings,
+        delivery_failure=state.delivery_failure,
     )
     return {"escalation_result": result}
 
@@ -538,6 +638,11 @@ def _route_after_breach(state: MarginCallState) -> str:
     ):
         return "await_approval"
     return END
+
+
+def _route_after_send(state: MarginCallState) -> str:
+    """G6: a notice that never left (WhatsApp rejected it) escalates at once."""
+    return "escalate" if state.delivery_failure else "await_sla_response"
 
 
 def _route_after_sla(state: MarginCallState) -> str:
@@ -740,6 +845,8 @@ def build_orchestrator_graph(
     settings: Settings | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
     sla_scheduler: SlaScheduler | None = None,
+    client_notifier: Notifier | None = None,
+    internal_notifier: internal.InternalNotifier | None = None,
 ) -> CompiledStateGraph:
     """Each DB-touching node opens its own short-lived session (matching
     persistence.batch_loader's convention) rather than holding one open across
@@ -772,6 +879,34 @@ def build_orchestrator_graph(
     sla_scheduler = sla_scheduler or get_sla_scheduler(settings)
     _db_write_lock = threading.Lock()
     checkpointer = checkpointer or SqlCheckpointSaver(session_factory, lock=_db_write_lock)
+    # MM-134: internal Slack traffic, each post once (claimed in processed_events).
+    internal_notifier = internal_notifier or get_internal_notifier(settings, session_factory)
+
+    def _post_internal(key: str, build: Callable[[], str]) -> None:
+        """Builds and posts lazily, so a disabled notifier costs nothing."""
+        if not internal_notifier.enabled:
+            return
+        with _db_write_lock:
+            internal_notifier.post_once(key, build())
+
+    def _counterparty_name(counterparty_id: str) -> str:
+        with session_factory() as session:
+            name = session.execute(
+                select(CounterpartyORM.name).where(CounterpartyORM.id == counterparty_id)
+            ).scalar_one_or_none()
+        return name or counterparty_id
+
+    def _internal_label(state: MarginCallState) -> str:
+        """How internal posts name the counterparty: "Acme Capital (CP-3)"."""
+        name = _counterparty_name(state.counterparty_id)
+        return (
+            state.counterparty_id
+            if name == state.counterparty_id
+            else (f"{name} ({state.counterparty_id})")
+        )
+
+    def _reference(state: MarginCallState) -> str:
+        return call_reference(thread_id_for(state.impact, state.counterparty_id))
 
     def _audit(session: Session, state: MarginCallState, event_type: str, payload: dict) -> None:
         with _db_write_lock:
@@ -896,6 +1031,23 @@ def build_orchestrator_graph(
         return result
 
     def _await_approval_node(state: MarginCallState) -> dict:
+        # MM-134: tell approvers, once per evaluation (a re-evaluation by a
+        # later trigger re-arms the gate with a new amount and posts again).
+        # Runs before interrupt(): LangGraph replays this node on resume, and
+        # the claim makes the replay a no-op.
+        if state.breach_result is not None:
+            trigger_id = state.current_trigger.event_id
+            thread_id = thread_id_for(state.impact, state.counterparty_id)
+            _post_internal(
+                f"approval_requested:{thread_id}:{trigger_id}",
+                lambda: internal.approval_requested(
+                    _reference(state),
+                    _internal_label(state),
+                    state.breach_result.call_amount if state.breach_result else 0.0,
+                    state.csa_terms.currency if state.csa_terms else "USD",
+                    state.call_rationale,
+                ),
+            )
         result = await_approval(state)
         with observe_step(tracer, "await_approval"), session_factory() as session:
             _audit(
@@ -914,6 +1066,17 @@ def build_orchestrator_graph(
         return result
 
     def _await_manager_approval_node(state: MarginCallState) -> dict:
+        if state.breach_result is not None:
+            _post_internal(
+                f"manager_approval_requested:{thread_id_for(state.impact, state.counterparty_id)}",
+                lambda: internal.manager_approval_requested(
+                    _reference(state),
+                    _internal_label(state),
+                    _effective_call_amount(state),
+                    state.csa_terms.currency if state.csa_terms else "USD",
+                    state.first_approver_username,
+                ),
+            )
         result = await_manager_approval(state)
         with observe_step(tracer, "await_manager_approval"), session_factory() as session:
             _audit(
@@ -932,20 +1095,66 @@ def build_orchestrator_graph(
         log = logger.bind(
             correlation_id=state.correlation_id, counterparty_id=state.counterparty_id
         )
+        whatsapp = client_channel(settings) == "whatsapp"
+        thread_id = thread_id_for(state.impact, state.counterparty_id)
         with observe_step(tracer, "send_notification"):
             with _guardrail_audit(state, "send_notification"):
-                result = send_notification(state, settings)
-            with session_factory() as session:
-                _audit(
-                    session,
+                result = send_notification(
                     state,
-                    "send_notification",
-                    {"notification_result": result["notification_result"].model_dump(mode="json")},
+                    settings,
+                    client_notifier=client_notifier,
+                    counterparty_name=(
+                        _counterparty_name(state.counterparty_id) if whatsapp else None
+                    ),
                 )
+            notification: NotificationResult = result["notification_result"]
+            payload: dict = {"notification_result": notification.model_dump(mode="json")}
+            if whatsapp:
+                # The webhook maps replies quoting this message back to the call.
+                payload["thread_id"] = thread_id
+            with session_factory() as session:
+                _audit(session, state, "send_notification", payload)
+                if result.get("delivery_failure"):
+                    _audit(
+                        session,
+                        state,
+                        "client_notification_failed",
+                        {"reason": result["delivery_failure"], "channel": notification.channel},
+                    )
+        if result.get("delivery_failure"):
+            log.error("send_notification_failed", reason=result["delivery_failure"])
+            _post_internal(
+                f"delivery_failed:{thread_id}",
+                lambda: internal.delivery_failed(
+                    _reference(state), _internal_label(state), result["delivery_failure"]
+                ),
+            )
+            return result  # no SLA timer: the run escalates now (_route_after_send)
         log.info(
             "send_notification_completed",
-            slack_channel=result["notification_result"].slack_channel,
+            channel=notification.channel,
+            slack_channel=notification.slack_channel,
+            message_id=notification.message_id,
         )
+        if whatsapp:
+            _post_internal(
+                f"client_notified:{thread_id}",
+                lambda: internal.client_notified(
+                    notification.reference or _reference(state),
+                    _internal_label(state),
+                    (
+                        money(_effective_call_amount(state), state.csa_terms.currency)
+                        if state.csa_terms
+                        else ""
+                    ),
+                    format_deadline(
+                        result["notification_sent_at"]
+                        + timedelta(minutes=settings.margin_call_sla_minutes)
+                    ),
+                    "WhatsApp",
+                    notification.message_id or "",
+                ),
+            )
         _schedule_sla_check({**state.model_dump(), **result}, log)
         return result
 
@@ -973,6 +1182,20 @@ def build_orchestrator_graph(
         result = await_sla_response(state, settings)
         with observe_step(tracer, "await_sla_response"), session_factory() as session:
             _audit(session, state, "await_sla_response", {"sla_outcome": result.get("sla_outcome")})
+            if result.get("delivery_failure"):
+                _audit(
+                    session,
+                    state,
+                    "client_notification_failed",
+                    {"reason": result["delivery_failure"], "channel": "whatsapp"},
+                )
+        if result.get("delivery_failure"):
+            _post_internal(
+                f"delivery_failed:{thread_id_for(state.impact, state.counterparty_id)}",
+                lambda: internal.delivery_failed(
+                    _reference(state), _internal_label(state), result["delivery_failure"]
+                ),
+            )
         return result
 
     def _send_sla_met_notification_node(state: MarginCallState) -> dict:
@@ -981,7 +1204,14 @@ def build_orchestrator_graph(
         )
         with observe_step(tracer, "send_sla_met_notification"):
             with _guardrail_audit(state, "send_sla_met_notification"):
-                result = send_sla_met_notification(state, settings)
+                result = send_sla_met_notification(
+                    state,
+                    settings,
+                    internal_notifier=internal_notifier,
+                    counterparty_name=(
+                        _internal_label(state) if client_channel(settings) == "whatsapp" else None
+                    ),
+                )
             with session_factory() as session:
                 _audit(
                     session,
@@ -1017,6 +1247,24 @@ def build_orchestrator_graph(
             "escalate_completed",
             incident_number=result["escalation_result"].incident_number,
         )
+        _post_internal(
+            f"escalated:{thread_id_for(state.impact, state.counterparty_id)}",
+            lambda: internal.escalated(
+                _reference(state),
+                _internal_label(state),
+                (
+                    money(_effective_call_amount(state), state.csa_terms.currency)
+                    if state.csa_terms
+                    else ""
+                ),
+                result["escalation_result"].incident_number,
+                (
+                    f"the client notice was not delivered ({state.delivery_failure})"
+                    if state.delivery_failure
+                    else "the SLA deadline passed with no client response"
+                ),
+            ),
+        )
         return result
 
     graph = StateGraph(MarginCallState)
@@ -1050,7 +1298,11 @@ def build_orchestrator_graph(
         _route_after_manager_approval,
         {"send_notification": "send_notification", END: END},
     )
-    graph.add_edge("send_notification", "await_sla_response")
+    graph.add_conditional_edges(
+        "send_notification",
+        _route_after_send,
+        {"await_sla_response": "await_sla_response", "escalate": "escalate"},
+    )
     graph.add_conditional_edges(
         "await_sla_response",
         _route_after_sla,

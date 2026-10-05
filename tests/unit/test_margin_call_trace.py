@@ -222,6 +222,25 @@ class TestSummarizeStep:
         )
         assert _summarize_step("send_sla_met_notification", {}) == "SLA-met confirmation sent"
 
+    def test_whatsapp_steps_name_the_channel_and_the_outcome(self) -> None:
+        """G6: a WhatsApp notice is "accepted" (or failed), not "sent to a channel"."""
+        accepted = NotificationResult(
+            notice_text="x", channel="whatsapp", reference="MC-1", delivery_status="accepted"
+        )
+        failed = accepted.model_copy(update={"delivery_status": "failed"})
+        internal = NotificationResult(notice_text="x", channel="slack-internal")
+
+        assert _summarize_step("send_notification", {"notification_result": accepted}) == (
+            "WhatsApp notice MC-1 accepted"
+        )
+        assert _summarize_step("send_notification", {"notification_result": failed}) == (
+            "WhatsApp notice MC-1 failed -- escalating"
+        )
+        assert (
+            _summarize_step("send_sla_met_notification", {"sla_met_notification_result": internal})
+            == "Client acknowledgement posted internally"
+        )
+
     def test_escalate_happy_path_and_fallback(self) -> None:
         result = IncidentResult(incident_number="INC001", sys_id="abc", urgency="2")
         assert _summarize_step("escalate", {"escalation_result": result}) == (

@@ -3,7 +3,7 @@ pre-GCP stack exactly (OpenAI, Chroma, Kafka, Slack), so the AWS deployment
 needs no config change (ground rule 6). GCP adapters are added here as each
 phase lands: Gemini (G2, MM-109), pgvector (G2), Pub/Sub (G4), WhatsApp (G6)."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openai import OpenAI
 
@@ -22,6 +22,11 @@ from ports.notifier import Notifier
 from ports.redactor import Redactor
 from ports.sla_scheduler import SlaScheduler
 from ports.vector_store import VectorStore
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session, sessionmaker
+
+    from agents.internal_notifications import InternalNotifier
 
 RAG_COLLECTION = "csa_documents"
 
@@ -134,11 +139,36 @@ def get_event_bus(settings: Settings) -> EventBus:
     return EventProducer(settings)
 
 
+def client_channel(settings: Settings) -> str:
+    """CLIENT_NOTIFIER, validated: slack (default) | whatsapp (G6)."""
+    return _choice("CLIENT_NOTIFIER", settings.client_notifier, ("slack", "whatsapp"))
+
+
 def get_notifier(settings: Settings) -> Notifier:
-    _choice("CLIENT_NOTIFIER", settings.client_notifier, ("slack",))
+    """The client-facing notifier. WhatsApp is an in-process adapter behind
+    the approval gate, never an MCP tool (ADR-0016 amendment, 2026-10-05)."""
+    if client_channel(settings) == "whatsapp":
+        from adapters.whatsapp_adapter import WhatsAppNotifier
+
+        return WhatsAppNotifier(settings)
     from adapters.slack_adapter import SlackNotifier
 
     return SlackNotifier(settings)
+
+
+def get_internal_notifier(
+    settings: Settings, session_factory: "sessionmaker[Session] | None" = None
+) -> "InternalNotifier":
+    """INTERNAL_NOTIFIER=none (default) | slack (MM-134). Posts are claimed in
+    `session_factory`'s processed_events, so each goes out once."""
+    from agents.internal_notifications import InternalNotifier
+
+    choice = _choice("INTERNAL_NOTIFIER", settings.internal_notifier, ("none", "slack"))
+    if choice == "none":
+        return InternalNotifier(None)
+    from adapters.slack_adapter import SlackNotifier
+
+    return InternalNotifier(SlackNotifier(settings).send, session_factory)
 
 
 def get_sla_scheduler(settings: Settings) -> SlaScheduler:

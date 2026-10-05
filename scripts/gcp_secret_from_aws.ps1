@@ -8,6 +8,10 @@
 # precedence over env vars, so they would override Cloud Run's GCP settings.
 # Values are piped from AWS to GCP inside this process and never printed or
 # written to disk; only key names and value lengths are shown.
+#
+# The new version holds ONLY these keys: re-running this drops keys added
+# since (the WhatsApp keys, G6) -- run scripts\gcp_whatsapp_secrets.ps1 again
+# afterwards.
 
 $ErrorActionPreference = "Stop"
 $Keys = @(

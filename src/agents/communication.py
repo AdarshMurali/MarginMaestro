@@ -70,7 +70,7 @@ def _draft_with_placeholders(
     raise NoticeDraftingError(f"Unusable {what}: {problem}")
 
 
-def _money(amount: float, currency: str) -> str:
+def money(amount: float, currency: str) -> str:
     return f"{currency} {amount:,.2f}"
 
 
@@ -83,9 +83,20 @@ class SlackDeliveryError(Exception):
 
 
 class NotificationResult(BaseModel):
+    """What was sent, on which channel. `slack_channel`/`slack_ts` are the
+    Slack identifiers (kept by name for runs checkpointed before G6);
+    `channel`/`message_id`/`delivery_status` are channel-neutral (G6,
+    MM-118): a WhatsApp send is "accepted" until the webhook reports
+    delivered/read/failed, and "failed" when it never left (the call then
+    escalates)."""
+
     notice_text: str
-    slack_channel: str
-    slack_ts: str
+    slack_channel: str | None = None
+    slack_ts: str | None = None
+    channel: str = "slack"
+    message_id: str | None = None
+    delivery_status: str = "sent"
+    reference: str | None = None
 
 
 def format_deadline(deadline: datetime) -> str:
@@ -126,9 +137,9 @@ def draft_margin_call_notice(
     )
     values = {
         "COUNTERPARTY": counterparty_id,
-        "CALL_AMOUNT": _money(call_amount, currency),
-        "THRESHOLD": _money(csa_terms.threshold, csa_terms.currency),
-        "MTA": _money(csa_terms.mta, csa_terms.currency),
+        "CALL_AMOUNT": money(call_amount, currency),
+        "THRESHOLD": money(csa_terms.threshold, csa_terms.currency),
+        "MTA": money(csa_terms.mta, csa_terms.currency),
         "DEADLINE": format_deadline(deadline),
     }
     required = {"COUNTERPARTY", "CALL_AMOUNT", "DEADLINE"}
@@ -166,7 +177,7 @@ def draft_sla_met_notice(
         "a new call -- do not restate it as a demand. {COUNTERPARTY} and {CALL_AMOUNT} "
         "must appear."
     )
-    values = {"COUNTERPARTY": counterparty_id, "CALL_AMOUNT": _money(call_amount, currency)}
+    values = {"COUNTERPARTY": counterparty_id, "CALL_AMOUNT": money(call_amount, currency)}
     return _draft_with_placeholders(
         llm, request, values, set(values), f"SLA-met notice for {counterparty_id}"
     )
@@ -191,4 +202,5 @@ def send_slack_notice(
         notice_text=text,
         slack_channel=settings.slack_channel_id,
         slack_ts=str(response["ts"]),
+        message_id=str(response["ts"]),
     )
