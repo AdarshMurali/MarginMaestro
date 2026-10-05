@@ -265,7 +265,9 @@ def test_cannot_insert_rows_for_another_counterparty(factory):
         "UPDATE collateral_items SET value_usd = 0 WHERE id = 'RLS-B-COL'",
         "DELETE FROM ratings WHERE id = 'RLS-B-RT'",
         "UPDATE counterparties SET name = 'hijacked' WHERE id = 'RLS-B'",
-        "DELETE FROM audit_log WHERE correlation_id = 'mm107-rls-test' AND counterparty_id = 'RLS-B'",
+        # audit_log is no longer here: since MM-137 mm_app can't delete from it
+        # at all (permission denied) -- tests/integration/test_audit_append_only_live.py.
+        "DELETE FROM tickets WHERE external_ref = 'mm107' AND counterparty_id = 'RLS-B'",
     ],
 )
 def test_cannot_update_or_delete_another_counterpartys_rows(factory, statement):
