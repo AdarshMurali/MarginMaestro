@@ -104,6 +104,10 @@ class MarginCallLifecycleStatus(StrEnum):
     AWAITING_SLA_RESPONSE = "awaiting_sla_response"
     SLA_MET = "sla_met"
     ESCALATED = "escalated"
+    # MM-125: a breach the intraday materiality gate held -- the event alone
+    # didn't move exposure by more than the MTA, so no call; the standing
+    # breach is the daily margin run's job.
+    BELOW_MATERIALITY = "below_materiality"
 
 
 class MarginCallSummary(BaseModel):
@@ -122,6 +126,10 @@ class MarginCallSummary(BaseModel):
     # notification_sent_at + Settings.margin_call_sla_minutes -- computed
     # server-side so the frontend doesn't need to know the SLA policy.
     sla_deadline: datetime | None = None
+    # MM-125: why the call (or no call), from code; and the later triggers
+    # that re-evaluated this call in place instead of raising another.
+    rationale: str | None = None
+    updated_by: list[str] = Field(default_factory=list)
 
 
 class MarginCallFeedResponse(BaseModel):
@@ -231,6 +239,11 @@ class SimulatedCounterpartyResult(BaseModel):
     # document, missing price history) -- the other counterparties' results
     # still return normally rather than the whole request failing.
     error: str | None = None
+    # MM-125: "started" (a new run), "updated" (the counterparty's open call
+    # was re-evaluated in place) or "unchanged" (an open call exists and this
+    # event leaves it as is); `detail` says why, from code.
+    action: str | None = None
+    detail: str | None = None
 
 
 class SimulateEventResponse(BaseModel):
@@ -247,6 +260,26 @@ class EodLoadResponse(BaseModel):
     tickers_loaded: int
     tickers_failed: list[str]
     reference_rates: int
+
+
+class DailyRunOutcome(BaseModel):
+    """One counterparty's result in the daily margin run (MM-125): a new run
+    started, the open call updated in place, or the open call left as is."""
+
+    counterparty_id: str
+    action: Literal["started", "updated", "unchanged"]
+    thread_id: str
+    breached: bool | None = None
+    call_amount: float | None = None
+    detail: str | None = None
+
+
+class DailyMarginRunResponse(BaseModel):
+    event_id: str
+    counterparties: int
+    # Counterparties dispatched by this request; ones already done today, or
+    # held (e.g. no CSA document), are not listed.
+    outcomes: list[DailyRunOutcome]
 
 
 class PubSubPushMessage(BaseModel):

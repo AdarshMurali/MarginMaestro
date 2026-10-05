@@ -62,6 +62,8 @@ def _lifecycle_status(values: dict) -> MarginCallLifecycleStatus:
         return MarginCallLifecycleStatus.AWAITING_MANAGER_APPROVAL
     breach_result = values.get("breach_result")
     if breach_result is not None:
+        if breach_result.breached and values.get("materiality") == "below_mta":
+            return MarginCallLifecycleStatus.BELOW_MATERIALITY
         if breach_result.breached:
             return MarginCallLifecycleStatus.AWAITING_APPROVAL
         return MarginCallLifecycleStatus.NO_BREACH
@@ -95,6 +97,7 @@ def _summarize(thread_id: str, values: dict, settings: Settings) -> MarginCallSu
         if notification_sent_at is not None
         else None
     )
+    status = _lifecycle_status(values)
     return MarginCallSummary(
         thread_id=thread_id,
         correlation_id=values["correlation_id"],
@@ -102,13 +105,21 @@ def _summarize(thread_id: str, values: dict, settings: Settings) -> MarginCallSu
         event_type=impact.event_type.value,
         reason=impact.reason,
         occurred_at=impact.occurred_at,
-        status=_lifecycle_status(values),
-        call_amount=_effective_call_amount(values, breach_result),
+        status=status,
+        # MM-125: a breach the materiality gate held raised no call, so it
+        # has no call amount (the rationale explains the shortfall).
+        call_amount=(
+            None
+            if status is MarginCallLifecycleStatus.BELOW_MATERIALITY
+            else _effective_call_amount(values, breach_result)
+        ),
         currency=csa_terms.currency if csa_terms is not None else "USD",
         approval_decision=values.get("approval_decision"),
         sla_outcome=values.get("sla_outcome"),
         notification_sent_at=notification_sent_at,
         sla_deadline=sla_deadline,
+        rationale=values.get("call_rationale"),
+        updated_by=values.get("updated_by") or [],
     )
 
 
@@ -226,7 +237,9 @@ def counterparty_history(
     # outcome yet, so it shouldn't count toward either total_calls or a
     # breach rate.
     resolved = [s for s in summaries if s.status != MarginCallLifecycleStatus.EVALUATING]
-    breached = [s for s in resolved if s.status != MarginCallLifecycleStatus.NO_BREACH]
+    # MM-125: a breach the materiality gate held raised no call either.
+    no_call = (MarginCallLifecycleStatus.NO_BREACH, MarginCallLifecycleStatus.BELOW_MATERIALITY)
+    breached = [s for s in resolved if s.status not in no_call]
 
     total_calls = len(resolved)
     breached_calls = len(breached)

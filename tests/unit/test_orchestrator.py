@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -26,15 +26,25 @@ from agents.orchestrator import (
     compute_exposure,
     escalate,
     evaluate_breach_node,
+    event_impact_for,
     fetch_csa_terms,
     get_or_start_run,
     resume_run,
     send_notification,
     send_sla_met_notification,
+    sla_deadline,
     start_run,
     thread_id_for,
 )
-from calc.models import BreachResult, CSATerms, InitialMargin, PricingError, VariationMargin
+from calc.models import (
+    BreachResult,
+    CSATerms,
+    EventImpact,
+    InitialMargin,
+    PriceMove,
+    PricingError,
+    VariationMargin,
+)
 from config.settings import Settings
 from observability.metrics import (
     AGENT_STEP_TOTAL,
@@ -433,6 +443,129 @@ class TestRouteAfterBreach:
         state.breach_result = BreachResult(breached=False, call_amount=0.0)
         assert _route_after_breach(state) != "await_approval"
 
+    def test_routes_to_end_when_the_materiality_gate_held_the_breach(self) -> None:
+        """MM-125: a breach the event itself didn't cause raises no call."""
+        state = _state()
+        state.breach_result = BreachResult(breached=True, call_amount=1.0)
+        state.materiality = "below_mta"
+        assert _route_after_breach(state) != "await_approval"
+
+
+class TestMateriality:
+    """MM-125: compute_exposure measures the event's own impact, and
+    evaluate_breach_node applies the gate and writes the rationale."""
+
+    HPE = PriceMove(ticker="TSLA", from_price=100.0, to_price=120.0)
+
+    def _state(self, *, impact: EventImpact | None, mta: float = 1_000.0, **extra):
+        state = _state()
+        state.variation_margin = VariationMargin(
+            portfolio_id="PF-CP-1", mtm_today=0, mtm_prior=0, variation_margin=100_000.0
+        )
+        state.initial_margin = InitialMargin(
+            portfolio_id="PF-CP-1", vix_level=20.0, vix_multiplier=1.0, initial_margin=10_000.0
+        )
+        state.csa_terms = CSATerms(threshold=1_000.0, mta=mta, currency="USD")
+        state.impact = state.impact.model_copy(update={"price_moves": [self.HPE], **extra})
+        state.event_impact = impact
+        return state
+
+    def _impact(self, change: float) -> EventImpact:
+        return EventImpact(tickers=["TSLA"], mtm_change=change, im_change=0, exposure_change=change)
+
+    def test_compute_exposure_measures_the_event_move(self, session_factory) -> None:
+        _seed_position(session_factory, "CP-1", "TSLA", 1000)
+        with session_factory() as session:
+            session.add(
+                PriceHistoryORM(
+                    ticker="TSLA",
+                    price_date=date(2026, 7, 30),
+                    price=100.0,
+                    currency="USD",
+                    source="yfinance",
+                )
+            )
+            session.add(
+                ReferenceRateORM(series_id="VIXCLS", rate_date=date(2026, 7, 30), value=20.0)
+            )
+            session.commit()
+        feed = MagicMock()
+        feed.get_prices.return_value = {
+            "TSLA": PriceQuote(ticker="TSLA", price=130.0, as_of=datetime.now(UTC), source="t")
+        }
+        state = _state()
+        state.impact = state.impact.model_copy(update={"price_moves": [self.HPE]})
+
+        with session_factory() as session:
+            result = compute_exposure(state, session, feed)
+            # Without a move on the event, there is no event impact.
+            no_move = compute_exposure(_state(), session, feed)
+
+        # 1,000 x (120 - 100) = 20,000 MTM; IM 15% of that = 3,000. The
+        # current price (130) doesn't matter: the event carries its own move.
+        assert result["event_impact"].exposure_change == pytest.approx(23_000.0)
+        assert no_move["event_impact"] is None
+
+    def test_event_impact_for_needs_a_book(self, session_factory) -> None:
+        with session_factory() as session, pytest.raises(PricingError):
+            event_impact_for(session, "CP-404", _state().impact)
+
+    def test_a_material_event_raises_the_call_with_its_impact_in_the_rationale(
+        self, session_factory
+    ) -> None:
+        state = self._state(impact=self._impact(23_000.0))
+
+        with session_factory() as session:
+            result = evaluate_breach_node(state, session)
+
+        assert result["materiality"] == "material"
+        assert result["call_rationale"].startswith(
+            "The TSLA move (USD 100.00 to USD 120.00) increased your exposure by USD 23,000.00, "
+            "more than the minimum transfer amount of USD 1,000.00. Your exposure of "
+            "USD 110,000.00 exceeds the threshold of USD 1,000.00"
+        )
+
+    def test_an_immaterial_event_is_held(self, session_factory) -> None:
+        state = self._state(impact=self._impact(999.0))
+
+        with session_factory() as session:
+            result = evaluate_breach_node(state, session)
+
+        assert result["breach_result"].breached is True
+        assert result["materiality"] == "below_mta"
+        assert "no intraday call" in result["call_rationale"]
+
+    def test_no_gate_once_the_call_is_open(self, session_factory) -> None:
+        state = self._state(impact=self._impact(1.0))
+        state.updated_by = ["later-event"]
+
+        with session_factory() as session:
+            result = evaluate_breach_node(state, session)
+
+        assert result["materiality"] is None
+
+    def test_a_non_price_event_states_its_reason(self, session_factory) -> None:
+        state = self._state(impact=None, price_moves=[], reason="CP-1 downgraded to BBB")
+
+        with session_factory() as session:
+            result = evaluate_breach_node(state, session)
+
+        assert result["materiality"] is None
+        assert result["call_rationale"].startswith("CP-1 downgraded to BBB. Your exposure of")
+
+    def test_the_daily_run_states_the_standing_exposure(self, session_factory) -> None:
+        state = self._state(
+            impact=None, price_moves=[], event_type=MarketEventType.DAILY_MARGIN_RUN
+        )
+        state.csa_terms = CSATerms(threshold=1_000_000.0, mta=1_000.0, currency="USD")
+
+        with session_factory() as session:
+            result = evaluate_breach_node(state, session)
+
+        assert result["breach_result"].breached is False
+        assert result["call_rationale"].startswith("Daily margin run: Your exposure of")
+        assert result["call_rationale"].endswith("no call is due.")
+
 
 class TestRouteAfterApproval:
     def test_routes_to_send_notification_when_approved(self) -> None:
@@ -531,6 +664,25 @@ class TestSendNotification:
             result = send_notification(state, Settings(_env_file=None))
 
         assert isinstance(result["notification_sent_at"], datetime)
+
+    def test_quotes_the_deadline_the_sla_timer_enforces(self) -> None:
+        """MM-125: the notice's deadline is exactly notification_sent_at +
+        MARGIN_CALL_SLA_MINUTES -- the same instant sla_deadline() enforces."""
+        state = _state()
+        state.breach_result = BreachResult(breached=True, call_amount=474_000.0)
+        state.csa_terms = CSATerms(threshold=1_000.0, mta=100.0, currency="USD")
+        state.approval_decision = "approved"
+        state.call_rationale = "Daily margin run: Your exposure ..."
+        settings = Settings(_env_file=None, margin_call_sla_minutes=45)
+
+        with _patch_draft_notice() as mock_draft, _patch_send_slack_notice():
+            result = send_notification(state, settings)
+
+        kwargs = mock_draft.call_args.kwargs
+        state.notification_sent_at = result["notification_sent_at"]
+        assert kwargs["deadline"] == sla_deadline(state, settings)
+        assert kwargs["deadline"] - result["notification_sent_at"] == timedelta(minutes=45)
+        assert kwargs["rationale"] == "Daily margin run: Your exposure ..."
 
 
 class TestRouteAfterSla:

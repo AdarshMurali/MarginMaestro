@@ -3,6 +3,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel
 
+from calc.models import PriceMove
 from persistence.models import RatingGrade
 
 
@@ -10,6 +11,17 @@ class MarketEventType(StrEnum):
     PRICE_SHOCK = "price_shock"
     VOL_SPIKE = "vol_spike"
     DOWNGRADE = "downgrade"
+    # MM-125: not a market event -- the scheduled end-of-day evaluation of
+    # every counterparty, which is where standing breaches are called.
+    DAILY_MARGIN_RUN = "daily_margin_run"
+
+
+# What a scripted scenario (`make simulate`) can publish onto the market topics.
+MARKET_SCENARIO_TYPES = (
+    MarketEventType.PRICE_SHOCK,
+    MarketEventType.VOL_SPIKE,
+    MarketEventType.DOWNGRADE,
+)
 
 
 class MarketEvent(BaseModel):
@@ -33,13 +45,19 @@ class ImpactSet(BaseModel):
     market event affects. Published on its own topic (market.impact), not
     back onto market.events, so the Event Agent never re-consumes its own
     output. event_id ties back to the originating price tick or MarketEvent
-    and doubles as the idempotency key."""
+    and doubles as the idempotency key.
+
+    `price_moves` (MM-125) is the move that caused a price event, carried on
+    the event so the intraday materiality gate measures the event's own impact
+    the same way on every replay. Empty for non-price events (downgrades) and
+    the daily margin run, which are not gated."""
 
     event_id: str
     event_type: MarketEventType
     counterparty_ids: list[str]
     reason: str
     occurred_at: datetime
+    price_moves: list[PriceMove] = []
 
 
 class DeadLetterEvent(BaseModel):

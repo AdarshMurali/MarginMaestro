@@ -29,11 +29,19 @@ from agents.escalation import (
     open_servicenow_incident,
     retrieve_escalation_procedure,
 )
-from calc.breach import evaluate_breach
+from calc.breach import effective_threshold, evaluate_breach
 from calc.im import compute_initial_margin
+from calc.materiality import (
+    below_materiality_rationale,
+    event_exposure_impact,
+    exposure_sentence,
+    is_material,
+    material_event_rationale,
+)
 from calc.models import (
     BreachResult,
     CSATerms,
+    EventImpact,
     InitialMargin,
     PortfolioMTM,
     PricingError,
@@ -51,6 +59,7 @@ from persistence.audit import record_audit_event
 from persistence.db.checkpoint_saver import SqlCheckpointSaver
 from persistence.db.engine import get_session_factory
 from persistence.db.models import (
+    CheckpointORM,
     CollateralItemORM,
     CounterpartyORM,
     PortfolioORM,
@@ -64,7 +73,7 @@ from ports.sla_scheduler import SlaScheduler
 from rag.models import Citation
 from streaming.event_agent import latest_close_before
 from streaming.market_feed import MarketFeed, get_market_feed
-from streaming.schemas import ImpactSet
+from streaming.schemas import ImpactSet, MarketEventType
 
 logger = structlog.get_logger()
 tracer = trace.get_tracer(__name__)
@@ -110,6 +119,24 @@ class MarginCallState(BaseModel):
     # confirmation and never getting one.
     sla_met_notification_result: NotificationResult | None = None
     escalation_result: IncidentResult | None = None
+
+    # MM-125 (margin-call policy). `trigger` is the event behind the latest
+    # evaluation when a later trigger re-evaluated this open call (None: the
+    # original `impact`). `event_impact` is that trigger's own effect on
+    # exposure (price events only); `materiality` is the intraday gate's
+    # verdict (None when the gate doesn't apply: daily run, downgrades,
+    # re-evaluations of a call already raised). `call_rationale` explains the
+    # figures, from code. `updated_by` lists the triggers that re-evaluated
+    # this call, oldest first.
+    trigger: ImpactSet | None = None
+    event_impact: EventImpact | None = None
+    materiality: Literal["material", "below_mta"] | None = None
+    call_rationale: str | None = None
+    updated_by: list[str] = Field(default_factory=list)
+
+    @property
+    def current_trigger(self) -> ImpactSet:
+        return self.trigger or self.impact
 
 
 def _load_positions(session: Session, counterparty_id: str) -> list[Position]:
@@ -175,13 +202,33 @@ def compute_exposure(state: MarginCallState, session: Session, market_feed: Mark
     mtm_today = compute_mtm(positions, current_prices)
     mtm_prior = compute_mtm(positions, prior_prices)
     variation_margin = compute_variation_margin(mtm_today, mtm_prior)
-    initial_margin = compute_initial_margin(mtm_today, _latest_vix(session))
+    vix = _latest_vix(session)
+    initial_margin = compute_initial_margin(mtm_today, vix)
 
+    trigger = state.current_trigger
     return {
         "portfolio_mtm": mtm_today,
         "variation_margin": variation_margin,
         "initial_margin": initial_margin,
+        # Explicit None for a non-price trigger: a re-evaluation must not keep
+        # the previous trigger's impact.
+        "event_impact": (
+            event_exposure_impact(positions, trigger.price_moves, vix)
+            if trigger.price_moves
+            else None
+        ),
     }
+
+
+def event_impact_for(session: Session, counterparty_id: str, impact: ImpactSet) -> EventImpact:
+    """One price event's own effect on a counterparty's exposure (MM-125):
+    the materiality pre-check for a counterparty that already has an open
+    call. Reads the book and VIX only; no prices are fetched, since the
+    event carries its own move."""
+    positions = _load_positions(session, counterparty_id)
+    if not positions:
+        raise PricingError(f"No positions found for counterparty {counterparty_id}")
+    return event_exposure_impact(positions, impact.price_moves, _latest_vix(session))
 
 
 def fetch_csa_terms(state: MarginCallState, settings: Settings) -> dict:
@@ -233,9 +280,43 @@ def evaluate_breach_node(state: MarginCallState, session: Session) -> dict:
     collateral_held = _collateral_held(session, state.counterparty_id)
     current_rating = _current_rating(session, state.counterparty_id)
     result = evaluate_breach(exposure, collateral_held, state.csa_terms, current_rating)
+    currency = state.csa_terms.currency
+    exposure_text = exposure_sentence(
+        exposure,
+        collateral_held,
+        effective_threshold(state.csa_terms, current_rating),
+        result.call_amount,
+        currency,
+        result.breached,
+    )
+
+    # MM-125 intraday materiality gate. It decides whether a price event
+    # *raises* a call; a call that is already open (updated_by non-empty) was
+    # gated when the later trigger was dispatched (agents.margin_policy).
+    trigger = state.current_trigger
+    materiality: Literal["material", "below_mta"] | None = None
+    if state.event_impact is not None and not state.updated_by:
+        material = is_material(state.event_impact, state.csa_terms.mta)
+        materiality = "material" if material else "below_mta"
+
+    if state.event_impact is not None and result.breached and materiality == "below_mta":
+        rationale = below_materiality_rationale(
+            state.event_impact, trigger.price_moves, state.csa_terms.mta, currency
+        )
+    elif state.event_impact is not None and result.breached:
+        rationale = material_event_rationale(
+            state.event_impact, trigger.price_moves, state.csa_terms.mta, currency, exposure_text
+        )
+    elif trigger.event_type is MarketEventType.DAILY_MARGIN_RUN:
+        rationale = f"Daily margin run: {exposure_text}"
+    else:
+        rationale = f"{trigger.reason}. {exposure_text}"
+
     return {
         "breach_result": result,
         "counterparty_tier": _counterparty_tier(session, state.counterparty_id),
+        "materiality": materiality,
+        "call_rationale": rationale,
     }
 
 
@@ -257,6 +338,7 @@ def await_approval(state: MarginCallState) -> dict:
         "counterparty_id": state.counterparty_id,
         "call_amount": state.breach_result.call_amount,
         "currency": state.csa_terms.currency if state.csa_terms else "USD",
+        "rationale": state.call_rationale,
     }
     resume = interrupt(payload)
 
@@ -342,15 +424,21 @@ def send_notification(state: MarginCallState, settings: Settings) -> dict:
         )
 
     call_amount = _effective_call_amount(state)
+    # MM-125: the notice quotes the deadline the SLA timer enforces. The send
+    # time is fixed before drafting, so the quoted deadline and the timer's
+    # (sla_deadline: notification_sent_at + SLA minutes) are the same instant.
+    sent_at = datetime.now(UTC)
     notice_text = draft_margin_call_notice(
         state.counterparty_id,
         call_amount,
         state.csa_terms.currency,
         state.csa_terms,
+        deadline=sent_at + timedelta(minutes=settings.margin_call_sla_minutes),
+        rationale=state.call_rationale,
         settings=settings,
     )
     result = send_slack_notice(notice_text, settings=settings)
-    return {"notification_result": result, "notification_sent_at": datetime.now(UTC)}
+    return {"notification_result": result, "notification_sent_at": sent_at}
 
 
 def send_sla_met_notification(state: MarginCallState, settings: Settings) -> dict:
@@ -440,7 +528,14 @@ def escalate(state: MarginCallState, settings: Settings) -> dict:
 
 
 def _route_after_breach(state: MarginCallState) -> str:
-    if state.breach_result is not None and state.breach_result.breached:
+    """A breach goes to the approval gate unless the intraday materiality
+    gate (MM-125) held it: the event alone didn't move exposure by more than
+    the MTA, so the standing breach is left to the daily margin run."""
+    if (
+        state.breach_result is not None
+        and state.breach_result.breached
+        and state.materiality != "below_mta"
+    ):
         return "await_approval"
     return END
 
@@ -532,6 +627,91 @@ def resume_run(graph: CompiledStateGraph, thread_id: str, resume_payload: dict) 
         result = graph.invoke(Command(resume=resume_payload), config=config)
     log.info("orchestrator_run_ended", approval_decision=result.get("approval_decision"))
     return result
+
+
+def reevaluate_run(
+    graph: CompiledStateGraph, thread_id: str, trigger: ImpactSet, updated_by: list[str]
+) -> dict:
+    """MM-125: re-runs an open call's evaluation (exposure, CSA terms, breach)
+    for a later trigger, on the call's own thread, instead of raising a
+    second call. Only for a call still awaiting its *first* approval (see
+    agents.margin_policy). The graph restarts from START with `trigger` set:
+    the run re-pauses at await_approval with the new amount (the pending
+    approval request is replaced, never answered), or ends as no-breach if
+    the shortfall is gone. Nothing is sent; the approval gate still stands
+    between the new figure and the client."""
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": get_settings().max_agent_steps,
+    }
+    correlation_id, counterparty_id = thread_id.rsplit(":", 1)
+    logger.bind(thread_id=thread_id, counterparty_id=counterparty_id).info(
+        "orchestrator_run_reevaluation_requested", trigger_event_id=trigger.event_id
+    )
+    graph.update_state(config, {"trigger": trigger, "updated_by": updated_by}, as_node=START)
+    with _run_span("reevaluate", thread_id, correlation_id, counterparty_id):
+        return graph.invoke(None, config=config)
+
+
+# The lifecycle stages in which a call is open (MM-125): raised, not yet
+# resolved. Mirrors api.margin_calls._lifecycle_status; a unit test keeps the
+# two in step.
+OpenCallStage = Literal["awaiting_approval", "awaiting_manager_approval", "awaiting_sla_response"]
+
+
+def open_call_stage(values: dict) -> OpenCallStage | None:
+    """Where an open call stands, or None if the run isn't an open call (no
+    breach, held by the materiality gate, rejected, disputed, SLA met,
+    escalated, or not evaluated yet)."""
+    breach_result = values.get("breach_result")
+    if breach_result is None or not breach_result.breached:
+        return None
+    if values.get("materiality") == "below_mta":
+        return None
+    if values.get("escalation_result") is not None or values.get("sla_outcome") is not None:
+        return None
+    if values.get("notification_sent_at") is not None:
+        return "awaiting_sla_response"
+    decision = values.get("approval_decision")
+    if decision in ("rejected", "disputed"):
+        return None
+    if decision in ("approved", "adjusted"):
+        return "awaiting_manager_approval"
+    return "awaiting_approval"
+
+
+def find_open_call(
+    graph: CompiledStateGraph, session: Session, counterparty_id: str
+) -> tuple[str, dict] | None:
+    """The counterparty's open call as (thread_id, values), or None. Thread
+    ids end in `:<counterparty_id>` (thread_id_for). Calls raised before this
+    policy can leave several open calls; the most recent one is the one a
+    trigger updates."""
+    thread_ids = (
+        session.execute(
+            select(CheckpointORM.thread_id)
+            .where(CheckpointORM.thread_id.like(f"%:{counterparty_id}"))
+            .distinct()
+        )
+        .scalars()
+        .all()
+    )
+    open_calls = []
+    for thread_id in thread_ids:
+        if thread_id.rsplit(":", 1)[-1] != counterparty_id:
+            continue  # LIKE treats "_" as a wildcard; compare exactly
+        values = graph.get_state({"configurable": {"thread_id": thread_id}}).values
+        if values and open_call_stage(values) is not None:
+            open_calls.append((thread_id, values))
+    if not open_calls:
+        return None
+    if len(open_calls) > 1:
+        logger.warning(
+            "multiple_open_calls",
+            counterparty_id=counterparty_id,
+            thread_ids=sorted(t for t, _ in open_calls),
+        )
+    return max(open_calls, key=lambda call: call[1]["impact"].occurred_at)
 
 
 def get_or_start_run(graph: CompiledStateGraph, state: MarginCallState) -> dict:
@@ -680,6 +860,14 @@ def build_orchestrator_graph(
                 {
                     "breach_result": result["breach_result"].model_dump(mode="json"),
                     "counterparty_tier": result["counterparty_tier"].value,
+                    "trigger_event_id": state.current_trigger.event_id,
+                    "event_impact": (
+                        state.event_impact.model_dump(mode="json")
+                        if state.event_impact is not None
+                        else None
+                    ),
+                    "materiality": result["materiality"],
+                    "call_rationale": result["call_rationale"],
                 },
             )
         MARGIN_CALL_BREACHES_TOTAL.labels(
@@ -689,7 +877,22 @@ def build_orchestrator_graph(
             "evaluate_breach_completed",
             breached=result["breach_result"].breached,
             call_amount=result["breach_result"].call_amount,
+            trigger_event_id=state.current_trigger.event_id,
+            materiality=result["materiality"],
+            event_exposure_change=(
+                state.event_impact.exposure_change if state.event_impact is not None else None
+            ),
         )
+        if result["materiality"] == "below_mta" and result["breach_result"].breached:
+            # MM-125: below the gate there is no call -- logged with the impact.
+            log.info(
+                "intraday_call_below_materiality",
+                trigger_event_id=state.current_trigger.event_id,
+                event_exposure_change=(
+                    state.event_impact.exposure_change if state.event_impact is not None else None
+                ),
+                rationale=result["call_rationale"],
+            )
         return result
 
     def _await_approval_node(state: MarginCallState) -> dict:

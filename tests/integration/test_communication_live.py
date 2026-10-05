@@ -5,6 +5,8 @@ services and post a real message to the configured Slack channel.
 Run explicitly with: pytest -m live tests/integration/test_communication_live.py
 """
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from agents.communication import draft_margin_call_notice, send_slack_notice
@@ -18,10 +20,12 @@ def test_drafts_and_sends_a_real_margin_call_notice() -> None:
     settings = get_settings()
     csa_terms = CSATerms(threshold=100_000.0, mta=10_000.0, currency="USD")
 
+    deadline = datetime.now(UTC) + timedelta(minutes=settings.margin_call_sla_minutes)
     notice_text = draft_margin_call_notice(
-        "CP-TEST", 474_000.0, "USD", csa_terms, settings=settings
+        "CP-TEST", 474_000.0, "USD", csa_terms, deadline=deadline, settings=settings
     )
     assert "474,000" in notice_text or "474000" in notice_text
+    assert f"{deadline.astimezone(UTC):%H:%M} UTC" in notice_text
 
     result = send_slack_notice(notice_text, settings=settings)
 

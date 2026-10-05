@@ -57,6 +57,11 @@ const STATUS_META: Record<
     dotClass: "bg-status-danger",
     pillClass: "bg-status-danger/10 text-status-danger",
   },
+  below_materiality: {
+    label: "Below MTA",
+    dotClass: "bg-status-success",
+    pillClass: "bg-neutral-100 text-neutral-600",
+  },
 };
 
 export function LifecycleStatusLight({
