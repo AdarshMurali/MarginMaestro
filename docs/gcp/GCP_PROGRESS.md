@@ -73,6 +73,20 @@ At the end of each story, prepend an entry to **Log** using this template:
   4. Live chat check.
   5. Billing check 24 hours later.
 - **Cost impact:** about $0 idle (`min_instances=0`); a Gemini + Model Armor call per turn costs fractions of a cent.
+- **Deployed and verified live (2026-10-05).** The user ran `desk_assistant.deploy`; the agent `reasoningEngines/7706080625140170752` was created at 05:58 UTC with min 0 / max 2, 1 vCPU / 2 GiB, running as `mm-agent-sa`, with no secrets in its environment.
+  - **Direct REST check as `analyst1`:**
+    - "awaiting approval?" → `list_margin_calls` → CP-2 and CP-3 only.
+    - "CP-6 threshold/MTA?" → `retrieve_document_chunks` → "not available to you" (RLS end to end).
+    - "HPE price?" → 69.33.
+    - Sessions carried the conversation across all three turns. The first, cold turn took 53 s; warm turns took 4–8 s.
+  - **Chat switched on.** The user applied `mm129.tfplan` (1 changed: `DESK_ASSISTANT`, `DESK_AGENT_RESOURCE` on the API; the image stayed `6bb9623`). `/desk/chat` without a token or with a forged one → 401.
+- **Bug found live through the UI.** The user, as `manager`, asked "Which of my margin calls are awaiting approval?" The agent called no tools and pointed to the dashboard: Gemini read the rule against approving as a rule against discussing approvals.
+  - **Instruction fix:** looking calls up (open, awaiting approval, escalated, amounts) is the agent's job; only actions are out of scope.
+  - **The same test found two more issues, fixed in code:**
+    - The margin-status tool returned the calc engine's full-precision float, which the model quoted as "62957.75959485657". The tool now rounds to cents in code.
+    - The tool description didn't explain the statuses, so a manager was told that calls needing an *approver* awaited *their* signature. It now spells out what each status means.
+  - **Re-tested** with real Gemini and the live MCP services (5 cases): every read question calls `list_margin_calls` with correct, scoped answers; "Approve CP-2's call" → no tool call, pointed to the dashboard.
+  - **Rollout:** the MCP change rolls out through CD; the instruction change needs `desk_assistant.deploy --update`.
 
 ### 2026-10-04 — MM-128: Read-only MCP servers on Cloud Run (G5 re-plan)
 - **G5 re-plan (user decisions, 2026-10-04):**

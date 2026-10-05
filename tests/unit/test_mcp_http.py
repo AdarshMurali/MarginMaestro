@@ -345,3 +345,27 @@ def test_caller_module_logs_without_leaking_headers(session_factory):
         caller_scope(_ctx({"x-mm-user": "analyst1", "authorization": "Bearer t"}), session_factory)
 
     assert "Bearer t" not in str(logger.info.call_args)
+
+
+def test_amounts_are_returned_in_cents(feed):
+    call = _summary("t9:CP-1", "CP-1", MarginCallLifecycleStatus.AWAITING_APPROVAL)
+    call.call_amount = 62957.75959485657
+    feed.return_value = MarginCallFeedResponse(as_of=datetime.now(UTC), margin_calls=[call])
+
+    assert margin_status.list_margin_calls()[0]["call_amount"] == 62957.76
+    assert margin_status.get_margin_call("t9:CP-1")["call_amount"] == 62957.76
+
+
+def test_a_call_without_an_amount_stays_none(feed):
+    call = _summary("t8:CP-1", "CP-1", MarginCallLifecycleStatus.EVALUATING)
+    call.call_amount = None
+    feed.return_value = MarginCallFeedResponse(as_of=datetime.now(UTC), margin_calls=[call])
+
+    assert margin_status.list_margin_calls()[0]["call_amount"] is None
+
+
+def test_tool_description_explains_the_approval_stages():
+    doc = margin_status.list_margin_calls.__doc__
+
+    assert "awaiting_manager_approval = approved, needs a manager's second signature" in doc
+    assert "awaiting_approval = needs an approver's decision" in doc

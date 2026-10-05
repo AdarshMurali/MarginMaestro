@@ -340,3 +340,10 @@ def test_deploy_updates_an_existing_agent(monkeypatch):
 
     client.agent_engines.create.assert_not_called()
     assert client.agent_engines.update.call_args.kwargs["name"].endswith("/7")
+
+
+def test_instruction_separates_looking_up_from_acting():
+    """Found live (MM-129): 'which calls are awaiting approval?' was refused
+    because the rule against approving read as a rule against discussing it."""
+    assert "Looking a call up is your job" in desk.INSTRUCTION
+    assert "Say so only when asked to take one" in desk.INSTRUCTION
