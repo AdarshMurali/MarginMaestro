@@ -61,7 +61,7 @@ At the end of each story, prepend an entry to **Log** using this template:
   - **RAG tool.** Analysts get a pgvector store whose sessions carry their scope, so the database enforces RLS. A code filter on top also covers Chroma, which has no RLS.
   - **New `mcp_servers/margin_status.py`.** `list_margin_calls` (filter by counterparty and status, with a limit) and `get_margin_call`. It reuses the API's feed (`api.margin_calls`), so the status and amounts match the dashboard. The session is scoped, a code filter backs it up, and a call outside the analyst's scope looks exactly like a missing one. No write tools.
   - **`mcp_servers/http.py`** serves `market-data`, `rag` and `margin-status` only; the notifiers are never served.
-  - **Terraform `mcp.tf`.** Three services `mcp-<name>` (API image, command `python -m mcp_servers.http <name>`, `mm-mcp-sa`, min 0 / max 2, 1 vCPU, 512 Mi; `margin-status` 1 Gi, Cloud SQL IAM login, `SECRETS_SOURCE=env`). `roles/run.invoker` goes to `mm-agent-sa` only, and CD gets roles on these services and on `mm-mcp-sa`. Output `mcp_urls`.
+  - **Terraform `mcp.tf`.** Three services `mcp-<name>` (API image, started as `uvicorn --factory mcp_servers.http:create_app` with `MCP_SERVER=<name>`, `mm-mcp-sa`, min 0 / max 2, 1 vCPU, 512 Mi; `margin-status` 1 Gi, Cloud SQL IAM login, `SECRETS_SOURCE=env`). `roles/run.invoker` goes to `mm-agent-sa` only, and CD gets roles on these services and on `mm-mcp-sa`. Output `mcp_urls`.
   - **CD.** Three `deploy-cloudrun` steps, gated on the repo variable `MCP_CD_ENABLED`.
 - **Order:**
   1. Merge, so that `latest` contains `mcp_servers.http`.
