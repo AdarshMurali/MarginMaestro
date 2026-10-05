@@ -224,6 +224,20 @@ ADR: 0015
 
 **Exit:** every dataset has an owner and class; any call is traceable to its source data and cited documents; bad data is rejected loudly; confidential fields never reach the LLM unmasked.
 
+**As built (2026-10-05, PR `feature/G8-governance`; Jira MM-135 / MM-136 / MM-137).** BigQuery is parked with G7 (user decision 2026-10-05), so every BigQuery item below is **deferred with G7**. See the ADR-0015 amendment.
+- **MM-G81 → MM-135.** `docs/data_catalog.yaml` covers all 16 Cloud SQL tables (every column classified) and all 5 GCS document families; a sync test guards it. Dataplex entries are generated from the YAML (`infra/gcp/dataplex.tf`). *Deferred:* BigQuery tables.
+- **MM-G82 → MM-135.** Per-column classes, enforced by the LLM data-class filter (`governance/classification.py`: pseudonymize names, mask sizes and values, deny secrets) in `GuardedLLM` and the MCP RAG tool. Labels go on the Dataplex entries. *Deferred:* BigQuery policy tags.
+- **MM-G83 → MM-136.** OpenLineage per margin call to the Data Lineage API (`LINEAGE_EXPORTER=datalineage`), best effort.
+- **MM-G84.** Fail-loud ingestion checks in code are unchanged. *Deferred:* Dataplex data-quality scans (BigQuery).
+- **MM-G85 → MM-137.** Scheduled SDP inspection of the documents bucket, with `python -m governance.sdp_scan` for the summary. *Deferred:* BigQuery scans.
+- **MM-G86 → MM-137.**
+  - Cloud Audit Logs data access on Cloud SQL, GCS and Secret Manager.
+  - GCS retention policy of 30 days, unlocked.
+  - `audit_log` append-only by grant (migration `e3f8a1c5d927`, Postgres CI test).
+  - *Deferred:* BigQuery audit logs and table expiration.
+- **MM-G88 → MM-137.** The CI `security` job: pip-audit, licence allow-list, gitleaks, Trivy (image, config) and Checkov, with SARIF uploaded to the Security tab. The Dockerfile now takes Debian security updates and current pip/setuptools.
+- **MM-G87 → MM-137.** Governance sections in `docs/ARCHITECTURE.md` (§10) and `docs/DATA_SOURCES.md` (§6a), with tests for each catalog, classification, masking and lineage rule.
+
 ### Phase G9 — Cut-over & decommission (Epic: MM-96)
 
 - **MM-G91** `make demo` passes against the GCP deployment; README / architecture diagrams updated for GCP; `CLAUDE.md` tech stack updated.

@@ -41,6 +41,8 @@ terraform -chdir=infra/gcp apply
 - `monitoring.tf` — one log-based metric `mm-incidents` (SLA breaches, guardrail blocks/outages, dead letters, 5xx; labelled by log `event`) and one email alert policy on it, sent to `budget_alert_emails` (MM-127). A single condition keeps alerting cost minimal.
 - `vertex_ai.tf` — Vertex AI API + `aiplatform.user` for `mm-api-sa`, `mm-agent-sa`, `mm-mcp-sa` (MM-109).
 - `documents.tf` — GCS bucket `marginmaestro-demo-documents` for the RAG corpus (versioned, private, old versions pruned) (MM-111). Upload: `python -m rag.gcs_documents data/documents`; ingest: `DOCUMENT_STORE=gcs python -m rag.ingest`.
+- `dataplex.tf` — Dataplex Universal Catalog (MM-135): aspect type `marginmaestro-governance` (owner, class, freshness, source, confidential fields), entry type `marginmaestro-data-asset`, entry group `marginmaestro`, and one entry per Cloud SQL table / GCS document family **generated from `docs/data_catalog.yaml`** (edit the YAML, not the .tf). ~$0 (metadata storage, free first MiB).
+- `governance.tf` — the rest of G8 (ADR-0015): Data Lineage API + `roles/datalineage.producer` for `mm-api-sa` (MM-136); Cloud Audit Logs data access (ADMIN_READ/DATA_READ/DATA_WRITE) on Cloud SQL, Cloud Storage and Secret Manager; the Sensitive Data Protection job trigger `marginmaestro-documents-scan` over the documents bucket (every `sdp_scan_period_days`, free tier) and the DLP service agent's read access to that bucket (MM-137). The documents bucket's 30-day retention policy (unlocked) is in `documents.tf`.
 - `outputs.tf` — project, region, service account emails, WIF provider, app secret id.
 
 CI (`terraform-gcp` job) runs `fmt -check` and `validate` on both roots with `-backend=false`, so it needs no GCP credentials.

@@ -21,6 +21,17 @@ resource "google_storage_bucket" "documents" {
     enabled = true
   }
 
+  # MM-137 (ADR-0015): a document can't be deleted or replaced until it is
+  # var.documents_retention_days old -- the text a margin call cited stays
+  # available for that long. NOT locked on purpose: locking is irreversible
+  # (the period could then never be shortened, nor the bucket deleted before
+  # every object ages out). `python -m rag.gcs_documents` skips unchanged
+  # files, so a re-upload only fails for a document edited inside the period.
+  retention_policy {
+    retention_period = var.documents_retention_days * 86400
+    is_locked        = false
+  }
+
   lifecycle_rule {
     condition {
       num_newer_versions = 5

@@ -42,6 +42,28 @@ def test_upload_keeps_relative_paths_as_object_names(tmp_path: Path):
     )
 
 
+def test_upload_skips_documents_that_are_unchanged_in_the_bucket(tmp_path: Path):
+    """MM-137: the bucket's retention policy refuses replacing a young object,
+    so a re-run must not touch byte-identical documents."""
+    (tmp_path / "csa").mkdir()
+    (tmp_path / "csa" / "CP-3.md").write_text("# CP-3 CSA", encoding="utf-8")
+    (tmp_path / "csa" / "CP-4.md").write_text("# CP-4 CSA, amended", encoding="utf-8")
+    client, bucket = _client_with({})
+    same = SimpleNamespace(md5_hash=gcs_documents._md5_base64(b"# CP-3 CSA"))
+    changed = SimpleNamespace(md5_hash=gcs_documents._md5_base64(b"# CP-4 CSA"))
+    bucket.get_blob.side_effect = {"csa/CP-3.md": same, "csa/CP-4.md": changed}.get
+
+    names = gcs_documents.upload_corpus(tmp_path, settings=_settings(), client=client)
+
+    assert names == ["csa/CP-4.md"]
+    assert [c.args[0] for c in bucket.blob.call_args_list] == ["csa/CP-4.md"]
+
+
+def test_md5_matches_the_gcs_checksum_format():
+    # GCS reports base64(md5) -- this is the value for an empty object.
+    assert gcs_documents._md5_base64(b"") == "1B2M2Y8AsgTpgAmY7PhCfg=="
+
+
 def test_iter_returns_markdown_only_sorted_by_name():
     client, _ = _client_with(
         {"policy/margin_policy.md": "policy", "csa/CP-3.md": "cp3", "README.txt": "skip"}

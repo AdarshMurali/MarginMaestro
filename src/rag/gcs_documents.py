@@ -5,6 +5,8 @@ counterpart to rag.s3_upload. The bucket is the corpus's source of truth
 Upload once from the repo:  python -m rag.gcs_documents data/documents
 """
 
+import base64
+import hashlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -28,15 +30,29 @@ def upload_corpus(
 ) -> list[str]:
     """Uploads every .md document under local_dir, keeping its relative path
     as the object name (e.g. `csa/CP-3.md`, which ingestion turns into
-    doc_type=csa, counterparty_id=CP-3)."""
+    doc_type=csa, counterparty_id=CP-3). Returns the names uploaded.
+
+    MM-137: a document whose bucket copy is byte-identical is skipped. The
+    bucket has a retention policy, so replacing an object younger than the
+    period fails -- skipping unchanged files keeps re-runs idempotent, and only
+    a genuinely edited document inside the period is refused (loudly)."""
     settings = settings or get_settings()
     bucket = _bucket(settings, client)
     names: list[str] = []
     for path in sorted(local_dir.rglob("*.md")):
         name = path.relative_to(local_dir).as_posix()
+        existing = bucket.get_blob(name)
+        if existing is not None and existing.md5_hash == _md5_base64(path.read_bytes()):
+            continue
         bucket.blob(name).upload_from_filename(str(path), content_type="text/markdown")
         names.append(name)
     return names
+
+
+def _md5_base64(data: bytes) -> str:
+    """GCS's object checksum format (an integrity check, not security)."""
+    digest = hashlib.md5(data, usedforsecurity=False).digest()  # NOSONAR -- GCS checksum
+    return base64.b64encode(digest).decode()
 
 
 def iter_corpus_documents(

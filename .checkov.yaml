@@ -1,0 +1,39 @@
+# Checkov (MM-G88) for infra/gcp. Every skip below is a reviewed, deliberate
+# decision -- mostly cost (ADR-0017: as close to $0 as possible) -- so any
+# *new* finding fails CI. Remove a skip when the decision changes.
+framework:
+  - terraform
+compact: true
+quiet: true
+skip-check:
+  # Cloud SQL (infra/gcp/cloud_sql.tf): public IP with NO authorized networks;
+  # the only way in is the Auth Proxy / Connector (IAM-checked, encrypted).
+  # Private IP needs a paid VPC connector.
+  - CKV_GCP_60 # no public IP
+  - CKV_GCP_6 # client certificates: the connector already encrypts (ssl_mode ENCRYPTED_ONLY)
+  - CKV_GCP_79 # latest major version: POSTGRES_17 pinned; upgrade is a planned change
+  # Postgres logging flags: every statement/connection logged would add Cloud
+  # Logging volume for no demo value; data access is covered by Cloud Audit
+  # Logs (infra/gcp/governance.tf) and the append-only audit_log table.
+  - CKV2_GCP_13 # log_duration
+  - CKV_GCP_51 # log_checkpoints
+  - CKV_GCP_52 # log_connections
+  - CKV_GCP_53 # log_disconnections
+  - CKV_GCP_54 # log_lock_waits
+  - CKV_GCP_108 # log_hostname
+  - CKV_GCP_109 # log_min_messages
+  - CKV_GCP_110 # pgaudit
+  - CKV_GCP_111 # log_statement
+  # Bucket access logs: replaced by Cloud Audit Logs data access on
+  # storage.googleapis.com (MM-137).
+  - CKV_GCP_62
+  # Versioning: the documents and state buckets are versioned; the function
+  # source bucket holds rebuildable zips only.
+  - CKV_GCP_78
+  # Customer-managed keys: Google-managed encryption by default; CMEK is the
+  # documented production option (ADR-0015), not enabled for the demo (cost).
+  - CKV_GCP_83
+  # WIF: the provider's attribute condition pins the numeric repository id,
+  # owner id and refs/heads/main (infra/gcp/wif.tf) -- stricter than the
+  # name-based shape this check looks for.
+  - CKV_GCP_125

@@ -1,0 +1,8 @@
+# Trivy findings reviewed and accepted (MM-G88). One line per id, with why.
+
+# Cloud SQL public IP: deliberate (infra/gcp/cloud_sql.tf). There are no
+# authorized networks, so the only way in is the Cloud SQL Auth Proxy /
+# Connector, which checks the caller's IAM identity and encrypts the link;
+# private IP would need a VPC connector (paid).
+GCP-0017
+AVD-GCP-0017

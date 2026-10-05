@@ -90,7 +90,13 @@ def _cleanup(session: Session) -> None:
         delete(CheckpointWriteORM).where(CheckpointWriteORM.thread_id.like("mm107evt:%"))
     )
     session.execute(delete(CheckpointORM).where(CheckpointORM.thread_id.like("mm107evt:%")))
-    session.execute(delete(AuditLogORM).where(AuditLogORM.correlation_id == CORRELATION))
+    # MM-137: the app role can't delete audit rows (append-only), so test rows
+    # are removed over a plain connection as the login user (the table owner).
+    with session.get_bind().connect() as owner:
+        # FORCE ROW LEVEL SECURITY applies to the owner too: scope it firm-wide.
+        owner.execute(text("SELECT set_config('app.scope', '*', true)"))
+        owner.execute(delete(AuditLogORM).where(AuditLogORM.correlation_id == CORRELATION))
+        owner.commit()
     session.execute(
         delete(UserCounterpartyAccessORM).where(
             UserCounterpartyAccessORM.username == "mm107-analyst"

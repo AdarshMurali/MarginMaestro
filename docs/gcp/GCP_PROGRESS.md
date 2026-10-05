@@ -34,8 +34,8 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | **Done** (live run on GCP comes with G5) |
 | G5 | MM-92 | Agent Platform desk assistant, Cloud Run deployment, observability | In progress (MM-123, 124, 126, 127 done; MM-128 … 132 planned) |
 | G6 | MM-93 | WhatsApp client notifications | Code done (MM-118, MM-133, MM-134; one PR). Then: secrets script, Meta webhook setup, flip `client_notifier` |
-| G7 | MM-94 | BigQuery analytics & audit warehouse | Not started |
-| G8 | MM-95 | Data governance (Dataplex, classification, lineage, audit, retention) | Not started |
+| G7 | MM-94 | BigQuery analytics & audit warehouse | **Parked** (user decision 2026-10-05) |
+| G8 | MM-95 | Data governance (Dataplex, classification, lineage, audit, retention) | Code done without BigQuery (MM-135, 136, 137; one PR). Then: migration on Cloud SQL, Terraform apply |
 | G9 | MM-96 | Cut-over & AWS/Azure decommission | Not started |
 | G10 | MM-97 | Month-2 cost review & free-fallback swaps | Not started |
 
@@ -48,6 +48,83 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-05 — MM-135 / MM-136 / MM-137: Data governance without BigQuery (Phase G8) (code done; migration and Terraform apply pending)
+- **Done:**
+  - **MM-135, catalog and classification.**
+    - `docs/data_catalog.yaml` covers all 16 Cloud SQL tables and the 5 GCS document families. Every column has a class; every entry has an owner, description, freshness and source.
+    - `governance/catalog.py` validates the catalog. Its rules: a confidential column must declare `llm`, a table's class is at least its columns', and references must resolve.
+    - `test_data_catalog.py` fails on any table, column or document folder that isn't catalogued, or that is catalogued but gone from the code.
+    - Dataplex: `infra/gcp/dataplex.tf` creates one aspect type, one entry type, one entry group and 21 entries, all generated from the YAML.
+    - **LLM data-class filter** (`governance/classification.py`), driven by the catalog:
+      - counterparty legal names → `CP-n` (names read from the DB, cached 5 minutes);
+      - position quantities and collateral values → `[CONFIDENTIAL]` (`mask_record`, used by the reconciliation prompt);
+      - `deny` values with a pattern (bcrypt hashes) block the prompt;
+      - an unclassified field raises.
+    - Wired into `GuardedLLM` before redaction and screening (`LLM_DATA_CLASS_FILTER=catalog`), so it covers the CSA RAG extraction, notice drafting, reconciliation and escalation. Also on the MCP RAG tool's output (desk assistant).
+    - If the names can't be loaded the filter raises `GuardrailUnavailable` (fail closed, counted, audited by the orchestrator like any guardrail outcome).
+    - Documented exception: the desk assistant quotes RLS-scoped call amounts (`llm_exceptions`).
+  - **MM-136, lineage.** `governance/lineage.py` sends OpenLineage run events to `processOpenLineageRunEvent`.
+    - Job `marginmaestro/margin_call_lifecycle` (one Data Lineage process), with one run per call (uuid5 of the thread id).
+    - Milestones:
+      - call raised: price event(s) + 8 calc input tables + cited CSA files → `margin_call`; START; CSA chunk ids in the run facet;
+      - approval or manager signature → `approval`;
+      - notification → `notification`; carries channel, message id and status;
+      - SLA met / escalation → COMPLETE, with the incident number.
+    - Only ids, never amounts or names. Best effort: a failure is a `lineage_export_failed` warning and never fails the node.
+    - `LINEAGE_EXPORTER=none|datalineage` (default none).
+  - **MM-137, the rest of G8.**
+    - **SDP:** job trigger `marginmaestro-documents-scan` over the documents bucket (every 30 days, plus manual runs), with `python -m governance.sdp_scan` for the summary.
+    - **Audit logs:** Cloud Audit Logs data access on cloudsql, storage and secretmanager.
+    - **Retention:** a 30-day GCS retention policy on the documents bucket (unlocked). `rag.gcs_documents` now skips unchanged files (md5), so re-uploads stay idempotent.
+    - **Append-only audit:** migration `e3f8a1c5d927` revokes UPDATE/DELETE/TRUNCATE on `audit_log` from `mm_app` (Postgres only). A static AST/SQL guard test covers app code, and a live Postgres test runs in the CI `migrations` job. The RLS live test's cleanup now deletes its audit rows as the table owner.
+    - **MM-G88:** the CI `security` job. pip-audit and the licence allow-list gate through `ops/security_gates.py`. gitleaks scans the commits of each push/PR. Trivy fails on fixable CRITICAL CVEs in the image and on HIGH/CRITICAL misconfiguration in `infra/gcp` and the Dockerfile. Checkov runs on `infra/gcp`. Results go to SARIF.
+    - **Dockerfile:** `apt-get upgrade` plus current pip/setuptools (Trivy found fixable perl/pcre2 and vendored wheel/jaraco CVEs in `:latest`). The catalog is copied into the image (`DATA_CATALOG_PATH`).
+    - **Docs:** governance sections in `docs/ARCHITECTURE.md` §10 and `docs/DATA_SOURCES.md` §6a; ADR-0015 and ADR-0018 amendments; "As built" in the roadmap; CLAUDE.md rules.
+- **Decisions:** ADR-0015 amendment (2026-10-05).
+  - BigQuery items are deferred with G7.
+  - Classification means what reaches the model: names pseudonymized, sizes masked, secrets denied. CSA terms are `internal`.
+  - One recorded LLM exception, for the desk assistant.
+  - The retention policy is unlocked (locking is irreversible).
+  - pgaudit is off (per-query logs).
+  - Scanner binaries are pinned and checksum-verified instead of `trivy-action`.
+- **Tests:** 1371 pass (`tests/unit`). New suites:
+  - `test_data_catalog.py`: sync and rules;
+  - `test_data_class_filter.py`: names, masking, deny, fail closed, DB source and TTL, GuardedLLM wiring, reconciliation, every seeded name;
+  - `test_lineage.py`: the full call on the real graph (SQLite), escalation, no amounts or names, export failure doesn't fail the call, the exporter's REST call;
+  - `test_audit_append_only.py`, `test_sdp_scan.py`, `test_security_gates.py`;
+  - plus MCP and GCS cases.
+  - The live Postgres test `tests/integration/test_audit_append_only_live.py` runs in CI.
+  - Coverage 98% (`governance/*` 97–100%). ruff, black and mypy are clean. `terraform fmt` and `validate` are clean. Checkov on `infra/gcp` is 0 failed after the reviewed skips; Trivy config on `infra/gcp` + Dockerfile is 0; gitleaks on the tree is 0 after one allowlisted false positive. The licence gate passes 133 packages; pip-audit on a fresh resolve shows nothing fixable.
+- **Changed:**
+  - **New:** `src/governance/{__init__,catalog,classification,lineage,sdp_scan}.py`, `src/ops/security_gates.py`, `docs/data_catalog.yaml`, `migrations/versions/e3f8a1c5d927_append_only_audit_log.py`, `infra/gcp/{dataplex,governance}.tf`, `.checkov.yaml`, `.trivyignore`, `.gitleaks.toml`.
+  - **Modified:** `src/adapters/{factory,guarded_llm}.py`, `src/agents/{orchestrator,reconciliation}.py`, `src/mcp_servers/rag_retriever.py`, `src/rag/gcs_documents.py`, `src/config/settings.py`, `infra/gcp/{documents,cloud_run,mcp,variables,README}`, `.github/workflows/ci.yml`, `Dockerfile`, `.dockerignore`, `pyproject.toml` (`pyyaml`), `.env.example`, CLAUDE.md, the docs above.
+- **Terraform (not applied):**
+  - APIs `dataplex.googleapis.com` and `datalineage.googleapis.com`.
+  - `google_dataplex_aspect_type.governance`, `google_dataplex_entry_type.asset`, `google_dataplex_entry_group.marginmaestro`, and 21 `google_dataplex_entry.asset`.
+  - `google_project_iam_member.api_lineage_producer`.
+  - 3 `google_project_iam_audit_config.data_access`.
+  - `google_storage_bucket_iam_member.dlp_reads_documents` and `google_data_loss_prevention_job_trigger.documents_scan`.
+  - The documents bucket gains `retention_policy`.
+  - Env: API gets `LLM_DATA_CLASS_FILTER=catalog`, `LINEAGE_EXPORTER=var.lineage_exporter` (default `datalineage`) and `LINEAGE_LOCATION`; MCP services get `LLM_DATA_CLASS_FILTER=catalog`.
+  - New variables: `lineage_exporter`, `documents_retention_days`, `sdp_scan_period_days`.
+- **Cost impact:** about $0.
+  - Dataplex catalog and lineage metadata: free under 1 MiB monthly average, then $2/GiB-month (cents at worst).
+  - SDP storage inspection: free up to 1 GB a month (the corpus is under 100 KB).
+  - Data access audit logs: estimated under 100 MB/month against the 50 GiB free ingestion.
+  - No Dataplex scans and no BigQuery.
+- **Known issues / tech debt:**
+  - The live Postgres test for the grant has only run in CI (Docker is down locally).
+  - The Dataplex aspect key uses the project *number* (`<number>.us-central1.marginmaestro-governance`); verify on the first apply.
+  - Lineage's custom names (`custom:marginmaestro.*`) are not validated by the API by design.
+  - Changing a GCS document within 30 days of its upload is refused by the retention policy. Wait it out, or lower `documents_retention_days` (it is unlocked).
+  - `google_project_iam_audit_config` is authoritative per service and replaces console-made settings for those services.
+  - CSA chunk ids are `source_file#section` (the vector store doesn't return its own ids).
+- **Next step (parent / user), in order:**
+  1. Merge, so CI's new `security` job and the Postgres migration test go green and CD deploys the image. The image carries the catalog file, and the new code must be live before the env flags flip.
+  2. Migration on Cloud SQL: `demo_online` must be true. Start the Cloud SQL Auth Proxy, then, as `postgres` with the Postgres `DB_*` env set, run `alembic upgrade head` (applies `e3f8a1c5d927`). `scripts/cloudsql_bootstrap.ps1` does proxy → migrations.
+  3. `terraform -chdir=infra/gcp plan`, after CD has deployed (stale-plan rule), then apply.
+  4. Check: a Dataplex search for `marginmaestro`; one simulated call, then Dataplex → Lineage on `custom:marginmaestro.margin_call.<thread>`; SDP → Job triggers → Run now, then `python -m governance.sdp_scan`; Logs Explorer `logName:"data_access"`.
 
 ### 2026-10-05 — MM-118 / MM-133 / MM-134: WhatsApp client notices, inbound webhook, Slack for internal traffic (Phase G6) (code done; secrets, Meta setup and Terraform apply pending)
 - **Done:**
