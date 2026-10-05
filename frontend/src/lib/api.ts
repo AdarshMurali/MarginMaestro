@@ -63,7 +63,8 @@ export type MarginCallLifecycleStatus =
   | "disputed"
   | "awaiting_sla_response"
   | "sla_met"
-  | "escalated";
+  | "escalated"
+  | "below_materiality";
 
 export interface MarginCallSummary {
   thread_id: string;
@@ -79,6 +80,8 @@ export interface MarginCallSummary {
   sla_outcome: string | null;
   notification_sent_at: string | null;
   sla_deadline: string | null;
+  rationale: string | null;
+  updated_by: string[];
 }
 
 export interface MarginCallFeedResponse {
@@ -291,6 +294,8 @@ export interface SimulatedCounterpartyResult {
   breached: boolean | null;
   call_amount: number | null;
   error: string | null;
+  action: "started" | "updated" | "unchanged" | null;
+  detail: string | null;
 }
 
 export interface SimulateEventResponse {

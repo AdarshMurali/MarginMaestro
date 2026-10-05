@@ -145,33 +145,40 @@ export default function SimulatePage() {
               </p>
             )}
             {result.affected_counterparties.map((item) => (
-              <div
-                key={item.counterparty_id}
-                className="flex items-center justify-between gap-4 text-sm"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-black">{item.counterparty_id}</span>
-                  {item.error ? (
-                    <span className="text-red-600">{item.error}</span>
-                  ) : (
-                    <StatusLight
-                      status={item.breached ? "breached" : "healthy"}
-                      className="text-xs"
-                    />
-                  )}
+              <div key={item.counterparty_id} className="flex flex-col gap-1 text-sm">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-black">{item.counterparty_id}</span>
+                    {item.error ? (
+                      <span className="text-red-600">{item.error}</span>
+                    ) : (
+                      <StatusLight
+                        status={item.breached ? "breached" : "healthy"}
+                        className="text-xs"
+                      />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 font-mono text-xs text-black">
+                    {item.call_amount !== null && formatUsd(item.call_amount, "USD")}
+                    {item.thread_id && (
+                      <Link
+                        href={`/margin-calls/${encodeURIComponent(item.thread_id)}/trace`}
+                        className="underline underline-offset-4"
+                        style={{ color: DARK_GREEN }}
+                      >
+                        View trace &rarr;
+                      </Link>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-3 font-mono text-xs text-black">
-                  {item.call_amount !== null && formatUsd(item.call_amount, "USD")}
-                  {item.thread_id && (
-                    <Link
-                      href={`/margin-calls/${encodeURIComponent(item.thread_id)}/trace`}
-                      className="underline underline-offset-4"
-                      style={{ color: DARK_GREEN }}
-                    >
-                      View trace &rarr;
-                    </Link>
-                  )}
-                </div>
+                {/* MM-125: why there is (or isn't) a call, from the backend. */}
+                {item.detail && (
+                  <p className="text-xs text-neutral-500">
+                    {item.action === "updated" && "Updated the open call: "}
+                    {item.action === "unchanged" && "Open call unchanged: "}
+                    {item.detail}
+                  </p>
+                )}
               </div>
             ))}
           </div>

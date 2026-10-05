@@ -201,18 +201,21 @@ def test_unknown_guardrail_provider_fails_loud():
 
 
 def test_simulate_holds_a_counterparty_whose_llm_call_was_blocked():
+    from agents.margin_policy import TriggerAction, TriggerOutcome
     from api import simulate
     from streaming.schemas import MarketEventType
 
     blocked = GuardrailBlocked("prompt", Verdict(allowed=False, guardrail="incode", reasons=["x"]))
+    started = TriggerOutcome(counterparty_id="CP-2", action=TriggerAction.STARTED, thread_id="t")
     with (
         patch.object(simulate, "affected_counterparties", return_value=["CP-1", "CP-2"]),
         patch.object(simulate, "build_orchestrator_graph", return_value=MagicMock()),
         patch.object(
             simulate,
-            "start_run",
-            side_effect=[blocked, {"breach_result": None, "__interrupt__": []}],
+            "CompositeMarketFeed",
+            return_value=MagicMock(**{"get_prices.return_value": {}}),
         ),
+        patch.object(simulate, "dispatch_trigger", side_effect=[blocked, started]),
     ):
         response = simulate.trigger_simulation(
             MarketEventType.PRICE_SHOCK, "AAPL", -0.1, MagicMock(), MagicMock(), _settings()

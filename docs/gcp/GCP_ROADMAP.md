@@ -167,6 +167,14 @@ Added 2026-10-02 after the first live run on GCP. Runs after G5, before G6 (user
 
 **Exit:** replaying 2026-10-02 raises no intraday HPE calls. The daily run raises the CP-1/3/7 calls once, each with its own exposure rationale. A second shock on a counterparty with an open call updates that call.
 
+**As built (2026-10-05, ADR-0020):**
+- **Daily run:** `POST /internal/margin/daily-run`, called by the Cloud Scheduler job `daily-margin-run` at 16:45 New York, Mon–Fri. That is 15 minutes after `eod-prices`, and the job is paused by `demo_online`. One impact set per day (`daily-margin-run:<date>`), so a retry is idempotent per counterparty.
+- **Gate:** `calc/materiality.py` computes impact as VM change + IM change over the moved tickers, from the move carried on the event (`ImpactSet.price_moves`). Below the gate the run ends as `below_materiality`, with no call and with the impact logged and audited. `/simulate` is gated the same way.
+- **One open call:** every trigger goes through `agents/margin_policy.dispatch_trigger`, under a per-counterparty lease.
+  - A call still awaiting its first approval is re-evaluated in place (`reevaluate_run`); the approval gate re-arms with the new amount.
+  - A call that is already signed or sent is never changed. The trigger is audited on it.
+- **Notice:** quotes `{DEADLINE}` = `notification_sent_at + MARGIN_CALL_SLA_MINUTES` and the code-built `{RATIONALE}`. Both are placeholders the model never fills.
+
 ### Phase G6 — WhatsApp client notifications (Epic: MM-93)
 ADR: 0016
 

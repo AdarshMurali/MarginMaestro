@@ -1,6 +1,7 @@
-"""MM-121: impact sets -> margin-call runs, exactly once per (event, counterparty)."""
+"""MM-121: impact sets -> margin-call runs, exactly once per (event, counterparty).
+MM-125: each counterparty is dispatched through the margin-call policy."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,8 +10,15 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agents.csa_rag import CSATermsUnavailableError
-from persistence.db.models import Base, ProcessedEventORM
-from streaming.impact_consumer import claim_run, handle_impact, release_run, run_claim_id
+from agents.margin_policy import CounterpartyBusyError, TriggerAction, TriggerOutcome
+from persistence.db.models import Base, CounterpartyORM, PortfolioORM, ProcessedEventORM
+from streaming.impact_consumer import (
+    claim_run,
+    daily_margin_run_impact,
+    handle_impact,
+    release_run,
+    run_claim_id,
+)
 from streaming.schemas import ImpactSet, MarketEventType
 
 
@@ -33,6 +41,18 @@ def _impact(counterparties: list[str]) -> ImpactSet:
     )
 
 
+def _started(graph, impact, counterparty_id, session_factory) -> TriggerOutcome:
+    return TriggerOutcome(
+        counterparty_id=counterparty_id,
+        action=TriggerAction.STARTED,
+        thread_id=f"{impact.event_id}:{counterparty_id}",
+    )
+
+
+def _dispatch(**kwargs):
+    return patch("streaming.impact_consumer.dispatch_trigger", **kwargs)
+
+
 def _claims(session_factory) -> list[str]:
     with session_factory() as session:
         return list(session.execute(select(ProcessedEventORM.event_id)).scalars())
@@ -50,15 +70,16 @@ def test_one_run_per_counterparty_and_none_on_redelivery(session_factory):
     graph_factory = MagicMock()
     impact = _impact(["CP-1", "CP-2"])
 
-    with patch("streaming.impact_consumer.start_run") as start_run:
+    with _dispatch(side_effect=_started) as dispatch:
         first = handle_impact(impact, session_factory, graph_factory)
         second = handle_impact(impact, session_factory, graph_factory)
 
-    assert first == [f"{impact.event_id}:CP-1", f"{impact.event_id}:CP-2"]
+    threads = [o.thread_id for o in first]
+    assert threads == [f"{impact.event_id}:CP-1", f"{impact.event_id}:CP-2"]
     assert second == []
-    assert start_run.call_count == 2
+    assert dispatch.call_count == 2
     graph_factory.assert_called_once()  # built once, lazily
-    assert sorted(_claims(session_factory)) == [run_claim_id(t) for t in first]
+    assert sorted(_claims(session_factory)) == [run_claim_id(t) for t in threads]
 
 
 def test_nothing_to_run_builds_no_graph(session_factory):
@@ -70,38 +91,70 @@ def test_nothing_to_run_builds_no_graph(session_factory):
 
 def test_a_known_business_error_is_held_not_retried(session_factory):
     impact = _impact(["CP-1"])
-    with patch(
-        "streaming.impact_consumer.start_run",
-        side_effect=CSATermsUnavailableError("no CSA for CP-1"),
-    ) as start_run:
+    with _dispatch(side_effect=CSATermsUnavailableError("no CSA for CP-1")) as dispatch:
         assert handle_impact(impact, session_factory, MagicMock()) == []
         assert handle_impact(impact, session_factory, MagicMock()) == []
 
-    start_run.assert_called_once()  # stays claimed: a retry would only repeat the LLM calls
+    dispatch.assert_called_once()  # stays claimed: a retry would only repeat the LLM calls
 
 
 def test_an_unexpected_error_releases_the_claim_and_raises(session_factory):
     impact = _impact(["CP-1"])
-    with (
-        patch("streaming.impact_consumer.start_run", side_effect=RuntimeError("db blip")),
-        pytest.raises(RuntimeError),
-    ):
+    with _dispatch(side_effect=RuntimeError("db blip")), pytest.raises(RuntimeError):
         handle_impact(impact, session_factory, MagicMock())
 
     assert _claims(session_factory) == []  # redelivery will try again
-    with patch("streaming.impact_consumer.start_run") as start_run:
-        assert handle_impact(impact, session_factory, MagicMock()) == [f"{impact.event_id}:CP-1"]
-    start_run.assert_called_once()
+    with _dispatch(side_effect=_started) as dispatch:
+        outcomes = handle_impact(impact, session_factory, MagicMock())
+    assert [o.thread_id for o in outcomes] == [f"{impact.event_id}:CP-1"]
+    dispatch.assert_called_once()
 
 
-def test_run_state_carries_the_impact_and_counterparty(session_factory):
+def test_dispatch_gets_the_impact_and_counterparty(session_factory):
     impact = _impact(["CP-7"])
-    with patch("streaming.impact_consumer.start_run") as start_run:
+    graph_factory = MagicMock()
+    with _dispatch(side_effect=_started) as dispatch:
+        handle_impact(impact, session_factory, graph_factory)
+
+    graph, dispatched, counterparty_id, factory = dispatch.call_args.args
+    assert graph is graph_factory.return_value
+    assert (dispatched, counterparty_id, factory) == (impact, "CP-7", session_factory)
+
+
+def test_a_busy_counterparty_is_retried_after_the_others(session_factory):
+    """MM-125: another trigger holds CP-1's lease. CP-2 is still dispatched;
+    CP-1's claim is released and the error makes the message redeliver."""
+    impact = _impact(["CP-1", "CP-2"])
+
+    def _busy_cp1(graph, impact, counterparty_id, factory):
+        if counterparty_id == "CP-1":
+            raise CounterpartyBusyError("CP-1 busy")
+        return _started(graph, impact, counterparty_id, factory)
+
+    with _dispatch(side_effect=_busy_cp1), pytest.raises(CounterpartyBusyError, match="CP-1"):
         handle_impact(impact, session_factory, MagicMock())
 
-    state = start_run.call_args.args[1]
-    assert (state.correlation_id, state.counterparty_id) == (impact.event_id, "CP-7")
-    assert state.impact == impact
+    assert _claims(session_factory) == [run_claim_id(f"{impact.event_id}:CP-2")]
+    with _dispatch(side_effect=_started) as dispatch:
+        outcomes = handle_impact(impact, session_factory, MagicMock())
+    assert [o.counterparty_id for o in outcomes] == ["CP-1"]  # CP-2 was already done
+    dispatch.assert_called_once()
+
+
+def test_daily_margin_run_names_every_counterparty_with_a_book_once_a_day(session_factory):
+    with session_factory() as session:
+        for cp in ("CP-2", "CP-1"):
+            session.add(CounterpartyORM(id=cp, name=cp, type="Bank", country="US"))
+            session.add(PortfolioORM(id=f"PF-{cp}", counterparty_id=cp, currency="USD"))
+        session.add(CounterpartyORM(id="CP-9", name="CP-9", type="Bank", country="US"))
+        session.commit()
+
+        impact = daily_margin_run_impact(session, date(2026, 10, 2))
+
+    assert impact.event_id == "daily-margin-run:2026-10-02"
+    assert impact.event_type == MarketEventType.DAILY_MARGIN_RUN
+    assert impact.counterparty_ids == ["CP-1", "CP-2"]  # CP-9 has no book
+    assert impact.price_moves == []  # never gated
 
 
 def test_claim_rows_do_not_collide_with_event_dedup_rows(session_factory):

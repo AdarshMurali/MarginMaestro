@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from adapters.factory import get_event_bus
+from calc.models import PriceMove
 from config.settings import Settings, get_settings
 from persistence.db.engine import get_session_factory
 from persistence.db.models import (
@@ -172,6 +173,8 @@ def handle_price_message(
         counterparty_ids=affected_counterparties(session, quote.ticker),
         reason=f"{quote.ticker} moved {pct_change:.1%} vs prior close ({prior_close} -> {quote.price})",
         occurred_at=quote.as_of,
+        # MM-125: the move itself, for the intraday materiality gate.
+        price_moves=[PriceMove(ticker=quote.ticker, from_price=prior_close, to_price=quote.price)],
     )
     producer.publish(settings.kafka_topic_impact, impact, key=shock_id)
     producer.flush()

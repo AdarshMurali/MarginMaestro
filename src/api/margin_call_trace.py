@@ -28,6 +28,7 @@ from api.schemas import MarginCallTraceResponse, TraceStep, TraceStepStatus
 
 NODE_LABELS = {
     "__start__": "Event received",
+    "__reevaluate__": "Re-evaluated by a later trigger",
     "compute_exposure": "Compute exposure",
     "fetch_csa_terms": "Fetch CSA terms",
     "evaluate_breach": "Evaluate breach",
@@ -50,6 +51,10 @@ def _pending_node(channel_values: dict) -> str | None:
 
 
 def _summarize_step(node: str, values: dict) -> str:
+    if node == "__reevaluate__":
+        trigger = values.get("trigger")
+        return f"Re-evaluated: {trigger.reason}" if trigger is not None else "Re-evaluated"
+
     if node == "__start__":
         impact = values.get("impact")
         return f"Event received: {impact.reason}" if impact is not None else "Event received"
@@ -73,6 +78,10 @@ def _summarize_step(node: str, values: dict) -> str:
         result = values.get("breach_result")
         if result is None:
             return "Breach evaluated"
+        if result.breached and values.get("materiality") == "below_mta":
+            impact = values.get("event_impact")
+            moved = f" (event moved exposure {impact.exposure_change:,.0f})" if impact else ""
+            return f"Below materiality -- no intraday call{moved}"
         return f"Breached -- call {result.call_amount:,.0f}" if result.breached else "No breach"
 
     if node == "await_approval":
@@ -136,6 +145,10 @@ def get_margin_call_trace(
     for older, newer in pairwise(checkpoints):
         node = _pending_node(older.checkpoint.get("channel_values", {})) or "__start__"
         metadata = newer.metadata or {}
+        if metadata.get("source") == "update":
+            # MM-125: a later trigger re-evaluating this open call
+            # (orchestrator.reevaluate_run) -- a state update, not a node run.
+            node = "__reevaluate__"
         ts = newer.checkpoint.get("ts")
         steps.append(
             TraceStep(

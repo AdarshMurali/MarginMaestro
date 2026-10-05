@@ -57,8 +57,11 @@ def list_margin_calls(
     awaiting_manager_approval = approved, needs a manager's second signature
     (elite-tier counterparties); awaiting_sla_response = the client was
     notified and the SLA clock is running; sla_met = the client responded in
-    time; escalated = SLA breached, ServiceNow incident opened; no_breach,
-    rejected, disputed, evaluating as named.
+    time; escalated = SLA breached, ServiceNow incident opened;
+    below_materiality = an intraday event moved exposure by less than the
+    CSA minimum transfer amount, so no call was raised (the daily margin run
+    handles standing breaches); no_breach, rejected, disputed, evaluating as
+    named. `rationale` explains each call's figures.
     """
     if status is not None and status not in MarginCallLifecycleStatus._value2member_map_:
         raise ValueError(f"Unknown status {status!r}; expected one of: {STATUSES}")

@@ -2,6 +2,7 @@ import base64
 import binascii
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from functools import lru_cache
 
 from fastapi import Depends, FastAPI, HTTPException, Response
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from adapters.factory import get_event_bus
 from adapters.pubsub_admin import topic_for_subscription
+from agents.margin_policy import CounterpartyBusyError
 from agents.orchestrator import build_orchestrator_graph, resume_run
 from api.audit_log import get_margin_call_audit_log
 from api.auth import (
@@ -49,6 +51,8 @@ from api.schemas import (
     CounterpartyExposure,
     CounterpartyHistoryResponse,
     CounterpartyListResponse,
+    DailyMarginRunResponse,
+    DailyRunOutcome,
     EodLoadResponse,
     ExposureBoardResponse,
     HealthResponse,
@@ -73,10 +77,11 @@ from persistence.daily_close import load_daily_closes, refresh_reference_rates
 from persistence.db.engine import get_session_factory
 from persistence.db.rls import RLS_SCOPE_KEY, can_see, scope_for
 from ports.event_bus import EventBus
+from streaming.impact_consumer import daily_margin_run_impact, handle_impact
 from streaming.inbound import PubSubInbound
 from streaming.live_feed_publisher import publish_live_prices
 from streaming.market_feed import MarketDataUnavailableError
-from streaming.pubsub_dispatch import dispatch
+from streaming.pubsub_dispatch import dispatch, live_graph_factory
 from streaming.schemas import MarketEventType
 
 configure_logging()
@@ -456,6 +461,38 @@ def load_end_of_day() -> EodLoadResponse:
         rates = refresh_reference_rates(session, settings)
     return EodLoadResponse(
         tickers_loaded=len(closes["loaded"]), tickers_failed=closes["failed"], reference_rates=rates
+    )
+
+
+@app.post(
+    "/internal/margin/daily-run",
+    response_model=DailyMarginRunResponse,
+    dependencies=[Depends(require_internal_caller)],
+)
+def daily_margin_run() -> DailyMarginRunResponse:
+    """The daily margin run (MM-125), scheduled at 16:45 New York on weekdays,
+    after the EOD price load: every counterparty is evaluated, standing
+    breaches raise calls (each paused at the approval gate), and an open call
+    is re-evaluated in place instead of a second one being raised. Once a
+    day: a retry or a second call the same day skips counterparties already
+    done. 503 while another trigger holds a counterparty, so Cloud Scheduler
+    retries."""
+    settings = get_settings()
+    session_factory = get_db_session_factory()
+    with session_factory() as session:
+        impact = daily_margin_run_impact(session, datetime.now(UTC).date())
+    try:
+        outcomes = handle_impact(
+            impact, session_factory, live_graph_factory(settings, session_factory)
+        )
+    except CounterpartyBusyError as exc:
+        raise HTTPException(
+            status_code=503, detail=str(exc), headers={"Retry-After": "60"}
+        ) from exc
+    return DailyMarginRunResponse(
+        event_id=impact.event_id,
+        counterparties=len(impact.counterparty_ids),
+        outcomes=[DailyRunOutcome.model_validate(o.model_dump()) for o in outcomes],
     )
 
 

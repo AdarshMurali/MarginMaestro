@@ -12,6 +12,7 @@ the calculation. A wrong amount can't be sent because the model can't write
 one."""
 
 import re
+from datetime import UTC, datetime
 
 from openai import OpenAI
 from pydantic import BaseModel
@@ -87,36 +88,59 @@ class NotificationResult(BaseModel):
     slack_ts: str
 
 
+def format_deadline(deadline: datetime) -> str:
+    """The SLA deadline as the notice quotes it, e.g. "14:35 UTC on 5 October
+    2026". Fails loud on a naive datetime -- a deadline without a time zone
+    can't be quoted to a client."""
+    if deadline.tzinfo is None:
+        raise ValueError("the SLA deadline must be timezone-aware")
+    utc = deadline.astimezone(UTC)
+    return f"{utc:%H:%M} UTC on {utc.day} {utc:%B %Y}"
+
+
 def draft_margin_call_notice(
     counterparty_id: str,
     call_amount: float,
     currency: str,
     csa_terms: CSATerms,
+    *,
+    deadline: datetime,
+    rationale: str | None = None,
     openai_client: OpenAI | None = None,
     settings: Settings | None = None,
     llm: LLMClient | None = None,
 ) -> str:
+    """MM-125: the notice quotes the enforced SLA deadline ({DEADLINE}) and,
+    when there is one, the call's rationale ({RATIONALE}). Both are computed
+    in code and filled in after validation, like the amounts (MM-116): the
+    model never sees or writes a date, a time or a figure."""
     settings = settings or get_settings()
     llm = llm or get_llm(settings, openai_client)
 
     request = (
         "Draft a margin call notice. Placeholders: {COUNTERPARTY} (the counterparty), "
         "{CALL_AMOUNT} (the margin call amount, with currency), {THRESHOLD} (the CSA "
-        "threshold) and {MTA} (the CSA minimum transfer amount). {COUNTERPARTY} and "
-        "{CALL_AMOUNT} must appear."
+        "threshold), {MTA} (the CSA minimum transfer amount) and {DEADLINE} (the date and "
+        "time by which the collateral must be delivered). State no other deadline or "
+        "timeframe. {COUNTERPARTY}, {CALL_AMOUNT} and {DEADLINE} must appear."
     )
     values = {
         "COUNTERPARTY": counterparty_id,
         "CALL_AMOUNT": _money(call_amount, currency),
         "THRESHOLD": _money(csa_terms.threshold, csa_terms.currency),
         "MTA": _money(csa_terms.mta, csa_terms.currency),
+        "DEADLINE": format_deadline(deadline),
     }
+    required = {"COUNTERPARTY", "CALL_AMOUNT", "DEADLINE"}
+    if rationale:
+        request += (
+            " {RATIONALE} is one or two sentences explaining why the call is due; it must "
+            "appear, on its own, after the opening sentence."
+        )
+        values["RATIONALE"] = rationale
+        required.add("RATIONALE")
     return _draft_with_placeholders(
-        llm,
-        request,
-        values,
-        {"COUNTERPARTY", "CALL_AMOUNT"},
-        f"margin call notice for {counterparty_id}",
+        llm, request, values, required, f"margin call notice for {counterparty_id}"
     )
 
 

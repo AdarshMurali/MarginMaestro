@@ -46,3 +46,26 @@ class CSATerms(BaseModel):
 class BreachResult(BaseModel):
     breached: bool
     call_amount: float
+
+
+class PriceMove(BaseModel):
+    """One ticker's move as a market event saw it (MM-125): the price the
+    shock was measured from (the prior close) and the price that crossed the
+    threshold. Carried on the event itself, so replaying the event later
+    measures the same move, whatever the market does in between."""
+
+    ticker: str
+    from_price: float = Field(gt=0)
+    to_price: float = Field(gt=0)
+
+
+class EventImpact(BaseModel):
+    """What one market event, on its own, did to a counterparty's exposure
+    (MM-125): the change in MTM (= the change in variation margin, since the
+    prior-close MTM is fixed) plus the change in initial margin, over the
+    positions in the moved tickers only."""
+
+    tickers: list[str]
+    mtm_change: float
+    im_change: float
+    exposure_change: float

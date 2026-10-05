@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agents.csa_rag import CSATermsUnavailableError
-from api.simulate import trigger_simulation
+from api.simulate import _simulated_move, trigger_simulation
 from config.settings import Settings
 from persistence.db.models import (
     Base,
@@ -19,7 +19,7 @@ from persistence.db.models import (
     ReferenceRateORM,
 )
 from rag.models import CSATermsResult
-from streaming.market_feed import PriceQuote
+from streaming.market_feed import MarketDataUnavailableError, PriceQuote
 from streaming.schemas import MarketEventType
 
 
@@ -125,7 +125,7 @@ class TestTriggerSimulation:
             result = trigger_simulation(
                 MarketEventType.PRICE_SHOCK,
                 "TSLA",
-                -0.12,
+                0.12,
                 session,
                 session_factory,
                 Settings(_env_file=None),
@@ -137,10 +137,59 @@ class TestTriggerSimulation:
         assert item.counterparty_id == "CP-SIM"
         assert item.error is None
         assert item.thread_id is not None and item.thread_id.endswith(":CP-SIM")
-        # -12% delta: 500 * 0.88 = 440, still a real breach against a
-        # threshold of 1,000.
+        # +12% delta: 500 -> 560 on 1,000 shares moves exposure by 60,000 of
+        # MTM (plus IM), far above the MTA of 1 (MM-125 gate), and the book
+        # breaches a threshold of 1,000.
         assert item.breached is True
         assert item.call_amount is not None and item.call_amount > 0
+        assert item.action == "started"
+        assert item.detail is not None and "increased your exposure" in item.detail
+
+    def test_a_move_that_reduces_exposure_raises_no_call(self, session_factory) -> None:
+        """MM-125: -12% on a long book reduces exposure, so the materiality
+        gate holds the standing breach for the daily run."""
+        _seed_counterparty(session_factory, "CP-SIM", "TSLA", prior_price=100.0)
+
+        with (
+            patch("agents.orchestrator.answer_csa_terms", return_value=_csa_result("CP-SIM")),
+            session_factory() as session,
+        ):
+            result = trigger_simulation(
+                MarketEventType.PRICE_SHOCK,
+                "TSLA",
+                -0.12,
+                session,
+                session_factory,
+                Settings(_env_file=None),
+                base_feed=_fake_base_feed(price=500.0),
+            )
+
+        item = result.affected_counterparties[0]
+        assert item.breached is True  # the standing breach is real...
+        assert item.call_amount is None  # ...but this event raises no call
+        assert item.detail is not None and "no intraday call" in item.detail
+
+    def test_no_baseline_price_means_no_gate(self, session_factory) -> None:
+        """A feed gap leaves the event without a move; the run itself then
+        reports the missing price, as before MM-125."""
+        _seed_counterparty(session_factory, "CP-SIM", "TSLA", prior_price=100.0)
+        empty_feed = MagicMock(**{"get_prices.return_value": {}})
+
+        with (
+            patch("agents.orchestrator.answer_csa_terms", return_value=_csa_result("CP-SIM")),
+            session_factory() as session,
+        ):
+            result = trigger_simulation(
+                MarketEventType.PRICE_SHOCK,
+                "TSLA",
+                0.12,
+                session,
+                session_factory,
+                Settings(_env_file=None),
+                base_feed=empty_feed,
+            )
+
+        assert "No price available" in (result.affected_counterparties[0].error or "")
 
     def test_unaffected_counterparty_is_not_included(self, session_factory) -> None:
         # Holds a ticker that isn't the one being shocked.
@@ -222,3 +271,17 @@ class TestTriggerSimulation:
         # A real counterparty holding TSLA is still evaluated even though an
         # upward move can't itself breach a VM threshold.
         assert len(result.affected_counterparties) == 1
+
+
+class TestSimulatedMove:
+    def test_is_the_baseline_and_shocked_price(self) -> None:
+        (move,) = _simulated_move("TSLA", -0.12, _fake_base_feed(price=500.0))
+
+        assert (move.ticker, move.from_price) == ("TSLA", 500.0)
+        assert move.to_price == pytest.approx(440.0)
+
+    def test_a_feed_outage_or_a_wipe_out_leaves_no_move(self) -> None:
+        down = MagicMock(**{"get_prices.side_effect": MarketDataUnavailableError("down")})
+
+        assert _simulated_move("TSLA", 0.1, down) == []
+        assert _simulated_move("TSLA", -1.0, _fake_base_feed()) == []
