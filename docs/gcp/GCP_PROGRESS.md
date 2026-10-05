@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123, 124, 126, 127 done (API, event flow, SLA timers, CD and observability live on GCP). Re-planned 2026-10-04: Agent Platform hosts the ADK desk assistant (MM-128 … MM-132), and the orchestrator stays on Cloud Run. MM-128 done (MCP servers live on Cloud Run); MM-129 (ADK desk assistant) code done, deploy pending approval. MM-125 (margin-call policy, G5b, ADR-0020) code done, `daily-margin-run` job apply pending; then G6 WhatsApp. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
+- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123, 124, 126, 127 done (API, event flow, SLA timers, CD and observability live on GCP). Re-planned 2026-10-04: Agent Platform hosts the ADK desk assistant (MM-128 … MM-132), and the orchestrator stays on Cloud Run. **MM-128, 130, 131, 132 done; MM-129 live, closing after the 2026-10-06 billing check. G5b (MM-125) done and verified live.** G6 in progress. MM-125 (margin-call policy, G5b, ADR-0020) code done, `daily-margin-run` job apply pending; then G6 WhatsApp. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -48,6 +48,18 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-05 — G5 + G5b verified live (MM-125, MM-130, MM-131, MM-132 closed)
+- **MM-132 evaluation in CI** (`desk-eval` run 37287235265, WIF as `mm-ci-sa`): **12/12 deterministic checks**; rubrics hallucination **0.94** and final-response quality **0.90**. The CSA case that Model Armor used to block now passes.
+- **MM-130 Memory Bank:** live, with cross-session recall verified (see the cutover entry). Closed.
+- **MM-131:** closed with per-tool IAM delivered and Agent Identity deferred. The 10 unused agent-principal grants were removed (`mm131off.tfplan`, 10 destroyed).
+- **MM-125 daily margin run,** triggered once by hand at 09:11 UTC (`gcloud scheduler jobs run daily-margin-run`). It finished in about 90 s, with `/internal/margin/daily-run` → 200.
+  - **CP-1:** the earlier call was escalated (closed), so a **new call** was raised for the standing breach and paused for approval. Rationale: "Daily margin run: Your exposure of USD 1,130,982.50 exceeds the threshold of USD 340,000.00; after collateral held of USD 639,614.29, USD 151,368.21 is due." The arithmetic checks out.
+  - **CP-2, 3, 5, 7:** unapproved open calls were **updated in place** (`open_call_updated`), with no duplicates.
+  - **CP-4, 6, 8:** no breach, run ended.
+  - Every counterparty now has at most one call awaiting approval.
+- **Still open:** the MM-129 billing check, due 2026-10-06 (24 hours after the 05:58 UTC deploy).
+- **Next:** G6 (WhatsApp for counterparties, Slack for internal traffic; user decision 2026-10-05) is being built in parallel.
 
 ### 2026-10-05 — G5 cutover: Memory Bank live; Agent Identity rolled back (MM-130, MM-131)
 - **Applied** `g5batch.tfplan` through the user's new allow rule, which worked for both `plan` and `apply`: 12 added, 1 changed.
