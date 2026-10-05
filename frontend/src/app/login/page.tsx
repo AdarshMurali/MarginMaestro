@@ -1,11 +1,12 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { LogoMarkV2 } from "@/components/logo-v2";
+import { getHealth } from "@/lib/api";
 import { BLACK, LIGHT_GREEN, WHITE, HERO_GRADIENT } from "@/lib/brand";
 
 function LoginForm() {
@@ -15,6 +16,15 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Warm-up: the API on Cloud Run scales to zero, and booting it takes ~30 s.
+  // Pinging it while the user types their password means the dashboard
+  // usually finds it warm, at no cost (no always-on instance).
+  useEffect(() => {
+    getHealth().catch(() => {
+      // Best effort only; the dashboard reports a real outage itself.
+    });
+  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

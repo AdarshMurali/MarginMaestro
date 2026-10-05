@@ -29,7 +29,8 @@ function StatTile({
   tone,
 }: {
   label: string;
-  value: string;
+  /** null while loading: shows a placeholder, never a misleading 0. */
+  value: string | null;
   tone?: "danger" | "warning";
 }) {
   return (
@@ -41,7 +42,7 @@ function StatTile({
           tone === "warning" && "text-[#b45309]",
         )}
       >
-        {value}
+        {value ?? <span className="animate-pulse text-neutral-300">—</span>}
       </span>
       <span className="text-xs text-neutral-500">{label}</span>
     </div>
@@ -113,9 +114,11 @@ export default function DashboardPage() {
             Welcome back, {displayName}
           </h1>
           <p className="max-w-md text-sm text-neutral-500">
-            {needsAttention > 0
-              ? `${needsAttention} margin call${needsAttention === 1 ? "" : "s"} need your attention right now.`
-              : "Everything in the book is caught up -- nothing waiting on you."}
+            {feed === null
+              ? "Checking the book…"
+              : needsAttention > 0
+                ? `${needsAttention} margin call${needsAttention === 1 ? "" : "s"} need your attention right now.`
+                : "Everything in the book is caught up -- nothing waiting on you."}
           </p>
         </div>
 
@@ -130,10 +133,22 @@ export default function DashboardPage() {
             Needs attention
           </span>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatTile label="Breached counterparties" value={String(breached)} tone="danger" />
-            <StatTile label="Awaiting approval" value={String(awaitingApproval)} tone="warning" />
-            <StatTile label="Awaiting SLA response" value={String(awaitingSla)} tone="warning" />
-            <StatTile label="Escalated" value={String(escalated)} tone="danger" />
+            <StatTile
+              label="Breached counterparties"
+              value={exposure && String(breached)}
+              tone="danger"
+            />
+            <StatTile
+              label="Awaiting approval"
+              value={feed && String(awaitingApproval)}
+              tone="warning"
+            />
+            <StatTile
+              label="Awaiting SLA response"
+              value={feed && String(awaitingSla)}
+              tone="warning"
+            />
+            <StatTile label="Escalated" value={feed && String(escalated)} tone="danger" />
           </div>
         </section>
 
@@ -142,16 +157,19 @@ export default function DashboardPage() {
             The book, live
           </span>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatTile label="Counterparties tracked" value={String(counterparties.length)} />
+            <StatTile
+              label="Counterparties tracked"
+              value={exposure && String(counterparties.length)}
+            />
             <StatTile
               label="Total exposure (USD)"
-              value={formatUsdCompact(totalExposureUsd, "USD")}
+              value={exposure && formatUsdCompact(totalExposureUsd, "USD")}
             />
             <StatTile
               label="Collateral held (USD)"
-              value={formatUsdCompact(totalCollateralUsd, "USD")}
+              value={exposure && formatUsdCompact(totalCollateralUsd, "USD")}
             />
-            <StatTile label="Runs evaluated" value={String(feed?.margin_calls.length ?? 0)} />
+            <StatTile label="Runs evaluated" value={feed && String(feed.margin_calls.length)} />
           </div>
         </section>
 
