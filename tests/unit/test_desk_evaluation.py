@@ -229,20 +229,24 @@ def test_report_and_markdown():
     assert "| hallucination | 0.90 | 0.75 |" in text
 
 
-def test_main_writes_report_and_exits_by_result(tmp_path, monkeypatch):
-    summary_file = tmp_path / "summary.md"
-    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
+def test_main_writes_report_and_summary_to_fixed_files(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(desk_eval, "_google_session", lambda: object())
     monkeypatch.setattr(desk_eval, "AgentRuntimeDesk", lambda *a: FakeDesk())
     monkeypatch.setattr(desk_eval, "GOLDEN_CASES", GOLDEN_CASES[:1])
-    out = tmp_path / "report.json"
     agent = "projects/p/locations/us-central1/reasoningEngines/1"
 
-    code = desk_eval.main(["--agent", agent, "--out", str(out), "--no-rubrics"])
+    code = desk_eval.main(["--agent", agent, "--no-rubrics"])
 
     assert code == 0
-    assert json.loads(out.read_text())["deterministic"]["total"] == 1
-    assert "Desk assistant evaluation" in summary_file.read_text()
+    report = json.loads((tmp_path / desk_eval.REPORT_FILE).read_text())
+    assert report["deterministic"]["total"] == 1
+    assert "Desk assistant evaluation" in (tmp_path / desk_eval.SUMMARY_FILE).read_text()
+
+
+def test_output_paths_are_not_configurable():
+    with pytest.raises(SystemExit):
+        desk_eval.main(["--agent", "projects/p/locations/l/reasoningEngines/1", "--out", "/etc/x"])
 
 
 def test_agent_info_declares_every_tool():

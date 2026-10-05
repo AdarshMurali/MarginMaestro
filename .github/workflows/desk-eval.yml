@@ -46,7 +46,11 @@ jobs:
         run: |
           flags=""
           [ "$RUBRICS" = "true" ] || flags="--no-rubrics"
-          python -m evaluation.desk_eval --agent "$AGENT" --out desk-eval-report.json $flags
+          python -m evaluation.desk_eval --agent "$AGENT" $flags
+
+      - name: Job summary
+        if: always()
+        run: cat desk-eval-summary.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
 
       - name: Upload report
         if: always()

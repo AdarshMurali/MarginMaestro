@@ -10,13 +10,12 @@
    quality) over the same turns; each mean score must reach its threshold.
    Skip with --no-rubrics.
 
-Writes a JSON report and, in GitHub Actions, a summary table. Exits 1 on any
-failure, so the CI job goes red on a regression.
+Writes desk-eval-report.json and desk-eval-summary.md to the working
+directory. Exits 1 on any failure, so the CI job goes red on a regression.
 """
 
 import argparse
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -29,6 +28,9 @@ from evaluation.checks import CheckResult, TurnRecord, check, summarize, turn_re
 from evaluation.golden import GOLDEN_CASES, TOOL_DESCRIPTIONS, GoldenCase
 
 logger = structlog.get_logger()
+
+REPORT_FILE = "desk-eval-report.json"
+SUMMARY_FILE = "desk-eval-summary.md"
 
 # Minimum mean score per Vertex rubric metric (scores are 0..1).
 RUBRIC_THRESHOLDS = {
@@ -183,7 +185,6 @@ def markdown(data: dict[str, Any]) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--agent", required=True, help="projects/.../reasoningEngines/<id>")
-    parser.add_argument("--out", default="desk-eval-report.json")
     parser.add_argument("--no-rubrics", action="store_true", help="deterministic checks only")
     args = parser.parse_args(argv)
 
@@ -200,12 +201,13 @@ def main(argv: list[str] | None = None) -> int:
         scores = rubric_scores(client, GOLDEN_CASES, [turn for turn, _ in results])
 
     data = report(results, scores)
-    Path(args.out).write_text(json.dumps(data, indent=2), encoding="utf-8")
+    # Fixed names in the working directory: no output path comes from the
+    # command line or the environment. The workflow uploads the report and
+    # appends the summary to the job summary itself.
+    Path(REPORT_FILE).write_text(json.dumps(data, indent=2), encoding="utf-8")
     summary = markdown(data)
+    Path(SUMMARY_FILE).write_text(summary, encoding="utf-8")
     print(summary)
-    if step_summary := os.environ.get("GITHUB_STEP_SUMMARY"):
-        with open(step_summary, "a", encoding="utf-8") as handle:
-            handle.write(summary)
 
     ok = data["deterministic"]["passed"] == data["deterministic"]["total"]
     return 0 if ok and not data["rubric_failures"] else 1
