@@ -10,6 +10,8 @@
   screen ends the turn with a refusal, never an unscreened answer.
 - **Numbers:** the instruction requires amounts to be quoted from tool
   results, never computed (golden rule 1). MM-132 evaluates it.
+- **Memory** (MM-130): recalled before each model call, saved after each
+  turn; see desk_assistant.memory.
 """
 
 import time
@@ -26,6 +28,7 @@ from google.genai import types
 
 from adapters.guardrail_factory import get_guardrail
 from config.settings import Settings, get_settings
+from desk_assistant.memory import MemoryRecall, save_turn_to_memory
 from ports.guardrail import Guardrail, GuardrailError
 
 logger = structlog.get_logger()
@@ -50,6 +53,8 @@ Rules:
   answered with the margin-call tools. Looking a call up is your job.
 - You cannot take actions: approving, rejecting, sending or escalating a call
   happens in the dashboard. Say so only when asked to take one.
+- You may be given what you remember about this analyst. Use it as context
+  only; never take a figure or a status from memory.
 - You only see the counterparties this analyst covers. If a tool returns
   nothing for a counterparty, say it isn't available to them.
 - Keep answers short and factual."""
@@ -192,8 +197,9 @@ def build_agent(
         model=settings.gemini_model,
         description="Answers analysts' questions about prices, CSA terms and margin calls.",
         instruction=INSTRUCTION,
-        tools=list(build_toolsets(settings, tokens)),
+        tools=[MemoryRecall(), *build_toolsets(settings, tokens)],
         generate_content_config=types.GenerateContentConfig(temperature=0),
         before_model_callback=screen_prompt(guardrail),
         after_model_callback=screen_response(guardrail),
+        after_agent_callback=save_turn_to_memory,
     )

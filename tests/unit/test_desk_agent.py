@@ -173,7 +173,9 @@ def test_agent_wiring():
 
     assert agent.name == "margin_desk"
     assert agent.model == "gemini-test"
-    assert len(agent.tools) == 3
+    assert len(agent.tools) == 4  # memory recall + three MCP toolsets
+    assert agent.tools[0].name == "memory_recall"
+    assert agent.after_agent_callback is not None
     assert agent.generate_content_config.temperature == 0
     assert "Never calculate" in agent.instruction
     assert agent.before_model_callback is not None
@@ -199,7 +201,7 @@ def test_deploy_config_stays_at_zero_idle_cost():
     assert config["min_instances"] == 0
     assert config["max_instances"] == 2
     assert config["resource_limits"] == {"cpu": "1", "memory": "2Gi"}
-    assert config["service_account"] == "mm-agent-sa@proj-x.iam.gserviceaccount.com"
+    assert config["identity_type"] == "AGENT_IDENTITY"  # MM-131, not mm-agent-sa
     assert config["entrypoint_module"] == "desk_assistant.app"
     assert config["agent_framework"] == "google-adk"
     assert "staging_bucket" not in config

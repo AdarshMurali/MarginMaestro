@@ -3,11 +3,10 @@
 Run by a person, not CI -- it creates a billable resource:
 
     cd src
-    python -m desk_assistant.deploy                       # create
-    python -m desk_assistant.deploy --update <resource>   # new revision
+    ../.venv/Scripts/python.exe -m desk_assistant.deploy         --env-file desk_assistant/deploy.prod.env [--update <resource>]
 
-Reads the MCP URLs from the environment (DESK_MCP_*_URL, i.e. Terraform's
-`mcp_urls` output). Deploys from source (no pickling, no staging bucket):
+deploy.prod.env holds the non-secret settings (project, MCP URLs from
+Terraform's `mcp_urls` output); without --update a new agent is created. Deploys from source (no pickling, no staging bucket):
 only the packages the agent imports are uploaded.
 
 Cost settings (user rule: stay as close to $0 as possible):
@@ -17,6 +16,7 @@ min_instances=0 (no warm instance, cold starts accepted), max 2,
 
 import argparse
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +34,54 @@ SOURCE_PACKAGES = [
     "adapters/incode_guardrail.py",
     "adapters/model_armor_guardrail.py",
 ]
+
+# MM-130: what Memory Bank may extract from conversations. Qualitative only;
+# amounts, prices and statuses change and must always come from the tools.
+NO_FIGURES = " Never amounts, prices, thresholds, rates or call statuses."
+MEMORY_TOPICS: list[dict[str, Any]] = [
+    {
+        "custom_memory_topic": {
+            "label": "analyst_coverage",
+            "description": "Which counterparties, tickers or books the analyst covers or "
+            "follows, by name or id." + NO_FIGURES,
+        }
+    },
+    {
+        "custom_memory_topic": {
+            "label": "analyst_preferences",
+            "description": "How the analyst likes answers: format, level of detail, "
+            "recurring questions." + NO_FIGURES,
+        }
+    },
+    {
+        "custom_memory_topic": {
+            "label": "counterparty_context",
+            "description": "Qualitative context the analyst shares about a counterparty, "
+            "e.g. what its disputes are usually about or how its contact prefers to be "
+            "reached." + NO_FIGURES,
+        }
+    },
+    {"managed_memory_topic": {"managed_topic_enum": "EXPLICIT_INSTRUCTIONS"}},
+]
+MEMORY_TTL = f"{90 * 24 * 3600}s"  # 90 days: data minimisation
+
+
+def context_spec(settings: Settings) -> dict[str, Any]:
+    model = (
+        f"projects/{settings.gcp_project_id}/locations/{settings.gcp_location}"
+        f"/publishers/google/models/{settings.gemini_model}"
+    )
+    return {
+        "memory_bank_config": {
+            "customization_configs": [{"memory_topics": MEMORY_TOPICS}],
+            "ttl_config": {"default_ttl": MEMORY_TTL},
+            "generation_config": {"model": model},
+        }
+    }
+
+
+# Env-file keys that name a secret (SECRETS_SOURCE is a setting, not one).
+SECRET_KEY = re.compile(r"(TOKEN|SECRET|PASSWORD|API_KEY)$")
 
 RUNTIME = {
     "min_instances": 0,
@@ -75,10 +123,31 @@ def deploy_config(settings: Settings, class_methods: list[dict[str, Any]]) -> di
         "requirements_file": "desk_assistant/requirements.txt",
         "agent_framework": "google-adk",
         "class_methods": class_methods,
-        "service_account": f"mm-agent-sa@{settings.gcp_project_id}.iam.gserviceaccount.com",
+        # MM-131: the agent runs as its own Agent Identity principal, not a
+        # shared service account; "" clears the old mm-agent-sa on update.
+        "identity_type": "AGENT_IDENTITY",
+        "service_account": "",
         "env_vars": runtime_env(settings),
+        "context_spec": context_spec(settings),
         **RUNTIME,
     }
+
+
+def load_env_file(path: Path) -> None:
+    """Sets KEY=VALUE lines as environment variables (comments and blanks
+    skipped). For non-secret deploy settings only; it refuses obvious secrets."""
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.partition("=")
+        if not sep:
+            raise ValueError(f"Not KEY=VALUE: {line!r}")
+        key = key.strip()
+        if SECRET_KEY.search(key.upper()):
+            raise ValueError(f"{key} looks like a secret; deploy env files hold settings only")
+        os.environ[key] = value.strip()
+    get_settings.cache_clear()
 
 
 def _class_methods(app: Any) -> list[dict[str, Any]]:
@@ -96,7 +165,12 @@ def _class_methods(app: Any) -> list[dict[str, Any]]:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--update", metavar="RESOURCE", help="existing reasoningEngines/... name")
+    parser.add_argument(
+        "--env-file", metavar="PATH", help="KEY=VALUE settings (non-secret), e.g. deploy.prod.env"
+    )
     args = parser.parse_args(argv)
+    if args.env_file:
+        load_env_file(Path(args.env_file))
 
     src = Path(__file__).resolve().parents[1]
     os.chdir(src)  # source_packages are relative to src/

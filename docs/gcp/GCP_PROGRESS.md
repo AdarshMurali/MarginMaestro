@@ -49,6 +49,29 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Log
 
+### 2026-10-05 — MM-130 + MM-131: Memory Bank and Agent Identity for the desk assistant (code done; cutover pending)
+- **Batch approval (user, 2026-10-05):** MM-130, MM-131, MM-132 and MM-125 were approved at once; MM-125 is being built in parallel in its own worktree. The user added Claude Code allow rules for `terraform -chdir=infra/gcp plan/apply` and `../.venv/Scripts/python.exe -m desk_assistant.deploy`.
+- **MM-130 — Memory Bank:**
+  - **`desk_assistant/memory.py`.** `MemoryRecall` is modelled on ADK's `PreloadMemoryTool`. Before each model call it searches the analyst's memories and adds them to the **system instruction**, never as a user turn, so the guardrail keeps screening the analyst's own words. Memories containing an amount are **dropped in code**. `save_turn_to_memory` (`after_agent_callback`) hands each session to Memory Bank; a failure is logged loudly and never blocks an answer that was already screened.
+  - **`deploy.py`.** The Memory Bank `context_spec` sets custom memory topics (`analyst_coverage`, `analyst_preferences`, `counterparty_context`), each saying *"Never amounts, prices, thresholds, rates or call statuses"*, plus managed `EXPLICIT_INSTRUCTIONS`. Memories expire after 90 days (data minimisation), and extraction uses the same Gemini model.
+  - The instruction says memory is context only, never a source of figures or statuses.
+- **MM-131 — Agent Identity:**
+  - `deploy.py` sets `identity_type=AGENT_IDENTITY` and clears `service_account`. It's applied as an update, so the resource id and therefore the principal stay the same.
+  - New `infra/gcp/agent_identity.tf` grants the principal (`principal://agents.global.proj-793928354019.system.id.goog/resources/aiplatform/<desk_agent_resource>`) Google's baseline (`aiplatform.expressUser`, `serviceusage.serviceUsageConsumer`, `browser`), telemetry writers and `modelarmor.user`, plus `run.invoker` on the three MCP services.
+  - `mm-agent-sa`'s MCP invoker is kept behind `mcp_legacy_sa_invoker` (default true) for a no-outage cutover: grant → redeploy → verify → set false and apply.
+  - Output `desk_agent_principal`.
+- **MM-132 prep:** `roles/aiplatform.user` for `mm-ci-sa`, so the on-demand evaluation job can query the agent.
+- **Deploy UX:** `--env-file desk_assistant/deploy.prod.env` (committed and non-secret: project, MCP URLs). The loader refuses key names ending in TOKEN/SECRET/PASSWORD/API_KEY. This lets the deploy command match the user's allow rule.
+- **Verified locally (real Gemini, live MCP services, ADK's in-memory store):** session 1 "I mainly cover CP-3, prefer one-line answers" → session 2 got a one-line answer, with the amount still taken from `list_margin_calls`. `analyst2` sees none of `analyst1`'s memories.
+- **Tests:** `test_desk_memory.py` (new): amount filter (7 drop / 4 keep cases), recall into the system instruction, failure tolerance, saving, topics/TTL/model, identity, deploy config validated against the SDK types, env-file rules.
+- **Cutover (next):**
+  1. Merge; CD.
+  2. `terraform plan/apply` (agent-principal roles + invokers + CI grant, plus MM-125's scheduler job if merged).
+  3. Redeploy with `--update`.
+  4. Verify chat and that the audit logs show the agent principal.
+  5. `mcp_legacy_sa_invoker=false` and apply.
+- **Cost impact:** Memory Bank storage is free up to 1 GiB. Each extraction is a small Gemini call (fractions of a cent). No new idle cost.
+
 ### 2026-10-05 — MM-129: "Ask the margin desk" ADK assistant (code done; deploy pending approval)
 - **Done:**
   - **`desk_assistant/agent.py`.** An ADK `LlmAgent` (Gemini, temperature 0) with one `McpToolset` per read-only MCP server.

@@ -99,3 +99,9 @@ variable "desk_agent_resource" {
   type        = string
   default     = ""
 }
+
+variable "mcp_legacy_sa_invoker" {
+  description = "Keep mm-agent-sa as an MCP invoker during the Agent Identity cutover (MM-131); set false once the agent runs as its own principal."
+  type        = bool
+  default     = true
+}
