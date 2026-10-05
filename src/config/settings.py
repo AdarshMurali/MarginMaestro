@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     desk_mcp_rag_url: str = ""
     desk_mcp_margin_status_url: str = ""
     desk_mcp_auth: str = "none"
+    # MM-130: the model Memory Bank uses to extract memories. Memory Bank
+    # rejects Gemini 2.5 ("Use gemini-3.5-flash instead", 2026-10-05), so it
+    # is set separately from the chat model.
+    desk_memory_model: str = "gemini-3.5-flash"
+    # gemini-3.5-flash is served from the global location only (us-central1
+    # returns 404 for it, 2026-10-05).
+    desk_memory_model_location: str = "global"
     # Gemini 3.x: thinking level (low | high); Gemini 2.5: thinking budget in
     # tokens (0 = off). Extraction/drafting don't need thinking. "" / None =
     # the model default.

@@ -101,7 +101,13 @@ variable "desk_agent_resource" {
 }
 
 variable "mcp_legacy_sa_invoker" {
-  description = "Keep mm-agent-sa as an MCP invoker during the Agent Identity cutover (MM-131); set false once the agent runs as its own principal."
+  description = "mm-agent-sa may invoke the MCP services. Keep true while the agent runs as mm-agent-sa (MM-131: Agent Identity is off); set false only after an Agent Identity cutover."
   type        = bool
   default     = true
+}
+
+variable "desk_agent_identity" {
+  description = "Grant the desk assistant's Agent Identity principal its roles (MM-131). Off: Agent Identity's mTLS-bound tokens can't reach Model Armor's regional endpoint, so the agent runs as mm-agent-sa."
+  type        = bool
+  default     = false
 }

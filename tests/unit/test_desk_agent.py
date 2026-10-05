@@ -201,7 +201,7 @@ def test_deploy_config_stays_at_zero_idle_cost():
     assert config["min_instances"] == 0
     assert config["max_instances"] == 2
     assert config["resource_limits"] == {"cpu": "1", "memory": "2Gi"}
-    assert config["identity_type"] == "AGENT_IDENTITY"  # MM-131, not mm-agent-sa
+    assert config["service_account"] == "mm-agent-sa@proj-x.iam.gserviceaccount.com"
     assert config["entrypoint_module"] == "desk_assistant.app"
     assert config["agent_framework"] == "google-adk"
     assert "staging_bucket" not in config

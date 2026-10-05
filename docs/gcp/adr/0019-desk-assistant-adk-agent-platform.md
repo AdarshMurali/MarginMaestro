@@ -20,7 +20,7 @@ Phase G5 planned to move the LangGraph margin-call orchestrator to Vertex AI Age
    |---|---|
    | Multi-turn chat that survives scale-to-zero | Agent Runtime + **Sessions** |
    | Memory per analyst and per counterparty | **Memory Bank** (MM-130) |
-   | An audit trail of the agent's own tool calls | **Agent Identity** (MM-131) |
+   | An audit trail of the agent's own tool calls | **Agent Identity** (MM-131): *off, see the 2026-10-05 amendment* |
    | Checking that tool choice and grounding stay correct | **Gen AI evaluation** (MM-132) |
 
 3. **The assistant is built with Google ADK** (`google-adk` 2.11.0). ADK has built-in MCP toolsets with per-call headers, Sessions and Memory Bank services, and the `AdkApp` wrapper Agent Runtime deploys. All Agent Identity documentation is written for it.
@@ -35,3 +35,13 @@ Phase G5 planned to move the LangGraph margin-call orchestrator to Vertex AI Age
 - A source deploy has to pass the class-method specs itself, so it uses a private helper of the pinned `google-cloud-aiplatform` (1.x). Re-check this on SDK upgrades.
 - Cost: about $0 idle; per-turn Gemini tokens and Model Armor calls cost fractions of a cent. A billing check is due 24 hours after the first deploy (user rule).
 - Post-trial fallback (ADR-0017): turn chat off (`DESK_ASSISTANT=none`). The rest of the app doesn't depend on it.
+
+## Amendment (2026-10-05): Agent Identity is off; the agent runs as `mm-agent-sa`
+
+The MM-131 cutover switched the deployed agent to `identity_type=AGENT_IDENTITY`. **Every chat turn then failed:** Model Armor answered `401 … Expected OAuth 2 access token`, and the agent was rolled back to `mm-agent-sa` about 3 minutes later.
+
+- **Cause.** Agent Identity issues **certificate-bound** tokens that Google APIs accept only over mTLS. Client libraries switch to mTLS endpoints only when `GOOGLE_API_USE_CLIENT_CERTIFICATE=true` and an mTLS endpoint exists. Model Armor has a global mTLS endpoint, but **no regional one** (`modelarmor.us-central1.rep.mtls.googleapis.com` doesn't resolve), and our template is regional.
+- **Decision:** keep Model Armor and run the agent as `mm-agent-sa`. Screening every turn matters more than per-agent attribution.
+  - Per-tool IAM still holds: `mm-agent-sa` is the only invoker of the MCP services, and the Slack/ServiceNow notifiers have no network service.
+  - `deploy.py` pins the service account. Terraform keeps the Agent Identity grants behind `desk_agent_identity` (default false) for a later retry, which would need a regional mTLS endpoint or a global Model Armor template.
+- **Also fixed:** the Model Armor adapter turned the 401 into an unhandled error. API errors now raise `GuardrailUnavailable`, so a screening outage gives a refusal (fail closed) instead of a crashed turn.

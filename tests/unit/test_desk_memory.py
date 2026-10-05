@@ -167,20 +167,22 @@ def test_memory_topics_are_qualitative_only():
 
 
 def test_context_spec_sets_topics_ttl_and_extraction_model():
-    spec = deploy.context_spec(_settings(gemini_model="gemini-test"))["memory_bank_config"]
+    spec = deploy.context_spec(_settings(desk_memory_model="gemini-test"))["memory_bank_config"]
 
     assert spec["customization_configs"][0]["memory_topics"] == deploy.MEMORY_TOPICS
     assert spec["ttl_config"] == {"default_ttl": "7776000s"}
     assert spec["generation_config"]["model"] == (
-        "projects/proj-x/locations/us-central1/publishers/google/models/gemini-test"
+        "projects/proj-x/locations/global/publishers/google/models/gemini-test"
     )
 
 
-def test_deploy_runs_the_agent_as_its_own_identity():
+def test_deploy_keeps_the_agent_on_its_service_account():
+    """MM-131: Agent Identity broke Model Armor (mTLS-bound tokens, no
+    regional mTLS endpoint), so the agent stays on mm-agent-sa."""
     config = deploy.deploy_config(_settings(), class_methods=[])
 
-    assert config["identity_type"] == "AGENT_IDENTITY"
-    assert config["service_account"] == ""
+    assert config["identity_type"] == "SERVICE_ACCOUNT"
+    assert config["service_account"] == "mm-agent-sa@proj-x.iam.gserviceaccount.com"
     assert "memory_bank_config" in config["context_spec"]
 
 
@@ -189,7 +191,7 @@ def test_deploy_config_is_valid_for_the_sdk():
 
     config = vtypes.AgentEngineConfig(**deploy.deploy_config(_settings(), class_methods=[]))
 
-    assert config.identity_type == vtypes.IdentityType.AGENT_IDENTITY
+    assert config.identity_type == vtypes.IdentityType.SERVICE_ACCOUNT
     assert config.context_spec.memory_bank_config.ttl_config.default_ttl == "7776000s"
 
 
@@ -244,3 +246,11 @@ def test_env_choice_loads_only_the_committed_file(monkeypatch):
         deploy.main(["--env", "../../etc/passwd"])  # argparse rejects anything else
 
     assert loaded == [deploy.ENV_FILES["prod"]]
+
+
+def test_memory_extraction_defaults_to_a_model_memory_bank_accepts():
+    """Memory Bank rejected gemini-2.5-flash on the first redeploy."""
+    spec = deploy.context_spec(_settings(gemini_model="gemini-2.5-flash"))
+    model = spec["memory_bank_config"]["generation_config"]["model"]
+
+    assert model == "projects/proj-x/locations/global/publishers/google/models/gemini-3.5-flash"
