@@ -49,6 +49,21 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Log
 
+### 2026-10-05 — G5 cutover: Memory Bank live; Agent Identity rolled back (MM-130, MM-131)
+- **Applied** `g5batch.tfplan` through the user's new allow rule, which worked for both `plan` and `apply`: 12 added, 1 changed.
+  - Agent-principal roles and MCP invokers, `mm-ci-sa` `aiplatform.user`, the `daily-margin-run` scheduler job (MM-125: weekdays 16:45 New York), and Model Armor `DANGEROUS` → HIGH.
+  - CD had already rolled `211a2a9` to the API and all three MCP services.
+- **Redeploys:**
+  1. The first `--update` failed safely (nothing changed): Memory Bank rejects Gemini 2.5. PR #103 adds `DESK_MEMORY_MODEL` (default `gemini-3.5-flash`).
+  2. The second update applied Memory Bank (topics, 90-day TTL, extraction model) and Agent Identity.
+- **Outage, about 3 minutes (08:53–08:56 UTC):** under Agent Identity every turn failed, with Model Armor returning `401`.
+  - **Cause:** Agent Identity tokens are certificate-bound (mTLS only) and Model Armor has no regional mTLS endpoint.
+  - **Fix:** rolled back with a config-only update to `mm-agent-sa`. Chat is verified working again; Memory Bank stayed configured and the agent acknowledged the stated preference.
+- **Decision:** keep Model Armor, so Agent Identity is off (ADR-0019 amendment).
+  - `deploy.py` pins `SERVICE_ACCOUNT`, and `desk_agent_identity` (default false) removes the 10 unused agent-principal grants (`mm131off.tfplan`, applied after merge).
+  - The Model Armor adapter now turns API errors into `GuardrailUnavailable` (fail closed with a refusal, not a crash).
+- **MM-131 outcome:** per-tool IAM delivered (`mm-agent-sa` is the only MCP invoker, notifiers not exposed); per-agent identity deferred.
+
 ### 2026-10-05 — MM-125: Margin-call policy (Phase G5b) (code done; Terraform apply pending approval)
 - **Done:**
   - **Daily margin run.** `POST /internal/margin/daily-run` (OIDC internal caller) evaluates every counterparty with a book, as one impact set per day (`daily-margin-run:<date>`).

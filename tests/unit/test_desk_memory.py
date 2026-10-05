@@ -176,11 +176,13 @@ def test_context_spec_sets_topics_ttl_and_extraction_model():
     )
 
 
-def test_deploy_runs_the_agent_as_its_own_identity():
+def test_deploy_keeps_the_agent_on_its_service_account():
+    """MM-131: Agent Identity broke Model Armor (mTLS-bound tokens, no
+    regional mTLS endpoint), so the agent stays on mm-agent-sa."""
     config = deploy.deploy_config(_settings(), class_methods=[])
 
-    assert config["identity_type"] == "AGENT_IDENTITY"
-    assert config["service_account"] == ""
+    assert config["identity_type"] == "SERVICE_ACCOUNT"
+    assert config["service_account"] == "mm-agent-sa@proj-x.iam.gserviceaccount.com"
     assert "memory_bank_config" in config["context_spec"]
 
 
@@ -189,7 +191,7 @@ def test_deploy_config_is_valid_for_the_sdk():
 
     config = vtypes.AgentEngineConfig(**deploy.deploy_config(_settings(), class_methods=[]))
 
-    assert config.identity_type == vtypes.IdentityType.AGENT_IDENTITY
+    assert config.identity_type == vtypes.IdentityType.SERVICE_ACCOUNT
     assert config.context_spec.memory_bank_config.ttl_config.default_ttl == "7776000s"
 
 

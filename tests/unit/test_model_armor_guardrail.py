@@ -165,3 +165,16 @@ def test_client_uses_the_regional_endpoint():
 
     options = client_cls.call_args.kwargs["client_options"]
     assert options.api_endpoint == "modelarmor.us-central1.rep.googleapis.com"
+
+
+@pytest.mark.parametrize("stage", ["prompt", "response"])
+def test_api_errors_become_guardrail_unavailable(stage):
+    """Found live (MM-131): a 401 from Model Armor crashed desk turns."""
+    from google.api_core.exceptions import Unauthenticated
+
+    client = MagicMock()
+    client.sanitize_user_prompt.side_effect = Unauthenticated("invalid credentials")
+    client.sanitize_model_response.side_effect = Unauthenticated("invalid credentials")
+
+    with pytest.raises(GuardrailUnavailable, match="Unauthenticated"):
+        ModelArmorGuardrail(TEMPLATE, client).screen("x", stage)

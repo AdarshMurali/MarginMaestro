@@ -50,6 +50,7 @@ class ModelArmorGuardrail:
         self._client = client
 
     def screen(self, text: str, stage: Stage) -> Verdict:
+        from google.api_core.exceptions import GoogleAPIError
         from google.cloud.modelarmor_v1 import (
             DataItem,
             SanitizeModelResponseRequest,
@@ -57,14 +58,21 @@ class ModelArmorGuardrail:
         )
 
         item = DataItem(text=text)
-        if stage == "prompt":
-            response = self._client.sanitize_user_prompt(
-                request=SanitizeUserPromptRequest(name=self._template, user_prompt_data=item)
-            )
-        else:
-            response = self._client.sanitize_model_response(
-                request=SanitizeModelResponseRequest(name=self._template, model_response_data=item)
-            )
+        try:
+            if stage == "prompt":
+                response = self._client.sanitize_user_prompt(
+                    request=SanitizeUserPromptRequest(name=self._template, user_prompt_data=item)
+                )
+            else:
+                response = self._client.sanitize_model_response(
+                    request=SanitizeModelResponseRequest(
+                        name=self._template, model_response_data=item
+                    )
+                )
+        except GoogleAPIError as exc:
+            # Fail closed, as a screening outage (found 2026-10-05: a 401 here
+            # crashed every desk turn instead of returning a refusal).
+            raise GuardrailUnavailable(f"Model Armor call failed ({type(exc).__name__})") from exc
         result = response.sanitization_result
         if _name(result.invocation_result) != SUCCESS:
             raise GuardrailUnavailable(
