@@ -50,7 +50,15 @@ def list_margin_calls(
     """List margin calls the calling analyst may see, most recent first:
     counterparty, triggering event, lifecycle status, call amount and
     currency, approval decision, SLA deadline. Amounts come from the
-    deterministic calc engine; quote them as given, never recompute them.
+    deterministic calc engine, in cents; quote them as given, never
+    recompute them.
+
+    Status meanings: awaiting_approval = needs an approver's decision;
+    awaiting_manager_approval = approved, needs a manager's second signature
+    (elite-tier counterparties); awaiting_sla_response = the client was
+    notified and the SLA clock is running; sla_met = the client responded in
+    time; escalated = SLA breached, ServiceNow incident opened; no_breach,
+    rejected, disputed, evaluating as named.
     """
     if status is not None and status not in MarginCallLifecycleStatus._value2member_map_:
         raise ValueError(f"Unknown status {status!r}; expected one of: {STATUSES}")
@@ -60,7 +68,7 @@ def list_margin_calls(
         if (counterparty_id is None or call.counterparty_id == counterparty_id)
         and (status is None or call.status.value == status)
     ]
-    return [call.model_dump(mode="json") for call in calls[:limit]]
+    return [_present(call) for call in calls[:limit]]
 
 
 @mcp.tool()
@@ -75,8 +83,18 @@ def get_margin_call(
     calling analyst (the two are deliberately indistinguishable)."""
     for call in _visible_calls(ctx):
         if call.thread_id == thread_id:
-            return call.model_dump(mode="json")
+            return _present(call)
     raise MarginCallNotFoundError(f"No margin call found for thread_id {thread_id!r}")
+
+
+def _present(call: MarginCallSummary) -> dict:
+    """The call as the dashboard shows it: the amount in cents (the calc
+    engine's full-precision float is not what anyone quotes). Rounding here,
+    in code, keeps the model from ever doing arithmetic on it."""
+    data = call.model_dump(mode="json")
+    if data["call_amount"] is not None:
+        data["call_amount"] = round(data["call_amount"], 2)
+    return data
 
 
 def _visible_calls(ctx: Context | None) -> list[MarginCallSummary]:
