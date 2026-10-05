@@ -286,9 +286,15 @@ def test_documents_fall_back_to_custom_names_without_a_gcs_bucket():
 
 
 def test_run_id_is_a_stable_uuid_per_call():
-    assert run_id_for("evt-1:CP-1") == run_id_for("evt-1:CP-1")
-    assert run_id_for("evt-1:CP-1") != run_id_for("evt-1:CP-2")
-    assert len(run_id_for("evt-1:CP-1")) == 36
+    first, again, other = (
+        run_id_for("evt-1:CP-1"),
+        run_id_for("evt-1:CP-1"),
+        run_id_for("evt-1:CP-2"),
+    )
+
+    assert first == again  # deterministic: a replay reuses the run
+    assert first != other
+    assert len(first) == 36
 
 
 # --- Data Lineage API exporter -------------------------------------------------------
