@@ -1,9 +1,12 @@
+from functools import lru_cache
 from typing import Annotated
 
 from mcp.server.fastmcp import Context
 from pydantic import Field
 
+from adapters.factory import get_data_class_filter
 from config.settings import get_settings
+from governance.classification import DataClassFilter
 from mcp_servers.base import new_server
 from mcp_servers.caller import caller_scope, get_mcp_session_factory, scoped_factory
 from persistence.db.rls import FIRM_WIDE, can_see
@@ -44,11 +47,29 @@ def retrieve_document_chunks(
         chunks = retrieve(query, counterparty_id, doc_type, top_k, vector_store=vector_store)
     # Shared documents have counterparty_id "". On pgvector the database
     # already filtered by scope; this also covers Chroma, which has no RLS.
-    return [
+    visible = [
         chunk.model_dump()
         for chunk in chunks
         if not chunk.counterparty_id or can_see(scope, chunk.counterparty_id)
     ]
+    # MM-135: the result goes straight to the desk assistant's model, so the
+    # data-class filter pseudonymizes legal names here (rag_chunks.text is
+    # confidential in the data catalog).
+    data_filter = _data_filter()
+    if data_filter is not None:
+        for chunk in visible:
+            chunk["text"] = data_filter.redact(chunk["text"])
+    return visible
+
+
+@lru_cache
+def _data_filter() -> DataClassFilter | None:
+    """One filter per process, so its pseudonym cache is shared across calls.
+    The session factory is only built when the filter is on."""
+    settings = get_settings()
+    if settings.llm_data_class_filter.strip().lower() == "none":
+        return None
+    return get_data_class_filter(settings, get_mcp_session_factory())
 
 
 def _scoped_store(ctx: Context | None) -> tuple[str, VectorStore | None]:

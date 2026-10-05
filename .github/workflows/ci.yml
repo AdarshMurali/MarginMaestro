@@ -128,6 +128,14 @@ jobs:
           REQUIRE_DB: "1"
         run: pytest tests/integration/test_rls_live.py -p no:cacheprovider -v
 
+      # MM-137: the audit trail is append-only -- mm_app can insert and read
+      # audit_log but not update or delete it (migration e3f8a1c5d927).
+      - name: Append-only audit log
+        if: matrix.dialect == 'postgres'
+        env:
+          REQUIRE_DB: "1"
+        run: pytest tests/integration/test_audit_append_only_live.py -p no:cacheprovider -v
+
       # MM-110: the pgvector RAG store must meet the same VectorStore contract
       # as Chroma / in-memory, against the migrated rag_chunks table shape.
       - name: pgvector VectorStore contract
@@ -187,6 +195,145 @@ jobs:
             terraform -chdir="$dir" init -backend=false -input=false
             terraform -chdir="$dir" validate
           done
+
+  # MM-G88 (ADR-0018): free stand-ins for Black Duck / Checkmarx, next to
+  # CodeQL, Dependabot and secret scanning (repo settings). Gates fail the
+  # job; findings also go to the Security tab as SARIF. Scanner binaries are
+  # pinned and checksum-verified (no third-party actions run with this
+  # token's security-events scope).
+  #   pip-audit  Python deps, fail on a known vuln WITH a fix (ops.security_gates)
+  #   licences   allow-list, fail on GPL/AGPL (LGPL and permissive pass)
+  #   gitleaks   secrets in the commits of this push / PR
+  #   Trivy      image CVEs (fail on fixable CRITICAL), Terraform + Dockerfile misconfig
+  #   Checkov    Terraform (infra/gcp); reviewed skips live in .checkov.yaml
+  security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to the Security tab
+    env:
+      TRIVY_VERSION: "0.75.0"
+      GITLEAKS_VERSION: "8.30.1"
+      CHECKOV_VERSION: "3.3.23"
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0 # gitleaks scans this push's / PR's commits
+
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install scanners (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          cd "$RUNNER_TEMP"
+          base=https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}
+          curl -sSfLO "$base/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sSfLO "$base/trivy_${TRIVY_VERSION}_checksums.txt"
+          grep " trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz$" "trivy_${TRIVY_VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -C bin trivy
+          base=https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}
+          curl -sSfLO "$base/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfLO "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz$" "gitleaks_${GITLEAKS_VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -C bin gitleaks
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Gitleaks (secrets in this push / PR)
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          range="$BASE..$HEAD"
+          # A new branch / first push has no usable "before": scan the head commit.
+          if ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then range="$HEAD~1..$HEAD"; fi
+          echo "scanning $range"
+          gitleaks git --log-opts="$range" --config .gitleaks.toml --redact --no-banner \
+            --report-format sarif --report-path gitleaks.sarif --exit-code 1
+
+      # The image's own dependency set (Dockerfile extras), freshly resolved --
+      # pyproject.toml is unpinned, so this is what the next build would ship.
+      - name: Install the app's runtime dependencies
+        if: always()
+        # pip/setuptools first: the runner's preinstalled setuptools can carry a
+        # fixed CVE that pip-audit would (rightly) flag.
+        run: |
+          pip install --upgrade pip setuptools
+          pip install ".[db,llm,streaming,rag,aws,gcp,data,notify,auth,observability]" pip-audit pip-licenses
+
+      - name: pip-audit (fail on fixable vulnerabilities)
+        if: always()
+        run: |
+          pip-audit -f json -o pip-audit.json --skip-editable --progress-spinner off || true
+          PYTHONPATH=src python -m ops.security_gates pip-audit
+
+      - name: Licence allow-list (fail on GPL/AGPL)
+        if: always()
+        run: |
+          pip-licenses --from=mixed --format=json --output-file licences.json
+          PYTHONPATH=src python -m ops.security_gates licences
+
+      - name: Trivy -- Terraform and Dockerfile misconfiguration
+        if: always()
+        run: |
+          trivy config --quiet --ignorefile .trivyignore --severity HIGH,CRITICAL \
+            --format sarif --output trivy-config.sarif infra/gcp
+          trivy config --quiet --ignorefile .trivyignore --severity HIGH,CRITICAL \
+            --exit-code 1 infra/gcp
+          trivy config --quiet --ignorefile .trivyignore --severity HIGH,CRITICAL \
+            --exit-code 1 Dockerfile
+
+      - name: Checkov -- Terraform (infra/gcp)
+        if: always()
+        run: |
+          pipx run --spec "checkov==${CHECKOV_VERSION}" checkov --config-file .checkov.yaml -d infra/gcp \
+            -o cli -o sarif --output-file-path console,checkov.sarif
+
+      - name: Build the image (not pushed)
+        if: always()
+        run: docker build -t marginmaestro:scan .
+
+      - name: Trivy -- image vulnerabilities and licences
+        if: always()
+        run: |
+          trivy image --quiet --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL \
+            --format sarif --output trivy-image.sarif marginmaestro:scan
+          # Python package licences, for the record (the gate above decides).
+          trivy image --quiet --scanners license --pkg-types library \
+            --severity HIGH,CRITICAL marginmaestro:scan
+          trivy image --quiet --scanners vuln --ignore-unfixed --severity CRITICAL \
+            --exit-code 1 marginmaestro:scan
+
+      - name: Upload SARIF -- gitleaks
+        if: always() && hashFiles('gitleaks.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: gitleaks.sarif
+          category: gitleaks
+
+      - name: Upload SARIF -- Trivy config
+        if: always() && hashFiles('trivy-config.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
+
+      - name: Upload SARIF -- Checkov
+        if: always() && hashFiles('checkov.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: checkov.sarif
+          category: checkov
+
+      - name: Upload SARIF -- Trivy image
+        if: always() && hashFiles('trivy-image.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
 
   sonarcloud:
     needs: lint-test

@@ -1,0 +1,11 @@
+# gitleaks config (MM-G88): the default rules, plus allowlists for known
+# false positives. Only add an entry after checking the match is not a
+# secret -- secret *names* and documented throwaway values, never real ones.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Secret names in docs, not values (the Secrets Manager secret id marginmaestro/<env>)"
+regexTarget = "match"
+regexes = ['''secret, `marginmaestro/[a-z]+`''']

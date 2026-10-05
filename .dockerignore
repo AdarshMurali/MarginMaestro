@@ -11,6 +11,8 @@ coverage.xml
 htmlcov/
 tests/
 docs/
+# MM-135: the data catalog ships in the image (governance.catalog).
+!docs/data_catalog.yaml
 frontend/
 infra/
 *.md

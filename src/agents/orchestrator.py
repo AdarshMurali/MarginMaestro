@@ -60,6 +60,7 @@ from calc.models import (
 from calc.mtm import compute_mtm
 from calc.vm import compute_variation_margin
 from config.settings import Settings, get_settings
+from governance.lineage import MarginCallLineage, get_margin_call_lineage
 from observability.metrics import (
     MARGIN_CALL_APPROVAL_DECISIONS_TOTAL,
     MARGIN_CALL_BREACHES_TOTAL,
@@ -848,6 +849,7 @@ def build_orchestrator_graph(
     sla_scheduler: SlaScheduler | None = None,
     client_notifier: Notifier | None = None,
     internal_notifier: internal.InternalNotifier | None = None,
+    lineage: MarginCallLineage | None = None,
 ) -> CompiledStateGraph:
     """Each DB-touching node opens its own short-lived session (matching
     persistence.batch_loader's convention) rather than holding one open across
@@ -886,6 +888,8 @@ def build_orchestrator_graph(
     )
     # MM-134: internal Slack traffic, each post once (claimed in processed_events).
     internal_notifier = internal_notifier or get_internal_notifier(settings, session_factory)
+    # MM-136: lineage per call, best effort (never fails a node).
+    lineage = lineage or get_margin_call_lineage(settings)
 
     def _post_internal(key: str, build: Callable[[], str]) -> None:
         """Builds and posts lazily, so a disabled notifier costs nothing."""
@@ -1033,6 +1037,9 @@ def build_orchestrator_graph(
                 ),
                 rationale=result["call_rationale"],
             )
+        evaluated = state.model_copy(update=result)
+        if _route_after_breach(evaluated) == "await_approval":
+            lineage.call_raised(evaluated, thread_id_for(state.impact, state.counterparty_id))
         return result
 
     def _await_approval_node(state: MarginCallState) -> dict:
@@ -1068,6 +1075,12 @@ def build_orchestrator_graph(
         decision = result.get("approval_decision")
         if decision is not None:
             MARGIN_CALL_APPROVAL_DECISIONS_TOTAL.labels(decision=decision).inc()
+            lineage.approval(
+                state,
+                thread_id_for(state.impact, state.counterparty_id),
+                decision,
+                result.get("first_approver_username"),
+            )
         return result
 
     def _await_manager_approval_node(state: MarginCallState) -> dict:
@@ -1093,6 +1106,14 @@ def build_orchestrator_graph(
                     "manager_username": result.get("manager_username"),
                     "approval_decision": result.get("approval_decision"),
                 },
+            )
+        if result.get("manager_decision") is not None:
+            lineage.approval(
+                state,
+                thread_id_for(state.impact, state.counterparty_id),
+                result["manager_decision"],
+                result.get("manager_username"),
+                second_signature=True,
             )
         return result
 
@@ -1126,6 +1147,13 @@ def build_orchestrator_graph(
                         "client_notification_failed",
                         {"reason": result["delivery_failure"], "channel": notification.channel},
                     )
+        lineage.notified(
+            state,
+            thread_id,
+            notification.channel,
+            notification.message_id,
+            notification.delivery_status,
+        )
         if result.get("delivery_failure"):
             log.error("send_notification_failed", reason=result["delivery_failure"])
             _post_internal(
@@ -1232,6 +1260,7 @@ def build_orchestrator_graph(
             "send_sla_met_notification_completed",
             slack_channel=result["sla_met_notification_result"].slack_channel,
         )
+        lineage.resolved(state, thread_id_for(state.impact, state.counterparty_id), "sla_met")
         return result
 
     def _escalate_node(state: MarginCallState) -> dict:
@@ -1250,6 +1279,12 @@ def build_orchestrator_graph(
                 )
         log.info(
             "escalate_completed",
+            incident_number=result["escalation_result"].incident_number,
+        )
+        lineage.resolved(
+            state,
+            thread_id_for(state.impact, state.counterparty_id),
+            "escalated",
             incident_number=result["escalation_result"].incident_number,
         )
         _post_internal(

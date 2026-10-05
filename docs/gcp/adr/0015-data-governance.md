@@ -27,3 +27,32 @@ Governance today is limited to the audit table, Pydantic validation at boundarie
 - Governance stories ship with tests: quality rules, masking rules, the LLM data-class filter, and RLS/row-policy isolation.
 - `docs/ARCHITECTURE.md` and `docs/DATA_SOURCES.md` gain a governance section.
 - Dataplex scans are billed per processing — post-trial fallback is governance-as-code (in-repo catalog + code-level checks), with BigQuery policy tags kept since they are free.
+
+## Amendment (2026-10-05): as built in G8 without BigQuery (MM-135, MM-136, MM-137)
+
+The user decided on 2026-10-05 to park Phase G7 (BigQuery). G8 was built without it. Each pillar now stands as follows.
+
+| Pillar | Built now | Deferred with G7 |
+|---|---|---|
+| **Catalog** | `docs/data_catalog.yaml` covers every Cloud SQL table and column and every GCS document family, and is kept in sync by a unit test. Dataplex Universal Catalog holds one custom entry per table/family (entry group `marginmaestro`, entry type `marginmaestro-data-asset`, required aspect `marginmaestro-governance`: owner, class, freshness, source, confidential fields). Terraform reads the YAML, so nothing is maintained twice. | BigQuery tables |
+| **Classification** | Per-column classes, plus an LLM handling for every confidential column (`pseudonymize` / `mask` / `deny`). The LLM data-class filter runs in `GuardedLLM` before every app prompt (`LLM_DATA_CLASS_FILTER=catalog` on Cloud Run) and on the MCP RAG tool's output. Labels `data-class` / `owner` are set on the Dataplex entries. | BigQuery policy tags and dynamic masking |
+| **Access control** | Unchanged: Postgres RLS (ADR-0011), one service account per service. | BigQuery row access policies |
+| **Lineage** | OpenLineage events to the Data Lineage API (`processOpenLineageRunEvent`), one run per margin call, best effort. Datasets use the same `custom:marginmaestro.*` names as the catalog entries, plus `gs://` for documents. | Automatic BigQuery lineage |
+| **Data quality** | Fail-loud ingestion checks in code (unchanged). | Dataplex data-quality scans (they target BigQuery) |
+| **Sensitive data** | A scheduled SDP inspection job over the documents bucket. Masking before LLM calls (MM-115) plus the data-class filter. | SDP scans of BigQuery tables |
+| **Audit** | Cloud Audit Logs data access (ADMIN_READ / DATA_READ / DATA_WRITE) on Cloud SQL, Cloud Storage and Secret Manager. `audit_log` is append-only by grant: UPDATE/DELETE/TRUNCATE are revoked from `mm_app`. | BigQuery audit logs |
+| **Retention** | A 30-day GCS retention policy on the documents bucket (unlocked). | BigQuery table expiration |
+
+**Decisions.**
+- **The classification sits in the data.** Confidential means "never reaches the model unmasked".
+  - Counterparty identity is pseudonymized (the model never needs the legal name to read a CSA).
+  - Position sizes and collateral values are masked.
+  - Secrets and blobs are denied.
+  - CSA *terms* (threshold, MTA, haircuts) are `internal`: extracting them is the CSA agent's job.
+- **One recorded exception:** the desk assistant quotes call amounts to the analyst who owns the book (RLS-scoped). That is its purpose. The amount comes from code, and the model is told to quote it, not compute it. The exception is listed under `llm_exceptions` in the catalog, and a test pins that list.
+- **Lineage carries ids, not values.** Lineage metadata leaves the database's RLS boundary, so amounts and names stay out of it.
+- **The filter is on only on GCP** (`LLM_DATA_CLASS_FILTER`, default `none`). It reads the counterparty names from the database, and the AWS/local default stays unchanged.
+- **The retention policy is not locked.** Locking is irreversible: the period could never be shortened, and the bucket couldn't be deleted before every object ages out. `rag.gcs_documents` skips unchanged files, so re-uploads stay idempotent under the policy.
+- **SQL statement auditing (pgaudit) is off.** It would log every query. Cloud Audit Logs plus the append-only `audit_log` cover who read or changed data.
+
+**Cost.** Dataplex catalog and lineage metadata are free up to 1 MiB (monthly average), then $2/GiB-month. About 21 entries and a few lineage events per call come to $0, or cents at worst. SDP storage inspection is free up to 1 GB a month; the corpus is under 100 KB. Cloud Audit Logs data access stays well under the 50 GiB/month free ingestion (estimate: under 100 MB). No Dataplex scans are created, because they are billed per DCU.

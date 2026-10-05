@@ -94,3 +94,43 @@ Daily-only reference data (EOD backfill prices, ratings snapshots, calendars) is
 - Synthetic data generators are versioned and seeded → reproducible datasets.
 - Citations retained on every RAG answer for auditability.
 - No secrets in data configs; connection strings via Parameter Store.
+
+### 6a. Governance on GCP (Phase G8, ADR-0015)
+
+**Catalog.** `docs/data_catalog.yaml` lists every dataset, with owner, class, freshness and source. Dataplex Universal Catalog mirrors it (`infra/gcp/dataplex.tf`). `tests/unit/test_data_catalog.py` keeps the YAML in sync with the SQLAlchemy models, the `rag_chunks` migration and `data/documents/`.
+
+| Dataset | Class | Freshness | Source |
+|---|---|---|---|
+| `price_history`, `latest_prices`, `reference_rates` | public | EOD job daily; prices every 5 minutes in market hours | Real (yfinance, FRED) |
+| `portfolios`, `ratings`, `tickets`, `processed_events`, `user_counterparty_access` | internal | Seeded, or written in real time | Synthetic / application |
+| `counterparties` (legal name), `positions` (quantity), `collateral_items` (value), `audit_log`, orchestrator checkpoints, `users`, `rag_chunks` | confidential | Seeded, or written in real time | Synthetic / application |
+| GCS `csa/`, `disputes/` | confidential | On change | Synthetic |
+| GCS `policy/`, `exceptions/`, `escalation/` | internal | On change; reviewed yearly | Synthetic |
+
+**Classification rules (enforced in code, tested in `tests/unit/test_data_class_filter.py`).**
+- A table's class is at least its highest column class.
+- Every confidential column declares how the LLM layer handles it:
+  - `pseudonymize`: a counterparty's legal name becomes its id in every prompt, e.g. "Yang Partners" → "CP-3".
+  - `mask`: position quantities and collateral values become `[CONFIDENTIAL]`. The reconciliation prompt sees the break type, never the sizes.
+  - `deny`: password hashes, audit payloads and checkpoint blobs. A prompt carrying a recognisable denied value (e.g. a bcrypt hash) is blocked.
+- An unclassified field can't be sent: `mask_record` raises.
+
+**Lineage.** Per margin call, through the Data Lineage API:
+
+```
+price event + positions, prices, VIX, collateral, ratings, tier + cited CSA files
+  -> margin call -> approval -> notification -> SLA met | escalation
+```
+
+**Sensitive data.** The scheduled Sensitive Data Protection inspection of the documents bucket looks for personal and account identifiers, including names. Before indexing and prompting, the regex/SDP redactor (MM-115) masks identifiers, and the data-class filter pseudonymizes names.
+
+**Retention.**
+
+| Data | Retention |
+|---|---|
+| GCS documents | 30-day bucket retention policy (not locked); versioned, with the 5 newest old versions kept |
+| `audit_log` | Append-only, kept for the demo's lifetime |
+| Cloud Audit Logs | Cloud Logging default (30 days for data access logs) |
+| Cloud SQL backups | 7 retained |
+
+BigQuery table expiration is deferred with G7.
