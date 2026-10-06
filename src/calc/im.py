@@ -17,20 +17,26 @@ VIX_MULTIPLIER_FLOOR = 0.5
 VIX_MULTIPLIER_CAP = 3.0
 
 
-def _risk_weight(ticker: str, asset_class: AssetClass) -> float:
+def risk_weight(ticker: str, asset_class: AssetClass) -> float:
+    """The SIMM-proxy risk weight of one position (public so the warehouse
+    backfill's vectorized IM uses exactly these weights, MM-140)."""
     if ticker in TREASURY_ETF_TICKERS:
         return TREASURY_ETF_RISK_WEIGHT
     return RISK_WEIGHTS[asset_class]
 
 
-def compute_initial_margin(mtm: PortfolioMTM, vix_level: float) -> InitialMargin:
+def vix_multiplier(vix_level: float) -> float:
+    """VIX / baseline, clamped to [floor, cap]."""
     if vix_level <= 0:
         raise PricingError(f"vix_level must be positive, got {vix_level}")
+    return max(VIX_MULTIPLIER_FLOOR, min(VIX_MULTIPLIER_CAP, vix_level / VIX_BASELINE))
 
-    multiplier = max(VIX_MULTIPLIER_FLOOR, min(VIX_MULTIPLIER_CAP, vix_level / VIX_BASELINE))
+
+def compute_initial_margin(mtm: PortfolioMTM, vix_level: float) -> InitialMargin:
+    multiplier = vix_multiplier(vix_level)
 
     base_im = sum(
-        abs(position.mtm) * _risk_weight(position.ticker, position.asset_class)
+        abs(position.mtm) * risk_weight(position.ticker, position.asset_class)
         for position in mtm.positions
     )
 

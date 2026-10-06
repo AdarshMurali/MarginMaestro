@@ -2,7 +2,9 @@
 
 The YAML is the single source of truth. Terraform registers it in Dataplex
 Universal Catalog (infra/gcp/dataplex.tf) and the LLM data-class filter
-(governance.classification) is driven by it, so both always agree.
+(governance.classification) is driven by it, so both always agree. Its
+`warehouse_tables` (MM-139) also drive the BigQuery policy tags
+(infra/gcp/bigquery.tf): every confidential column there is masked.
 
 Where the file is found, in order:
 1. `DATA_CATALOG_PATH` (the Docker image sets it: /app/docs/data_catalog.yaml);
@@ -88,11 +90,15 @@ class DataCatalog(_Strict):
     version: int
     tables: dict[str, TableEntry]
     documents: dict[str, DocumentFamily]
+    # MM-139: BigQuery warehouse tables (dataset marginmaestro_analytics).
+    # Kept apart from `tables` (Cloud SQL): the LLM data-class filter reads
+    # `tables` only, and no warehouse data is ever sent to a model.
+    warehouse_tables: dict[str, TableEntry] = Field(default_factory=dict)
     llm_exceptions: list[LlmException] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _references_resolve(self) -> "DataCatalog":
-        for table_name, table in self.tables.items():
+        for table_name, table in {**self.tables, **self.warehouse_tables}.items():
             self._check_table_references(table_name, table)
         for family_name, family in self.documents.items():
             for ref in family.contains:

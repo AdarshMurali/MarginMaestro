@@ -282,6 +282,24 @@ class DailyMarginRunResponse(BaseModel):
     outcomes: list[DailyRunOutcome]
 
 
+class WarehouseLoadResponse(BaseModel):
+    """POST /internal/warehouse/daily-load (MM-141): rows written per table
+    for the live book's day, and the counterparties that couldn't be priced."""
+
+    as_of: date
+    rows: dict[str, int]
+    skipped: list[str]
+
+
+class ReportsStatusResponse(BaseModel):
+    """GET /reports/status (MM-142): whether the warehouse is configured and
+    which books the caller may see."""
+
+    configured: bool
+    books: list[str]
+    scoped: bool
+
+
 class PubSubPushMessage(BaseModel):
     """Pub/Sub push body's `message` (MM-121); `data` is base64."""
 

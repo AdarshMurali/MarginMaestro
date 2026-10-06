@@ -260,6 +260,229 @@ tables:
       metadata: {class: internal}
       embedding: {class: internal}
 
+# BigQuery warehouse tables (MM-139, ADR-0013), dataset marginmaestro_analytics.
+# Columns must match src/warehouse/schemas.py (test_data_catalog.py). Every
+# confidential column carries the `confidential` policy tag (column-level
+# masking, infra/gcp/bigquery.tf). No warehouse data is sent to an LLM; `llm`
+# is declared to satisfy the catalog's rule and says how it would be handled.
+warehouse_tables:
+  fact_daily_exposure:
+    owner: margin-operations
+    description: "Counterparty x trading day: exposure (VM + IM), collateral, CSA threshold/MTA, headroom and the call due -- all computed by the calc engine."
+    class: confidential
+    freshness: "Daily: the live book after the 16:45 New York margin run; the simulated book once, by backfill."
+    source: Calc engine over real closes; live book from Cloud SQL (warehouse.live_load), simulated book from warehouse.backfill.
+    columns:
+      as_of_date: {class: internal}
+      book: {class: internal}
+      counterparty_id: {class: internal}
+      csa_version: {class: internal}
+      rating: {class: internal}
+      vix: {class: internal}
+      variation_margin: {class: internal}
+      initial_margin: {class: internal}
+      exposure: {class: internal}
+      threshold: {class: internal}
+      mta: {class: internal}
+      collateral_held: {class: confidential, llm: mask}
+      required_support: {class: internal}
+      headroom: {class: confidential, llm: mask}
+      call_due: {class: internal}
+      breached: {class: internal}
+      call_raised: {class: internal}
+      currency: {class: internal}
+
+  fact_position_daily:
+    owner: margin-operations
+    description: "Position x trading day: quantity, close and market value."
+    class: confidential
+    freshness: Daily (live); once by backfill (simulated, ~63M rows).
+    source: Positions (synthetic) x real closes (Yahoo Finance).
+    columns:
+      as_of_date: {class: internal}
+      book: {class: internal}
+      counterparty_id: {class: internal}
+      position_id: {class: internal}
+      ticker: {class: internal}
+      asset_class: {class: internal}
+      quantity: {class: confidential, llm: mask}
+      close: {class: internal}
+      market_value: {class: confidential, llm: mask}
+
+  fact_margin_call:
+    owner: margin-operations
+    description: One row per margin call raised, with its lifecycle timestamps and outcome.
+    class: confidential
+    freshness: Daily, re-loading the trailing 14 days of live calls; once by backfill (simulated).
+    source: Orchestrator checkpoints + audit_log (live); warehouse.backfill (simulated, synthetic lifecycle times).
+    columns:
+      raised_date: {class: internal}
+      book: {class: internal}
+      call_id: {class: internal}
+      counterparty_id: {class: internal}
+      trigger_type: {class: internal}
+      call_amount: {class: internal}
+      currency: {class: internal}
+      rationale: {class: confidential, llm: mask}
+      raised_at: {class: internal}
+      approval_decision: {class: internal}
+      approved_at: {class: internal}
+      approver: {class: internal}
+      manager_approved_at: {class: internal}
+      notified_at: {class: internal}
+      channel: {class: internal}
+      acknowledged_at: {class: internal}
+      escalated_at: {class: internal}
+      sla_outcome: {class: internal}
+      status: {class: internal}
+
+  fact_price_daily:
+    owner: market-data
+    description: "Symbol x trading day: real daily closes (Yahoo Finance) and FRED reference rates."
+    class: public
+    freshness: Daily (live); once by backfill (simulated).
+    source: Real market data (Yahoo Finance, FRED).
+    columns:
+      price_date: {class: public}
+      book: {class: public}
+      symbol: {class: public}
+      kind: {class: public}
+      value: {class: public}
+      source: {class: public}
+
+  dim_counterparty:
+    owner: margin-operations
+    description: Counterparties of both books (simulated names are clearly synthetic).
+    class: confidential
+    freshness: Daily (live); once by backfill (simulated).
+    source: Cloud SQL counterparties (live); warehouse.simulated_book (synthetic SIM names).
+    columns:
+      book_key: {class: internal}
+      book: {class: internal}
+      counterparty_id: {class: internal}
+      name: {class: confidential, llm: pseudonymize, pseudonym: counterparty_id}
+      type: {class: internal}
+      country: {class: internal}
+      tier: {class: internal}
+      rating: {class: internal}
+
+  dim_instrument:
+    owner: market-data
+    description: Instruments held by each book, with GICS sector from the S&P 500 snapshot.
+    class: public
+    freshness: Daily (live); once by backfill (simulated).
+    source: S&P 500 snapshot (Wikipedia) + the live universe.
+    columns:
+      book_key: {class: public}
+      book: {class: public}
+      ticker: {class: public}
+      security: {class: public}
+      asset_class: {class: public}
+      sector: {class: public}
+      sub_industry: {class: public}
+      in_sp500: {class: public}
+
+  dim_csa_terms:
+    owner: legal
+    description: CSA terms per counterparty, SCD type 2 (valid_from / valid_to).
+    class: internal
+    freshness: "Daily (live: SCD2 versions of the CSA terms the orchestrator extracted); once by backfill (simulated)."
+    source: "Orchestrator checkpoints (live); warehouse.simulated_book (simulated: structured terms, not documents)."
+    columns:
+      book_key: {class: internal}
+      book: {class: internal}
+      counterparty_id: {class: internal}
+      csa_version: {class: internal}
+      valid_from: {class: internal}
+      valid_to: {class: internal}
+      is_current: {class: internal}
+      threshold: {class: internal}
+      mta: {class: internal}
+      currency: {class: internal}
+      trigger_below_grade: {class: internal}
+      trigger_threshold: {class: internal}
+      haircut_cash: {class: internal}
+      haircut_treasury: {class: internal}
+      haircut_corporate: {class: internal}
+      haircut_mmf: {class: internal}
+      change_reason: {class: internal}
+
+  dim_date:
+    owner: platform-engineering
+    description: "Shared calendar (no book): one row per day, 2021-2030."
+    class: public
+    freshness: Static calendar 2021-2030, written by the backfill.
+    source: Generated (warehouse.dims).
+    columns:
+      date_key: {class: public}
+      year: {class: public}
+      quarter: {class: public}
+      month: {class: public}
+      day_of_week: {class: public}
+      is_weekday: {class: public}
+      is_month_end: {class: public}
+      year_quarter: {class: public}
+      year_month: {class: public}
+
+  rpt_counterparty_daily:
+    owner: risk-management
+    description: "Reports 1, 2, 5: exposure, headroom, collateral adequacy and calls per day."
+    class: confidential
+    freshness: Refreshed after every load (warehouse/sql/refresh_rpt_counterparty_daily.sql).
+    source: fact_daily_exposure + dim_counterparty.
+    columns:
+      as_of_date: {class: internal}
+      book: {class: internal}
+      counterparty_id: {class: internal}
+      tier: {class: internal}
+      exposure: {class: internal}
+      threshold: {class: internal}
+      headroom: {class: confidential, llm: mask}
+      required_support: {class: internal}
+      collateral_held: {class: confidential, llm: mask}
+      coverage_ratio: {class: confidential, llm: mask}
+      breached: {class: internal}
+      call_raised: {class: internal}
+      call_due: {class: internal}
+      vix: {class: internal}
+
+  rpt_concentration:
+    owner: risk-management
+    description: "Report 3: month-end gross/net market value by counterparty, ticker and sector."
+    class: confidential
+    freshness: Refreshed after every load; one month-end snapshot per month.
+    source: fact_position_daily + dim_instrument.
+    columns:
+      month_start: {class: internal}
+      as_of_date: {class: internal}
+      book: {class: internal}
+      counterparty_id: {class: internal}
+      ticker: {class: internal}
+      sector: {class: internal}
+      asset_class: {class: internal}
+      gross_market_value: {class: confidential, llm: mask}
+      net_market_value: {class: confidential, llm: mask}
+
+  rpt_margin_call:
+    owner: risk-management
+    description: "Report 4: one row per call with approval turnaround and SLA result."
+    class: internal
+    freshness: Refreshed after every load.
+    source: fact_margin_call + dim_counterparty.
+    columns:
+      raised_date: {class: internal}
+      book: {class: internal}
+      call_id: {class: internal}
+      counterparty_id: {class: internal}
+      tier: {class: internal}
+      trigger_type: {class: internal}
+      call_amount: {class: internal}
+      approval_minutes: {class: internal}
+      notify_minutes: {class: internal}
+      sla_outcome: {class: internal}
+      escalated: {class: internal}
+      status: {class: internal}
+
 # GCS documents bucket (`<project>-documents`), one family per top-level folder.
 documents:
   csa:

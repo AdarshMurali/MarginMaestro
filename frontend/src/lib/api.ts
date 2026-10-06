@@ -343,3 +343,150 @@ export function postDeskChat(
     session_id: sessionId,
   });
 }
+
+// MM-142: warehouse reports. The numbers are computed upstream (calc engine)
+// and aggregated in BigQuery; this client only renders them.
+export type ReportBook = "live" | "historical-sim";
+export type ReportPeriod = "3m" | "1y" | "5y";
+
+export interface ReportsStatusResponse {
+  configured: boolean;
+  books: ReportBook[];
+  scoped: boolean;
+}
+
+export interface ReportMeta {
+  book: ReportBook;
+  period: ReportPeriod;
+  start_date: string;
+  end_date: string;
+  generated_at: string;
+  scoped: boolean;
+}
+
+export interface ExposurePoint {
+  as_of_date: string;
+  counterparties: number;
+  exposure: number;
+  threshold: number;
+  headroom: number;
+  breached: number;
+  shortfalls: number;
+}
+
+export interface ExposureTrendReport {
+  meta: ReportMeta;
+  points: ExposurePoint[];
+}
+
+export interface CoverageBucket {
+  bucket: string;
+  counterparties: number;
+  required_support: number;
+  collateral_held: number;
+}
+
+export interface CounterpartyAdequacy {
+  counterparty_id: string;
+  tier: string;
+  required_support: number;
+  collateral_held: number;
+  coverage_ratio: number | null;
+  headroom: number;
+}
+
+export interface CollateralAdequacyReport {
+  meta: ReportMeta;
+  as_of_date: string | null;
+  counterparties: number;
+  required_support: number;
+  collateral_held: number;
+  buckets: CoverageBucket[];
+  lowest_headroom: CounterpartyAdequacy[];
+}
+
+export interface ConcentrationRow {
+  key: string;
+  gross: number;
+  net: number;
+  counterparties: number;
+}
+
+export interface ConcentrationReport {
+  meta: ReportMeta;
+  as_of_date: string | null;
+  by_sector: ConcentrationRow[];
+  by_asset_class: ConcentrationRow[];
+  top_tickers: ConcentrationRow[];
+}
+
+export interface MarginCallMonth {
+  month: string;
+  calls: number;
+  amount: number;
+  avg_approval_minutes: number | null;
+  p90_approval_minutes: number | null;
+  sla_met: number;
+  sla_breached: number;
+  escalations: number;
+  open_calls: number;
+}
+
+export interface MarginCallPerformanceReport {
+  meta: ReportMeta;
+  months: MarginCallMonth[];
+}
+
+export interface StressDay {
+  as_of_date: string;
+  calls_raised: number;
+  call_amount: number;
+  breached: number;
+  vix: number;
+}
+
+export interface StressMonth {
+  month: string;
+  calls_raised: number;
+  call_amount: number;
+  breach_days: number;
+  avg_vix: number;
+  max_vix: number;
+}
+
+export interface StressBacktestReport {
+  meta: ReportMeta;
+  top_days: StressDay[];
+  months: StressMonth[];
+}
+
+export function getReportsStatus(): Promise<ReportsStatusResponse> {
+  return getJson<ReportsStatusResponse>("/reports/status");
+}
+
+function reportPath(name: string, book: ReportBook, period: ReportPeriod): string {
+  const query = new URLSearchParams({ book, period });
+  return `/reports/${name}?${query.toString()}`;
+}
+
+export function getExposureTrend(book: ReportBook, period: ReportPeriod) {
+  return getJson<ExposureTrendReport>(reportPath("exposure-trend", book, period));
+}
+
+export function getCollateralAdequacy(book: ReportBook, period: ReportPeriod) {
+  return getJson<CollateralAdequacyReport>(reportPath("collateral-adequacy", book, period));
+}
+
+export function getConcentration(book: ReportBook, period: ReportPeriod) {
+  return getJson<ConcentrationReport>(reportPath("concentration", book, period));
+}
+
+export function getMarginCallPerformance(book: ReportBook, period: ReportPeriod) {
+  return getJson<MarginCallPerformanceReport>(
+    reportPath("margin-call-performance", book, period),
+  );
+}
+
+export function getStressBacktest(book: ReportBook, period: ReportPeriod) {
+  return getJson<StressBacktestReport>(reportPath("stress-backtest", book, period));
+}

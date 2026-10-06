@@ -1,0 +1,13 @@
+[
+  "dim_counterparty",
+  "dim_csa_terms",
+  "dim_date",
+  "dim_instrument",
+  "fact_daily_exposure",
+  "fact_margin_call",
+  "fact_position_daily",
+  "fact_price_daily",
+  "rpt_concentration",
+  "rpt_counterparty_daily",
+  "rpt_margin_call"
+]

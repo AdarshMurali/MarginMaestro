@@ -206,3 +206,57 @@ variable "desk_agent_identity" {
   type        = bool
   default     = false
 }
+
+# --- G7: BigQuery finance warehouse (ADR-0013) ------------------------------------
+# IAM members are "user:<email>", "group:<email>" or "serviceAccount:<email>".
+# Set them in terraform.tfvars (gitignored) -- the repo is public, so no
+# personal emails in code.
+
+variable "warehouse" {
+  description = "WAREHOUSE on Cloud Run (MM-141): bigquery (the daily load after the margin run + the /reports page) or none."
+  type        = string
+  default     = "bigquery"
+
+  validation {
+    condition     = contains(["none", "bigquery"], var.warehouse)
+    error_message = "warehouse must be \"none\" or \"bigquery\"."
+  }
+}
+
+variable "warehouse_loaders" {
+  description = "Members who run the backfill (python -m warehouse.backfill) with their own credentials: write, run jobs, read unmasked, see every row."
+  type        = list(string)
+  default     = []
+}
+
+variable "warehouse_readers" {
+  description = "Firm-wide read-only members (e.g. the Tableau user's Google account): dataViewer + jobUser, every row, confidential columns masked."
+  type        = list(string)
+  default     = []
+}
+
+variable "warehouse_unmasked_readers" {
+  description = "Members who may read confidential warehouse columns unmasked (Fine-Grained Reader on the policy tag). Must also be a reader or loader."
+  type        = list(string)
+  default     = []
+}
+
+variable "warehouse_scoped_readers" {
+  description = "Scoped analysts: member -> live counterparty ids they cover (the BigQuery mirror of user_counterparty_access). They see only those live counterparties' rows, masked; the simulated book is firm-wide only."
+  type        = map(list(string))
+  default     = {}
+
+  validation {
+    condition = alltrue([
+      for ids in values(var.warehouse_scoped_readers) :
+      alltrue([for id in ids : can(regex("^CP-[0-9]+$", id))])
+    ])
+    error_message = "warehouse_scoped_readers values must be live counterparty ids like CP-3."
+  }
+}
+
+variable "warehouse_load_job" {
+  description = "Create a dedicated 17:15 New York Cloud Scheduler job for /internal/warehouse/daily-load. Off by default: the daily margin run triggers the load, and a 4th job costs $0.10/month (3 are free per billing account)."
+  type        = bool
+  default     = false
+}

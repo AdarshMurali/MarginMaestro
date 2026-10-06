@@ -1,0 +1,49 @@
+{
+  "description": "Symbol x trading day: real daily closes (Yahoo Finance) and FRED reference rates.",
+  "kind": "fact",
+  "partition_column": "price_date",
+  "partition_type": "DAY",
+  "clustering": [
+    "symbol"
+  ],
+  "require_partition_filter": false,
+  "has_counterparty": false,
+  "schema": [
+    {
+      "name": "price_date",
+      "type": "DATE",
+      "mode": "REQUIRED",
+      "description": "Trading day (partition)"
+    },
+    {
+      "name": "book",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "live | historical-sim"
+    },
+    {
+      "name": "symbol",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Ticker, ^VIX, or FRED series id"
+    },
+    {
+      "name": "kind",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "close | rate"
+    },
+    {
+      "name": "value",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "Close in USD, or the rate/index level"
+    },
+    {
+      "name": "source",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "yfinance | fred | eod"
+    }
+  ]
+}

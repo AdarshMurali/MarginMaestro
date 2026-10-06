@@ -1,0 +1,86 @@
+{
+  "description": "Report 4: one row per call with approval turnaround and SLA result.",
+  "kind": "report",
+  "partition_column": "raised_date",
+  "partition_type": "MONTH",
+  "clustering": [
+    "book",
+    "counterparty_id"
+  ],
+  "require_partition_filter": false,
+  "has_counterparty": true,
+  "schema": [
+    {
+      "name": "raised_date",
+      "type": "DATE",
+      "mode": "REQUIRED",
+      "description": "UTC date raised (partition)"
+    },
+    {
+      "name": "book",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "live | historical-sim"
+    },
+    {
+      "name": "call_id",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Call id"
+    },
+    {
+      "name": "counterparty_id",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Counterparty id (CP-n live, SIM-nnnn simulated)"
+    },
+    {
+      "name": "tier",
+      "type": "STRING",
+      "mode": "NULLABLE",
+      "description": "standard | elite"
+    },
+    {
+      "name": "trigger_type",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Trigger type"
+    },
+    {
+      "name": "call_amount",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "Call amount"
+    },
+    {
+      "name": "approval_minutes",
+      "type": "FLOAT",
+      "mode": "NULLABLE",
+      "description": "raised_at -> approved_at"
+    },
+    {
+      "name": "notify_minutes",
+      "type": "FLOAT",
+      "mode": "NULLABLE",
+      "description": "raised_at -> notified_at"
+    },
+    {
+      "name": "sla_outcome",
+      "type": "STRING",
+      "mode": "NULLABLE",
+      "description": "met | breached | null"
+    },
+    {
+      "name": "escalated",
+      "type": "BOOLEAN",
+      "mode": "REQUIRED",
+      "description": "Escalated"
+    },
+    {
+      "name": "status",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Lifecycle status"
+    }
+  ]
+}

@@ -227,6 +227,13 @@ ADR: 0013
 
 **Exit:** an auditor can trace any call's history in BigQuery; a restricted user sees only their counterparties and masked confidential columns.
 
+**As built (2026-10-06, PR `feature/G7-bigquery-warehouse`; Jira MM-139 / MM-140 / MM-141 / MM-142).** Scope reset by the user on 2026-10-06 (ADR-0013 amendment): a finance star schema, not an event/telemetry mirror.
+- **MM-G71 → MM-139.** Dataset `marginmaestro_analytics` with 4 facts, 4 dimensions (SCD2 CSA terms) and 3 report tables, every row tagged `book` = live | historical-sim. Schemas from `src/warehouse/schemas.py` (Terraform reads the rendered JSON; tests pin it to the catalog). Policy tag `confidential` with a masking data policy on every confidential column; IAM via `warehouse_loaders` / `warehouse_readers` / `warehouse_unmasked_readers` / `warehouse_scoped_readers`. *Dropped:* Pub/Sub → BigQuery subscriptions and raw audit/LLM telemetry mirrors.
+- **MM-G72 → MM-140.** The simulated historical book (1,000 synthetic counterparties, ~50k positions over the real S&P 500, 5 years of real closes, ~62M position-days), backfilled by `python -m warehouse.backfill` with the vectorized calc engine (proven equal to `calc/`), in idempotent quarter chunks.
+- **MM-G73 → MM-141 / MM-142.** The live book is loaded after every daily margin run (`WAREHOUSE=bigquery`; `/internal/warehouse/daily-load` for re-runs); KPI/report tables refreshed by committed SQL. *Dropped:* LLM cost and guardrail-block KPIs (Cloud Logging covers them).
+- **MM-G74 → deferred.** BigQuery ML is not built.
+- **MM-G75 → MM-142.** Row access policies (scoped analysts: their live counterparties only; the simulated book is firm-wide only) and column masking. Dashboards: the in-app `/reports` page (five reports) and a Tableau Desktop guide (`docs/warehouse/tableau.md`) instead of Looker Studio.
+
 ### Phase G8 — Data governance (Epic: MM-95)
 ADR: 0015
 

@@ -33,6 +33,10 @@ skip-check:
   # Customer-managed keys: Google-managed encryption by default; CMEK is the
   # documented production option (ADR-0015), not enabled for the demo (cost).
   - CKV_GCP_83
+  # Same decision for the BigQuery warehouse (MM-139): Google-managed
+  # encryption; a Cloud KMS key costs per key-version and per operation.
+  - CKV_GCP_80 # BigQuery tables
+  - CKV_GCP_81 # BigQuery dataset
   # WIF: the provider's attribute condition pins the numeric repository id,
   # owner id and refs/heads/main (infra/gcp/wif.tf) -- stricter than the
   # name-based shape this check looks for.
