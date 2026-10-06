@@ -16,6 +16,8 @@ import { formatDateTime, formatUsd } from "@/lib/format";
 import { DARK_GREEN, LIGHT_GREEN } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 
+const FEED_POLL_MS = 30_000;
+
 function slaRemainingLabel(deadline: string): string {
   const diffMs = new Date(deadline).getTime() - Date.now();
   if (diffMs <= 0) return "overdue";
@@ -313,8 +315,21 @@ export default function ApprovalsPage() {
       .catch(() => setError(true));
   }, []);
 
+  // Calls also change outside this page -- a client's WhatsApp acknowledgement,
+  // the SLA timer, the daily margin run -- so the feed refreshes on a timer and
+  // whenever the tab comes back into view. Found 2026-10-06: an acknowledged
+  // call still showed "overdue" because the page had only loaded once.
   useEffect(() => {
     refetch();
+    const id = setInterval(refetch, FEED_POLL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refetch();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [refetch]);
 
   const awaitingApproval = items?.filter((item) => item.status === "awaiting_approval") ?? [];
