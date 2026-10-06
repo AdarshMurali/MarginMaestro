@@ -105,10 +105,17 @@ resource "google_data_catalog_taxonomy" "classification" {
 resource "google_data_catalog_policy_tag" "confidential" {
   taxonomy     = google_data_catalog_taxonomy.classification.id
   display_name = "confidential"
-  description  = "Quantities, market values, collateral and legal names: masked unless the reader has fine-grained read access."
+  description  = "Quantities, market values, collateral and legal names: readable only with fine-grained read access (masked instead when warehouse_masking is on)."
 }
 
+# Dynamic data masking needs the project to belong to an organization
+# ("needs to belong to an organization to manage DataPolicies", first apply
+# 2026-10-06). This project has none, so masking is off by default: the
+# policy tag still BLOCKS confidential columns for anyone without
+# fine-grained read (access denied rather than masked values).
 resource "google_bigquery_datapolicy_data_policy" "mask_confidential" {
+  count = var.warehouse_masking ? 1 : 0
+
   location         = var.region
   data_policy_id   = "mask_confidential"
   policy_tag       = google_data_catalog_policy_tag.confidential.name
@@ -201,11 +208,11 @@ resource "google_data_catalog_policy_tag_iam_member" "unmasked" {
 }
 
 resource "google_bigquery_datapolicy_data_policy_iam_member" "masked" {
-  for_each = toset(concat(var.warehouse_readers, keys(var.warehouse_scoped_readers)))
+  for_each = var.warehouse_masking ? toset(concat(var.warehouse_readers, keys(var.warehouse_scoped_readers))) : toset([])
 
   project        = var.project_id
   location       = var.region
-  data_policy_id = google_bigquery_datapolicy_data_policy.mask_confidential.data_policy_id
+  data_policy_id = google_bigquery_datapolicy_data_policy.mask_confidential[0].data_policy_id
   role           = "roles/bigquerydatapolicy.maskedReader"
   member         = each.value
 }

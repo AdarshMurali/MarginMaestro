@@ -243,3 +243,9 @@ variable "warehouse_load_job" {
   type        = bool
   default     = false
 }
+
+variable "warehouse_masking" {
+  description = "BigQuery dynamic data masking of confidential columns (MM-142). Needs the project to be in an organization; off here, so confidential columns are blocked (not masked) for readers without fine-grained read."
+  type        = bool
+  default     = false
+}
