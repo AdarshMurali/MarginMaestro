@@ -16,6 +16,12 @@ dependencies = [
     "httpx",
     # MM-135: the data catalog (docs/data_catalog.yaml) drives the LLM data-class filter.
     "pyyaml",
+    # Security floors for transitive dependencies (Trivy, 2026-10-06):
+    # urllib3 CVE-2026-97687/97689, msgpack GHSA-6v7p-g79w-8964,
+    # setuptools CVE-2025-47273. Raise, never lower.
+    "urllib3>=2.8.0",
+    "msgpack>=1.2.1",
+    "setuptools>=78.1.1",
 ]
 
 [project.optional-dependencies]
