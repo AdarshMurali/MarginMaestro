@@ -34,7 +34,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | **Done** (live run on GCP comes with G5) |
 | G5 | MM-92 | Agent Platform desk assistant, Cloud Run deployment, observability | In progress (MM-123, 124, 126, 127 done; MM-128 … 132 planned) |
 | G6 | MM-93 | WhatsApp client notifications | Code done (MM-118, MM-133, MM-134; one PR). Then: secrets script, Meta webhook setup, flip `client_notifier` |
-| G7 | MM-94 | BigQuery analytics & audit warehouse | **Parked** (user decision 2026-10-05) |
+| G7 | MM-94 | BigQuery finance warehouse | Code done (MM-139..142; one PR). Then: Terraform apply, backfill, verify |
 | G8 | MM-95 | Data governance (Dataplex, classification, lineage, audit, retention) | Code done without BigQuery (MM-135, 136, 137; one PR). Then: migration on Cloud SQL, Terraform apply |
 | G9 | MM-96 | Cut-over & AWS/Azure decommission | Not started |
 | G10 | MM-97 | Month-2 cost review & free-fallback swaps | Not started |
@@ -48,6 +48,24 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-06 — MM-139 / MM-140 / MM-141 / MM-142: BigQuery finance warehouse (Phase G7) (code done; Terraform apply, backfill and verification pending)
+- **Done:**
+  - **MM-139:** `infra/gcp/bigquery.tf` — BigQuery/Data Policy/Data Catalog APIs, dataset `marginmaestro_analytics` (us-central1, no table expiration, 48 h time travel), 11 tables from `src/warehouse/schemas.py` (rendered to `infra/gcp/bigquery_schemas/`), DAY/MONTH partitioning on dates and RANGE partitioning on `book_key` for dimensions, clustering by counterparty (and ticker / sector), `require_partition_filter` on `fact_position_daily` and `fact_daily_exposure`. Taxonomy + `confidential` policy tag + `DEFAULT_MASKING_VALUE` data policy on every confidential column (from `docs/data_catalog.yaml` `warehouse_tables`). IAM and row access policies driven by `warehouse_loaders`, `warehouse_readers`, `warehouse_unmasked_readers`, `warehouse_scoped_readers`. Dataplex entries for the warehouse tables. `src/warehouse/client.py`: every query sets `maximum_bytes_billed` (8 GB ceiling), writes are whole-partition DELETE (0 bytes) + batch `WRITE_APPEND` loads from gzip CSV; no streaming inserts.
+  - **MM-140:** `warehouse.sp500` (committed Wikipedia snapshot, 503 constituents), `warehouse.history` (yfinance in batches with retries, gzip-CSV cache), `warehouse.simulated_book` (seeded 1,000 counterparties / 50,318 positions, SCD2 CSA terms, rating migrations), `warehouse.vector_calc` (numpy twins of `calc/`, proven equal on randomized books), `warehouse.backfill` (quarter chunks, `--list/--dims/--chunk/--all/--dry-run`, streaming, idempotent).
+  - **MM-141:** `warehouse.live_load` + `POST /internal/warehouse/daily-load` (OIDC/job token); the daily margin run triggers it when `WAREHOUSE=bigquery` (best effort). Exposure recomputed with `calc/` from Cloud SQL and the CSA terms of the orchestrator's last run (no LLM call); trailing 14 days of calls with lifecycle from the audit trail. Terraform sets `WAREHOUSE=bigquery` on Cloud Run.
+  - **MM-142:** committed SQL (`src/warehouse/sql/`) refreshing `rpt_counterparty_daily`, `rpt_concentration`, `rpt_margin_call`, and six report queries; `GET /reports/{status,exposure-trend,collateral-adequacy,concentration,margin-call-performance,stress-backtest}` (require_user + RLS scope, 10-minute cache, 500 MB cap); the `/reports` page with a nav tab; `docs/warehouse/tableau.md`.
+- **Decisions:** ADR-0013 amendment, ADR-0015 update.
+  - A date belongs to one book (simulated ≤ 2026-07-31 < live), so partition replaces never touch the other book.
+  - The simulated book is firm-wide only (scoped analysts: 403 in the app, no BigQuery policy).
+  - The load rides on the daily margin run instead of a 4th Cloud Scheduler job ($0.10/month; `warehouse_load_job` toggle, off).
+  - gzip CSV instead of parquet (no pyarrow in the image); no GCS staging.
+  - Collateral returns at month end and T+1 settlement in the simulation (documented simplifications); survivorship bias documented.
+- **Changed:** `src/warehouse/*`, `src/api/main.py` + `schemas.py`, `src/calc/im.py` (public `risk_weight`, `vix_multiplier`), `src/config/settings.py`, `src/governance/catalog.py`, `docs/data_catalog.yaml`, `infra/gcp/bigquery.tf`, `bigquery_schemas/`, `cloud_run.tf`, `dataplex.tf`, `variables.tf`, `pyproject.toml` (`google-cloud-bigquery` in `gcp`), frontend `/reports`, docs.
+- **Measured (dry run, real data):** 62.4M position-days (5.38 GB logical, 86 B/row), 1.255M exposures (167 MB), 127k calls (43 MB), 625k prices (34 MB); compute + write 330 s; ~1.76 GB gzip to upload.
+- **Cost impact:** storage ~6 GB (10 GiB free); queries: backfill refresh ~4-5 GB once, daily load MBs, report pages ≤ 75 MB per query cached 10 min (1 TiB free); loads, policy tags, masking, row policies free. Only paid option: the optional 4th scheduler job ($0.10/month), off.
+- **Known issues / tech debt:** data masking availability on on-demand pricing to confirm at apply (it is documented as edition-dependent); BigQuery ML deferred; Dataplex DQ / SDP scans of BigQuery still deferred.
+- **Next step:** apply Terraform (with `warehouse_loaders` / `warehouse_readers` in tfvars), run `python -m warehouse.backfill --all`, then `POST /internal/warehouse/daily-load` and open `/reports`.
 
 ### 2026-10-06 — G6 and G8 live; G9 docs (MM-118, MM-133, MM-134, MM-135, MM-136, MM-137, MM-138)
 - **G6, WhatsApp to clients and Slack internally, live:**

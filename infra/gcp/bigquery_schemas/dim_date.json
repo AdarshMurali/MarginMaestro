@@ -1,0 +1,65 @@
+{
+  "description": "Shared calendar (no book): one row per day, 2021-2030.",
+  "kind": "dimension",
+  "partition_column": null,
+  "partition_type": null,
+  "clustering": [],
+  "require_partition_filter": false,
+  "has_counterparty": false,
+  "schema": [
+    {
+      "name": "date_key",
+      "type": "DATE",
+      "mode": "REQUIRED",
+      "description": "Calendar day"
+    },
+    {
+      "name": "year",
+      "type": "INTEGER",
+      "mode": "REQUIRED",
+      "description": "Year"
+    },
+    {
+      "name": "quarter",
+      "type": "INTEGER",
+      "mode": "REQUIRED",
+      "description": "1-4"
+    },
+    {
+      "name": "month",
+      "type": "INTEGER",
+      "mode": "REQUIRED",
+      "description": "1-12"
+    },
+    {
+      "name": "day_of_week",
+      "type": "INTEGER",
+      "mode": "REQUIRED",
+      "description": "1 = Monday ... 7 = Sunday"
+    },
+    {
+      "name": "is_weekday",
+      "type": "BOOLEAN",
+      "mode": "REQUIRED",
+      "description": "Monday-Friday"
+    },
+    {
+      "name": "is_month_end",
+      "type": "BOOLEAN",
+      "mode": "REQUIRED",
+      "description": "Last calendar day of the month"
+    },
+    {
+      "name": "year_quarter",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "e.g. 2024-Q1"
+    },
+    {
+      "name": "year_month",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "e.g. 2024-01"
+    }
+  ]
+}

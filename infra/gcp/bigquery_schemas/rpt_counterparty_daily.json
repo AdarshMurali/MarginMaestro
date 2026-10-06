@@ -1,0 +1,98 @@
+{
+  "description": "Reports 1, 2, 5: exposure, headroom, collateral adequacy and calls per day.",
+  "kind": "report",
+  "partition_column": "as_of_date",
+  "partition_type": "DAY",
+  "clustering": [
+    "book",
+    "counterparty_id"
+  ],
+  "require_partition_filter": false,
+  "has_counterparty": true,
+  "schema": [
+    {
+      "name": "as_of_date",
+      "type": "DATE",
+      "mode": "REQUIRED",
+      "description": "Trading day (partition)"
+    },
+    {
+      "name": "book",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "live | historical-sim"
+    },
+    {
+      "name": "counterparty_id",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Counterparty id (CP-n live, SIM-nnnn simulated)"
+    },
+    {
+      "name": "tier",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "standard | elite"
+    },
+    {
+      "name": "exposure",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "Exposure"
+    },
+    {
+      "name": "threshold",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "Effective threshold"
+    },
+    {
+      "name": "headroom",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "threshold + collateral_held - exposure"
+    },
+    {
+      "name": "required_support",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "max(0, exposure - threshold)"
+    },
+    {
+      "name": "collateral_held",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "Collateral after haircuts (confidential)"
+    },
+    {
+      "name": "coverage_ratio",
+      "type": "FLOAT",
+      "mode": "NULLABLE",
+      "description": "collateral_held / required_support"
+    },
+    {
+      "name": "breached",
+      "type": "BOOLEAN",
+      "mode": "REQUIRED",
+      "description": "Breached"
+    },
+    {
+      "name": "call_raised",
+      "type": "BOOLEAN",
+      "mode": "REQUIRED",
+      "description": "Call raised that day"
+    },
+    {
+      "name": "call_due",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "Call amount due"
+    },
+    {
+      "name": "vix",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "VIX close"
+    }
+  ]
+}

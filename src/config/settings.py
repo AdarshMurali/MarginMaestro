@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     # Data Lineage API, OpenLineage events; best effort, never fails a call).
     lineage_exporter: str = "none"
     lineage_location: str = "us-central1"
+    # MM-139..142 (G7, ADR-0013): the BigQuery finance warehouse. none
+    # (default: local/AWS unchanged, /reports shows "not configured") |
+    # bigquery (the daily load after the margin run, and the /reports page;
+    # needs GCP_PROJECT_ID). The dataset is created by Terraform.
+    warehouse: str = "none"
+    warehouse_dataset: str = "marginmaestro_analytics"
     # MM-117: cost / loop bounds. Per run: <= max_agent_steps graph steps, each
     # LLM call <= llm_max_prompt_chars in and llm_max_output_tokens out.
     max_agent_steps: int = 25

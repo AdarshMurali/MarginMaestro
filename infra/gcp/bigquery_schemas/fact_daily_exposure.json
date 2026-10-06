@@ -1,0 +1,122 @@
+{
+  "description": "Counterparty x trading day: exposure (VM + IM), collateral, CSA threshold/MTA, headroom and the call due -- all computed by the calc engine.",
+  "kind": "fact",
+  "partition_column": "as_of_date",
+  "partition_type": "DAY",
+  "clustering": [
+    "counterparty_id",
+    "book"
+  ],
+  "require_partition_filter": true,
+  "has_counterparty": true,
+  "schema": [
+    {
+      "name": "as_of_date",
+      "type": "DATE",
+      "mode": "REQUIRED",
+      "description": "Trading day (partition)"
+    },
+    {
+      "name": "book",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "live | historical-sim"
+    },
+    {
+      "name": "counterparty_id",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Counterparty id (CP-n live, SIM-nnnn simulated)"
+    },
+    {
+      "name": "csa_version",
+      "type": "INTEGER",
+      "mode": "REQUIRED",
+      "description": "dim_csa_terms version in force that day"
+    },
+    {
+      "name": "rating",
+      "type": "STRING",
+      "mode": "NULLABLE",
+      "description": "Counterparty rating that day"
+    },
+    {
+      "name": "vix",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "VIX close used for initial margin"
+    },
+    {
+      "name": "variation_margin",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "MTM today - MTM at the prior close"
+    },
+    {
+      "name": "initial_margin",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "SIMM-proxy initial margin"
+    },
+    {
+      "name": "exposure",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "variation_margin + initial_margin"
+    },
+    {
+      "name": "threshold",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "Effective CSA threshold (after rating triggers)"
+    },
+    {
+      "name": "mta",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "CSA minimum transfer amount"
+    },
+    {
+      "name": "collateral_held",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "Collateral held after haircuts (confidential)"
+    },
+    {
+      "name": "required_support",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "max(0, exposure - threshold)"
+    },
+    {
+      "name": "headroom",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "threshold + collateral_held - exposure (negative = shortfall)"
+    },
+    {
+      "name": "call_due",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "Delivery amount when breached, else 0"
+    },
+    {
+      "name": "breached",
+      "type": "BOOLEAN",
+      "mode": "REQUIRED",
+      "description": "Shortfall > 0 and >= MTA (calc.breach.evaluate_breach)"
+    },
+    {
+      "name": "call_raised",
+      "type": "BOOLEAN",
+      "mode": "REQUIRED",
+      "description": "A margin call was raised that day (no call already open)"
+    },
+    {
+      "name": "currency",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "CSA currency"
+    }
+  ]
+}

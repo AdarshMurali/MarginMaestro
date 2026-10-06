@@ -1,0 +1,115 @@
+{
+  "description": "CSA terms per counterparty, SCD type 2 (valid_from / valid_to).",
+  "kind": "dimension",
+  "partition_column": "book_key",
+  "partition_type": "BOOK",
+  "clustering": [
+    "counterparty_id"
+  ],
+  "require_partition_filter": false,
+  "has_counterparty": true,
+  "schema": [
+    {
+      "name": "book_key",
+      "type": "INTEGER",
+      "mode": "REQUIRED",
+      "description": "Partition key: 0 = historical-sim, 1 = live"
+    },
+    {
+      "name": "book",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "live | historical-sim"
+    },
+    {
+      "name": "counterparty_id",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Counterparty id (CP-n live, SIM-nnnn simulated)"
+    },
+    {
+      "name": "csa_version",
+      "type": "INTEGER",
+      "mode": "REQUIRED",
+      "description": "1, 2, ... per counterparty"
+    },
+    {
+      "name": "valid_from",
+      "type": "DATE",
+      "mode": "REQUIRED",
+      "description": "First day in force"
+    },
+    {
+      "name": "valid_to",
+      "type": "DATE",
+      "mode": "REQUIRED",
+      "description": "Last day in force (9999-12-31 = current)"
+    },
+    {
+      "name": "is_current",
+      "type": "BOOLEAN",
+      "mode": "REQUIRED",
+      "description": "The version in force now"
+    },
+    {
+      "name": "threshold",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "Base threshold"
+    },
+    {
+      "name": "mta",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "Minimum transfer amount"
+    },
+    {
+      "name": "currency",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "CSA currency"
+    },
+    {
+      "name": "trigger_below_grade",
+      "type": "STRING",
+      "mode": "NULLABLE",
+      "description": "Rating trigger grade"
+    },
+    {
+      "name": "trigger_threshold",
+      "type": "FLOAT",
+      "mode": "NULLABLE",
+      "description": "Threshold once the trigger fires"
+    },
+    {
+      "name": "haircut_cash",
+      "type": "FLOAT",
+      "mode": "NULLABLE",
+      "description": "Null = not eligible"
+    },
+    {
+      "name": "haircut_treasury",
+      "type": "FLOAT",
+      "mode": "NULLABLE",
+      "description": "Null = not eligible"
+    },
+    {
+      "name": "haircut_corporate",
+      "type": "FLOAT",
+      "mode": "NULLABLE",
+      "description": "Null = not eligible"
+    },
+    {
+      "name": "haircut_mmf",
+      "type": "FLOAT",
+      "mode": "NULLABLE",
+      "description": "Null = not eligible"
+    },
+    {
+      "name": "change_reason",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "initial | renegotiated | extracted"
+    }
+  ]
+}
