@@ -1,0 +1,69 @@
+{
+  "description": "Report 3: month-end gross/net market value by counterparty, ticker and sector.",
+  "kind": "report",
+  "partition_column": "month_start",
+  "partition_type": "MONTH",
+  "clustering": [
+    "book",
+    "counterparty_id",
+    "sector"
+  ],
+  "require_partition_filter": false,
+  "has_counterparty": true,
+  "schema": [
+    {
+      "name": "month_start",
+      "type": "DATE",
+      "mode": "REQUIRED",
+      "description": "First day of the month (partition)"
+    },
+    {
+      "name": "as_of_date",
+      "type": "DATE",
+      "mode": "REQUIRED",
+      "description": "Last trading day of the month loaded"
+    },
+    {
+      "name": "book",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "live | historical-sim"
+    },
+    {
+      "name": "counterparty_id",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Counterparty id (CP-n live, SIM-nnnn simulated)"
+    },
+    {
+      "name": "ticker",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Ticker"
+    },
+    {
+      "name": "sector",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "GICS sector (ETF / Crypto / Unknown otherwise)"
+    },
+    {
+      "name": "asset_class",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Asset class"
+    },
+    {
+      "name": "gross_market_value",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "abs(market value)"
+    },
+    {
+      "name": "net_market_value",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "Signed market value (confidential)"
+    }
+  ]
+}

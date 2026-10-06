@@ -56,3 +56,10 @@ The user decided on 2026-10-05 to park Phase G7 (BigQuery). G8 was built without
 - **SQL statement auditing (pgaudit) is off.** It would log every query. Cloud Audit Logs plus the append-only `audit_log` cover who read or changed data.
 
 **Cost.** Dataplex catalog and lineage metadata are free up to 1 MiB (monthly average), then $2/GiB-month. About 21 entries and a few lineage events per call come to $0, or cents at worst. SDP storage inspection is free up to 1 GB a month; the corpus is under 100 KB. Cloud Audit Logs data access stays well under the 50 GiB/month free ingestion (estimate: under 100 MB). No Dataplex scans are created, because they are billed per DCU.
+
+## Update (2026-10-06): the BigQuery items, built with G7 (MM-139, MM-142)
+
+- **Catalog:** `docs/data_catalog.yaml` has a `warehouse_tables` section (every column classified; a test keeps it equal to `src/warehouse/schemas.py`), and Dataplex gets one custom entry per warehouse table (`custom:marginmaestro.bigquery.<table>`).
+- **Classification → policy tags:** every `confidential` warehouse column (quantities, market values, collateral, headroom, legal names, call rationale) carries the `confidential` policy tag of the `MarginMaestro classification` taxonomy, with a `DEFAULT_MASKING_VALUE` data policy: masked readers see 0 / empty.
+- **Access control:** BigQuery row access policies mirror Cloud SQL RLS (see the ADR-0013 amendment).
+- **Still deferred:** Dataplex data-quality scans and SDP scans of BigQuery (billed per DCU / per GB; the loaders fail loud instead), BigQuery audit logs and table expiration (the warehouse is the long-term history).

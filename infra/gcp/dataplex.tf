@@ -1,5 +1,6 @@
-# Dataplex Universal Catalog (MM-135, ADR-0015): every Cloud SQL table and
-# every GCS document family, registered from the in-repo catalog
+# Dataplex Universal Catalog (MM-135, ADR-0015): every Cloud SQL table, every
+# BigQuery warehouse table (MM-139) and every GCS document family, registered
+# from the in-repo catalog
 # (docs/data_catalog.yaml -- the source of truth; edit it, not this file).
 #
 # - Aspect type `marginmaestro-governance`: owner, class, freshness, source and
@@ -11,9 +12,11 @@
 #   these entries.
 #
 # Cost: catalog metadata storage is free up to 1 MiB (monthly average), then
-# $2/GiB-month. ~21 small entries are a few KB: $0. Catalog API calls made by
+# $2/GiB-month. ~32 small entries are a few KB: $0. Catalog API calls made by
 # Terraform are free. No scans are created (Dataplex data-quality/profile
-# scans are billed per DCU and would target BigQuery, which is parked with G7).
+# scans are billed per DCU; the warehouse's quality checks are fail-loud code
+# in its loaders instead). BigQuery also auto-catalogs the warehouse tables as
+# system entries; these custom entries add the governance aspect to them.
 
 locals {
   catalog = yamldecode(file("${path.module}/../../docs/data_catalog.yaml"))
@@ -25,6 +28,22 @@ locals {
         title       = "Cloud SQL table ${name}"
         platform    = "Cloud SQL"
         resource    = "${google_sql_database_instance.main.name}/${google_sql_database.app.name}/public.${name}"
+        owner       = table.owner
+        description = table.description
+        class       = table.class
+        freshness   = table.freshness
+        source      = table.source
+        confidential_fields = sort([
+          for column, entry in table.columns : column if entry.class == "confidential"
+        ])
+      }
+    },
+    {
+      for name, table in local.catalog.warehouse_tables : "bigquery-${replace(name, "_", "-")}" => {
+        fqn         = "custom:marginmaestro.bigquery.${name}"
+        title       = "BigQuery table ${name}"
+        platform    = "BigQuery"
+        resource    = "${var.project_id}.${google_bigquery_dataset.analytics.dataset_id}.${name}"
         owner       = table.owner
         description = table.description
         class       = table.class

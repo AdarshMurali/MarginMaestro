@@ -1,0 +1,61 @@
+{
+  "description": "Instruments held by each book, with GICS sector from the S&P 500 snapshot.",
+  "kind": "dimension",
+  "partition_column": "book_key",
+  "partition_type": "BOOK",
+  "clustering": [
+    "ticker"
+  ],
+  "require_partition_filter": false,
+  "has_counterparty": false,
+  "schema": [
+    {
+      "name": "book_key",
+      "type": "INTEGER",
+      "mode": "REQUIRED",
+      "description": "Partition key: 0 = historical-sim, 1 = live"
+    },
+    {
+      "name": "book",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "live | historical-sim"
+    },
+    {
+      "name": "ticker",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Ticker (Yahoo Finance form)"
+    },
+    {
+      "name": "security",
+      "type": "STRING",
+      "mode": "NULLABLE",
+      "description": "Security name"
+    },
+    {
+      "name": "asset_class",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "equity | etf | crypto"
+    },
+    {
+      "name": "sector",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "GICS sector; ETF / Crypto for those asset classes"
+    },
+    {
+      "name": "sub_industry",
+      "type": "STRING",
+      "mode": "NULLABLE",
+      "description": "GICS sub-industry"
+    },
+    {
+      "name": "in_sp500",
+      "type": "BOOLEAN",
+      "mode": "REQUIRED",
+      "description": "In the S&P 500 snapshot"
+    }
+  ]
+}

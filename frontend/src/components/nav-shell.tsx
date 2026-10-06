@@ -25,6 +25,7 @@ const TABS: { href: string; label: string; isActive: (pathname: string) => boole
   { href: "/approvals", label: "Approvals & SLA", isActive: (p) => p === "/approvals" },
   { href: "/simulate", label: "Simulate Event", isActive: (p) => p === "/simulate" },
   { href: "/desk", label: "Ask the Desk", isActive: (p) => p === "/desk" },
+  { href: "/reports", label: "Reports", isActive: (p) => p === "/reports" },
 ];
 
 const NO_CHROME_ROUTES = new Set(["/", "/login", "/landing", "/landing-v3", "/logo-preview"]);

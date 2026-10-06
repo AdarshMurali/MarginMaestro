@@ -1,11 +1,13 @@
 import base64
 import binascii
 import hmac
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from functools import lru_cache
+from typing import TYPE_CHECKING, Literal, TypeVar
 
+import structlog
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
@@ -72,9 +74,11 @@ from api.schemas import (
     PriceRefreshResponse,
     PublicStatsResponse,
     PubSubPushEnvelope,
+    ReportsStatusResponse,
     SimulateEventRequest,
     SimulateEventResponse,
     SlaResponse,
+    WarehouseLoadResponse,
 )
 from api.simulate import trigger_simulation
 from api.whatsapp_webhook import WebhookDeps, WebhookPayload, process_webhook, verify_signature
@@ -90,8 +94,23 @@ from streaming.live_feed_publisher import publish_live_prices
 from streaming.market_feed import MarketDataUnavailableError
 from streaming.pubsub_dispatch import dispatch, live_graph_factory
 from streaming.schemas import MarketEventType
+from warehouse.reports import (
+    CollateralAdequacyReport,
+    ConcentrationReport,
+    ExposureTrendReport,
+    MarginCallPerformanceReport,
+    ReportAccessError,
+    ReportService,
+    StressBacktestReport,
+    visible_books,
+)
+from warehouse.schemas import Book, BookDateError
+
+if TYPE_CHECKING:
+    from warehouse.client import WarehouseClient
 
 configure_logging()
+logger = structlog.get_logger()
 
 
 @asynccontextmanager
@@ -163,6 +182,27 @@ def get_whatsapp_webhook_deps() -> WebhookDeps:
         internal_notifier=get_api_internal_notifier(),
         resume=resume_run,
     )
+
+
+def warehouse_enabled() -> bool:
+    return get_settings().warehouse == "bigquery"
+
+
+@lru_cache
+def get_warehouse_client() -> "WarehouseClient":
+    """One BigQuery client per process (MM-141/142), only when WAREHOUSE=bigquery."""
+    from warehouse.client import WarehouseClient
+
+    settings = get_settings()
+    if not settings.gcp_project_id:
+        raise HTTPException(status_code=503, detail="GCP_PROJECT_ID is not configured")
+    return WarehouseClient(settings.gcp_project_id, settings.warehouse_dataset)
+
+
+@lru_cache
+def get_report_service() -> ReportService:
+    """Report queries with a 10-minute in-process cache (MM-142)."""
+    return ReportService(get_warehouse_client())
 
 
 def approver_action(approver: str = Depends(require_approver)) -> str:
@@ -423,6 +463,87 @@ async def market_universe() -> MarketUniverseResponse:
     return MarketUniverseResponse(tickers=get_settings().market_universe_list)
 
 
+# --- Reports (MM-142): the BigQuery warehouse, pre-aggregated tables only --------
+
+BookParam = Literal["live", "historical-sim"]
+ReportT = TypeVar("ReportT")
+PeriodParam = Literal["3m", "1y", "5y"]
+
+
+def _caller_scope(identity: Identity) -> str:
+    session_factory = get_db_session_factory()
+    with session_factory() as lookup:
+        return scope_for(identity.role, identity.username, lookup)
+
+
+def _report_service() -> ReportService:
+    if not warehouse_enabled():
+        raise HTTPException(status_code=503, detail="The warehouse is not configured")
+    return get_report_service()
+
+
+def _report(
+    build: Callable[[ReportService, str, Book, str], ReportT],
+    identity: Identity,
+    book: str,
+    period: str,
+) -> ReportT:
+    """Runs one report as the caller: the RLS scope decides the counterparties
+    (and whether the simulated book is visible at all -- 403 if not)."""
+    service = _report_service()
+    try:
+        return build(service, _caller_scope(identity), Book(book), period)
+    except ReportAccessError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.get("/reports/status", response_model=ReportsStatusResponse)
+def reports_status(identity: Identity = Depends(require_user)) -> ReportsStatusResponse:
+    if not warehouse_enabled():
+        return ReportsStatusResponse(configured=False, books=[], scoped=False)
+    scope = _caller_scope(identity)
+    return ReportsStatusResponse(
+        configured=True,
+        books=[b.value for b in visible_books(scope)],
+        scoped=scope != "*",
+    )
+
+
+@app.get("/reports/exposure-trend", response_model=ExposureTrendReport)
+def report_exposure_trend(
+    book: BookParam = "live", period: PeriodParam = "1y", identity: Identity = Depends(require_user)
+) -> ExposureTrendReport:
+    return _report(ReportService.exposure_trend, identity, book, period)
+
+
+@app.get("/reports/collateral-adequacy", response_model=CollateralAdequacyReport)
+def report_collateral_adequacy(
+    book: BookParam = "live", period: PeriodParam = "3m", identity: Identity = Depends(require_user)
+) -> CollateralAdequacyReport:
+    return _report(ReportService.collateral_adequacy, identity, book, period)
+
+
+@app.get("/reports/concentration", response_model=ConcentrationReport)
+def report_concentration(
+    book: BookParam = "live", period: PeriodParam = "3m", identity: Identity = Depends(require_user)
+) -> ConcentrationReport:
+    return _report(ReportService.concentration, identity, book, period)
+
+
+@app.get("/reports/margin-call-performance", response_model=MarginCallPerformanceReport)
+def report_margin_call_performance(
+    book: BookParam = "live", period: PeriodParam = "1y", identity: Identity = Depends(require_user)
+) -> MarginCallPerformanceReport:
+    return _report(ReportService.margin_call_performance, identity, book, period)
+
+
+@app.get("/reports/stress-backtest", response_model=StressBacktestReport)
+def report_stress_backtest(
+    book: BookParam = "live", period: PeriodParam = "5y", identity: Identity = Depends(require_user)
+) -> StressBacktestReport:
+    return _report(ReportService.stress_backtest, identity, book, period)
+
+
 @app.post("/desk/chat", response_model=DeskChatResponse)
 def desk_chat(
     body: DeskChatRequest, identity: Identity = Depends(require_user)
@@ -529,11 +650,54 @@ def daily_margin_run() -> DailyMarginRunResponse:
                 [o.model_dump(mode="json") for o in outcomes],
             ),
         )
+    if warehouse_enabled():
+        _warehouse_load_after_daily_run()
     return DailyMarginRunResponse(
         event_id=impact.event_id,
         counterparties=len(impact.counterparty_ids),
         outcomes=[DailyRunOutcome.model_validate(o.model_dump()) for o in outcomes],
     )
+
+
+def _warehouse_load_after_daily_run() -> None:
+    """MM-141: the live book's end-of-day load runs right after the daily
+    margin run -- no extra Cloud Scheduler job (the free tier is three). Best
+    effort: a warehouse failure is logged and never fails the run; the
+    /internal/warehouse/daily-load endpoint re-runs it (idempotent)."""
+    from warehouse.live_load import load_live_day
+
+    try:
+        load_live_day(get_warehouse_client(), get_db_session_factory(), get_orchestrator_graph())
+    except Exception:  # see docstring: the margin run has already succeeded
+        logger.exception("warehouse_load_after_daily_run_failed")
+
+
+@app.post(
+    "/internal/warehouse/daily-load",
+    response_model=WarehouseLoadResponse,
+    dependencies=[Depends(require_internal_caller)],
+)
+def warehouse_daily_load(as_of: date | None = None) -> WarehouseLoadResponse:
+    """MM-141: loads the live book's end-of-day exposure, positions, prices,
+    recent margin calls and dimensions into BigQuery for `as_of` (default:
+    the latest day with official closes), then refreshes the report tables.
+    Idempotent per date. 503 when WAREHOUSE is not bigquery."""
+    from warehouse.client import WarehouseError
+    from warehouse.live_load import NoClosesError, load_live_day
+
+    if not warehouse_enabled():
+        raise HTTPException(status_code=503, detail="The warehouse is not configured")
+    try:
+        result = load_live_day(
+            get_warehouse_client(), get_db_session_factory(), get_orchestrator_graph(), as_of
+        )
+    except (NoClosesError, BookDateError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except WarehouseError as exc:
+        raise HTTPException(
+            status_code=503, detail=str(exc), headers={"Retry-After": "60"}
+        ) from exc
+    return WarehouseLoadResponse(as_of=result.as_of, rows=result.rows, skipped=result.skipped)
 
 
 @app.post(

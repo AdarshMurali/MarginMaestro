@@ -1,0 +1,68 @@
+{
+  "description": "Position x trading day: quantity, close and market value.",
+  "kind": "fact",
+  "partition_column": "as_of_date",
+  "partition_type": "DAY",
+  "clustering": [
+    "counterparty_id",
+    "ticker"
+  ],
+  "require_partition_filter": true,
+  "has_counterparty": true,
+  "schema": [
+    {
+      "name": "as_of_date",
+      "type": "DATE",
+      "mode": "REQUIRED",
+      "description": "Trading day (partition)"
+    },
+    {
+      "name": "book",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "live | historical-sim"
+    },
+    {
+      "name": "counterparty_id",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Counterparty id (CP-n live, SIM-nnnn simulated)"
+    },
+    {
+      "name": "position_id",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Position id"
+    },
+    {
+      "name": "ticker",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Instrument ticker (Yahoo Finance form)"
+    },
+    {
+      "name": "asset_class",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "equity | etf | crypto"
+    },
+    {
+      "name": "quantity",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "Signed quantity (confidential)"
+    },
+    {
+      "name": "close",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "Daily close (real, Yahoo Finance)"
+    },
+    {
+      "name": "market_value",
+      "type": "FLOAT",
+      "mode": "REQUIRED",
+      "description": "quantity x close (confidential)"
+    }
+  ]
+}

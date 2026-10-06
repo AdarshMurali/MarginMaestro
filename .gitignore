@@ -33,6 +33,8 @@ secrets/
 
 # ---- Data (synthetic/generated is regenerable; keep it out of git) ----
 data/generated/
+# MM-140: the backfill's cached Yahoo Finance closes (re-downloadable)
+data/warehouse_cache/
 data/*.duckdb
 *.sqlite
 chroma/

@@ -1,0 +1,61 @@
+{
+  "description": "Counterparties of both books (simulated names are clearly synthetic).",
+  "kind": "dimension",
+  "partition_column": "book_key",
+  "partition_type": "BOOK",
+  "clustering": [
+    "counterparty_id"
+  ],
+  "require_partition_filter": false,
+  "has_counterparty": true,
+  "schema": [
+    {
+      "name": "book_key",
+      "type": "INTEGER",
+      "mode": "REQUIRED",
+      "description": "Partition key: 0 = historical-sim, 1 = live"
+    },
+    {
+      "name": "book",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "live | historical-sim"
+    },
+    {
+      "name": "counterparty_id",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Counterparty id (CP-n live, SIM-nnnn simulated)"
+    },
+    {
+      "name": "name",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Legal name (confidential)"
+    },
+    {
+      "name": "type",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Bank | Hedge Fund | Asset Manager"
+    },
+    {
+      "name": "country",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "Jurisdiction"
+    },
+    {
+      "name": "tier",
+      "type": "STRING",
+      "mode": "REQUIRED",
+      "description": "standard | elite"
+    },
+    {
+      "name": "rating",
+      "type": "STRING",
+      "mode": "NULLABLE",
+      "description": "Current rating"
+    }
+  ]
+}

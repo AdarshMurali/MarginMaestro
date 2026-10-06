@@ -79,6 +79,12 @@ locals {
     LLM_DATA_CLASS_FILTER = "catalog"
     LINEAGE_EXPORTER      = var.lineage_exporter
     LINEAGE_LOCATION      = var.region
+
+    # G7 (ADR-0013): the BigQuery warehouse -- the live book's daily load after
+    # the margin run, and the /reports page (mm-api-sa: dataEditor on the
+    # dataset, jobUser, fine-grained reader; bigquery.tf).
+    WAREHOUSE         = var.warehouse
+    WAREHOUSE_DATASET = google_bigquery_dataset.analytics.dataset_id
   }
 }
 
