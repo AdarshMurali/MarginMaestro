@@ -5,7 +5,7 @@
 
 **An agentic, event-driven platform that automates the end-to-end margin call lifecycle — from market event to client notification, escalation, and audit — using LLM agent orchestration, a RAG pipeline over legal/policy documents, and a real-time streaming backbone.**
 
-> Status: ✅ **Live and deployed.** Backend on AWS (EC2 + Elastic IP), frontend on Vercel, relational store on Azure SQL. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phased plan and [`docs/PROGRESS.md`](docs/PROGRESS.md) for current state.
+> Status: ✅ **Live on Google Cloud.** API, MCP servers and event consumers on Cloud Run; Cloud SQL Postgres + pgvector; Gemini on Vertex AI; the "Ask the Desk" ADK agent on Agent Platform; frontend on Vercel. The earlier AWS (EC2) + Azure SQL deployment is paused and scheduled for decommissioning (Phase G9). See [`docs/gcp/GCP_ROADMAP.md`](docs/gcp/GCP_ROADMAP.md) and [`docs/gcp/GCP_PROGRESS.md`](docs/gcp/GCP_PROGRESS.md) for the GCP track, [`docs/ROADMAP.md`](docs/ROADMAP.md) / [`docs/PROGRESS.md`](docs/PROGRESS.md) for the original phases.
 
 ---
 
@@ -28,7 +28,7 @@ Sign in at [`/login`](https://marginmaestro.vercel.app/login) with one of the se
 
 Every page except the public landing page needs a login, and the backend scopes every read to the caller: on Postgres, **row-level security** in the database itself hides other analysts' counterparties (MM-106). The `approver`, `manager` and `auditor` see all counterparties.
 
-> This is a portfolio demo running on the project owner's own AWS/OpenAI/Slack accounts — please don't script/load-test it. A handful of clicks is exactly what it's for.
+> This is a portfolio demo running on the project owner's own Google Cloud/Slack/WhatsApp accounts — please don't script/load-test it. A handful of clicks is exactly what it's for.
 
 ### A five-minute walkthrough
 
@@ -66,8 +66,8 @@ Historically this is done with **spreadsheets, email, and phone calls**, and it 
 ## High-level architecture
 
 - **[`docs/architecture/functional-lifecycle.svg`](docs/architecture/functional-lifecycle.svg)** — the margin-call lifecycle as actually implemented in the LangGraph orchestrator: every node from `compute_exposure` through approval, notification, and SLA/escalation, color-coded by CLAUDE.md's golden rule (deterministic code vs. LLM reasoning/RAG vs. hybrid vs. the human-approval gate).
-- **[`docs/architecture/tech-architecture.svg`](docs/architecture/tech-architecture.svg)** — the real, currently-deployed infrastructure: AWS (EC2 + Elastic IP, Secrets Manager, S3, IAM), Vercel, Azure SQL, the CI/CD pipeline, and the third-party integrations (OpenAI, Slack, ServiceNow), with a clearly separated box for what's local-dev-only (Kafka/Redpanda, OTel/Prometheus/Grafana) and not part of the live deployment.
-- **[`docs/architecture/gcp-tech-architecture-blue.svg`](docs/architecture/gcp-tech-architecture-blue.svg)** and **[`gcp-tech-architecture-multicolor.svg`](docs/architecture/gcp-tech-architecture-multicolor.svg)** — the Google Cloud target architecture (the GCP track in [`docs/gcp/GCP_ROADMAP.md`](docs/gcp/GCP_ROADMAP.md)): Cloud Run services, Pub/Sub and Cloud Tasks, Gemini on Vertex AI with Agent Platform, Model Armor and Sensitive Data Protection, Cloud SQL + pgvector with row-level security, BigQuery and Dataplex, the security/operations layer, WhatsApp/Slack/ServiceNow, and the GitHub Actions → Docker Hub → Cloud Run (keyless WIF) deploy path. Same diagram in two icon styles: Google Cloud's official blue product icons, and its official four-colour core/category icons. PNG copies sit alongside each SVG.
+- **[`docs/architecture/tech-architecture.svg`](docs/architecture/tech-architecture.svg)** — the original (pre-GCP) deployment, now paused: AWS (EC2 + Elastic IP, Secrets Manager, S3, IAM), Vercel, Azure SQL, the CI/CD pipeline, and the third-party integrations (OpenAI, Slack, ServiceNow), with a clearly separated box for what's local-dev-only (Kafka/Redpanda, OTel/Prometheus/Grafana) and not part of the live deployment.
+- **[`docs/architecture/gcp-tech-architecture-blue.svg`](docs/architecture/gcp-tech-architecture-blue.svg)** and **[`gcp-tech-architecture-multicolor.svg`](docs/architecture/gcp-tech-architecture-multicolor.svg)** — the live Google Cloud architecture (the GCP track in [`docs/gcp/GCP_ROADMAP.md`](docs/gcp/GCP_ROADMAP.md)): Cloud Run services, Pub/Sub and Cloud Tasks, Gemini on Vertex AI with Agent Platform, Model Armor and Sensitive Data Protection, Cloud SQL + pgvector with row-level security, Dataplex (BigQuery is planned for Phase G7), the security/operations layer, WhatsApp/Slack/ServiceNow, and the GitHub Actions → Docker Hub → Cloud Run (keyless WIF) deploy path. Same diagram in two icon styles: Google Cloud's official blue product icons, and its official four-colour core/category icons. PNG copies sit alongside each SVG.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full written design, and [`docs/AGENT_ORCHESTRATION_FAQ.md`](docs/AGENT_ORCHESTRATION_FAQ.md) for which parts are deterministic code vs. LLM-driven, and what happens end-to-end when a real (not simulated) market move triggers a run.
 
@@ -75,24 +75,26 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full written design, 
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Agent orchestration | **LangGraph** | Explicit, auditable state-graph over agents |
-| LLM | **OpenAI `gpt-4o-mini`** | Usage-minimized; LLM used for *reasoning, retrieval, and drafting only*, never math (`LLM_PROVIDER=ollama` remains supported for anyone running on hardware where local inference is viable) |
-| Embeddings | **OpenAI `text-embedding-3-small`** | Query/document embeddings share one model |
-| RAG vector store | **ChromaDB** | Runs as a container alongside the API on the same EC2 instance |
-| Relational store | **Azure SQL** | Positions, ratings, audit log, users — the one piece deliberately kept outside AWS |
-| Streaming | **Kafka (Redpanda locally)** | Event backbone for the intended design; not part of the current live deployment (see the tech architecture diagram above) |
-| API | **FastAPI** | Async, auto OpenAPI, MCP-friendly |
-| Frontend | **Next.js on Vercel** | Real-time ops dashboard, git-linked to auto-deploy on push to `main` |
-| Tool interface | **MCP servers** | Market data, Slack, ServiceNow, RAG retriever exposed as MCP tools |
-| Notifications | **Slack API** | Client margin-call notices + SLA-met confirmations |
+| Agent orchestration | **LangGraph** (margin-call workflow) + **Google ADK** (desk assistant) | Fixed, auditable state-graph for the lifecycle on Cloud Run; a conversational ADK agent on Agent Platform for analyst Q&A (ADR-0019) |
+| LLM | **Gemini on Vertex AI** | Reasoning, retrieval and drafting only, never math; every call screened by **Model Armor** + in-code guardrails, with **Sensitive Data Protection** masking (OpenAI remains a supported fallback via `LLM_PROVIDER`) |
+| Embeddings | **Vertex AI text embeddings** | Query/document embeddings share one model |
+| RAG + relational store | **Cloud SQL Postgres + pgvector** | Positions, ratings, calls, audit log and RAG chunks in one database, with **row-level security** scoping every read to the analyst's counterparties; LangGraph checkpoints persisted here |
+| Documents | **Cloud Storage** | CSA, policy, dispute and escalation documents (30-day retention, scanned by SDP) |
+| Eventing | **Pub/Sub + Cloud Tasks + Cloud Scheduler** | Live price refresh, impact events, one SLA timer per call, the daily margin run |
+| API | **FastAPI on Cloud Run** | Scales to zero; IAM database login; OIDC for internal callers |
+| Frontend | **Next.js on Vercel** | Real-time ops dashboard and the "Ask the Desk" chat, git-linked to auto-deploy on push to `main` |
+| Agent platform | **Vertex AI Agent Runtime** | The desk assistant: Sessions + Memory Bank, `min_instances=0`; evaluated with **Gen AI evaluation** in CI |
+| Tool interface | **MCP servers on Cloud Run** | Read-only market data, CSA/policy search and margin-call status; private, invoked only by the desk agent |
+| Notifications | **WhatsApp Cloud API + Slack** | Client notices on WhatsApp (approved template, signed webhook for replies and delivery status); Slack for internal approvals, alerts and escalations |
 | Escalation | **ServiceNow** | Real incident opened when an SLA is breached (see ADR-0007) |
+| Governance | **Dataplex catalog + Data Lineage + Cloud Audit Logs** | Every table and document family catalogued and classified; lineage per margin call; data-access audit logs; append-only audit trail |
+| Observability | **Cloud Trace + Cloud Logging + Cloud Monitoring** | One trace per margin-call run; structured logs; incident alert |
 | Dev-story tracker | **Jira** | `MM-#` tickets for this project's own development — not an agent-facing tool |
-| Secrets/config | **AWS Secrets Manager** | One JSON secret per environment (`marginmaestro/<env>`); AWS Parameter Store remains available for non-secret config |
-| Compute | **AWS EC2 + Elastic IP** | Single instance running the API + ChromaDB via Docker Compose; admin access via SSM Session Manager, no SSH |
-| CI/CD | **GitHub Actions + Docker Hub** | Lint, test, coverage, quality gate, build, push |
+| Secrets/config | **Secret Manager** | One JSON secret per environment (`marginmaestro-<env>`) |
+| CI/CD | **GitHub Actions + Docker Hub → Cloud Run** | Lint, test, coverage, quality gate, security scans, build, push, and keyless (WIF) deploy on every merge to `main` |
 | Quality | **SonarCloud + pytest-cov** | Coverage + quality gate |
-| Security scanning | **CodeQL + Dependabot + secret scanning** | SAST on every push/PR + weekly; dependency CVE alerts with auto fix PRs; push protection blocks leaked secrets — free alternatives to Checkmarx / Black Duck (see ADR-0018) |
-| IaC | **Terraform** | AWS resources provisioned as code |
+| Security scanning | **CodeQL, Dependabot, secret scanning, pip-audit, gitleaks, Trivy, Checkov** | SAST, dependency CVEs, leaked secrets, image and IaC misconfiguration — free alternatives to Checkmarx / Black Duck (see ADR-0018) |
+| IaC | **Terraform** | `infra/gcp/` provisions the Google Cloud deployment (the original AWS stack lives in `infra/`) |
 
 ## Repository layout
 
@@ -106,7 +108,7 @@ MarginMaestro/
 ├── .gitignore
 ├── src/                       # Backend: agents, calc, streaming, rag, api, config, persistence
 ├── frontend/                  # Next.js dashboard (deployed to Vercel)
-├── infra/                     # Terraform (AWS) + Prometheus/Grafana provisioning
+├── infra/                     # Terraform: gcp/ (live) + the original AWS stack, Prometheus/Grafana provisioning
 └── docs/
     ├── ARCHITECTURE.md       # Lifecycle, agent mesh, streaming, data flow
     ├── AGENTS.md             # Each agent: responsibility, IO, tools
