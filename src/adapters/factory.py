@@ -177,6 +177,12 @@ def client_channel(settings: Settings) -> str:
     return _choice("CLIENT_NOTIFIER", settings.client_notifier, ("slack", "whatsapp"))
 
 
+def notice_pdf_enabled(settings: Settings) -> bool:
+    """WHATSAPP_NOTICE_PDF, validated: off (default) | on (MM-144). Only
+    meaningful with CLIENT_NOTIFIER=whatsapp."""
+    return _choice("WHATSAPP_NOTICE_PDF", settings.whatsapp_notice_pdf, ("off", "on")) == "on"
+
+
 def get_notifier(settings: Settings) -> Notifier:
     """The client-facing notifier. WhatsApp is an in-process adapter behind
     the approval gate, never an MCP tool (ADR-0016 amendment, 2026-10-05)."""

@@ -48,6 +48,17 @@ class BreachResult(BaseModel):
     call_amount: float
 
 
+class CollateralLine(BaseModel):
+    """Collateral held of one type at one haircut, as the breach check valued
+    it (MM-144: the PDF notice's breakdown). `value_after_haircut` is
+    value x (1 - haircut_pct), the same figure collateral held sums."""
+
+    collateral_type: str
+    value: float
+    haircut_pct: float
+    value_after_haircut: float
+
+
 class PriceMove(BaseModel):
     """One ticker's move as a market event saw it (MM-125): the price the
     shock was measured from (the prior close) and the price that crossed the

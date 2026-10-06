@@ -21,10 +21,12 @@ from adapters.factory import (
     get_internal_notifier,
     get_notifier,
     get_sla_scheduler,
+    notice_pdf_enabled,
 )
 from agents import internal_notifications as internal
 from agents.client_notice import build_client_notice, call_reference
 from agents.communication import (
+    NoticeDraftingError,
     NotificationResult,
     draft_margin_call_notice,
     draft_sla_met_notice,
@@ -38,6 +40,7 @@ from agents.escalation import (
     open_servicenow_incident,
     retrieve_escalation_procedure,
 )
+from agents.notice_pdf import NoticePdfError, NoticePdfInputs, prepare_notice_pdf
 from agents.state_serde import checkpoint_serializer
 from calc.breach import effective_threshold, evaluate_breach
 from calc.im import compute_initial_margin
@@ -50,6 +53,7 @@ from calc.materiality import (
 )
 from calc.models import (
     BreachResult,
+    CollateralLine,
     CSATerms,
     EventImpact,
     InitialMargin,
@@ -67,6 +71,7 @@ from observability.metrics import (
     observe_step,
 )
 from persistence.audit import record_audit_event
+from persistence.contacts import ContactRecipient, active_contact
 from persistence.db.checkpoint_saver import SqlCheckpointSaver
 from persistence.db.engine import get_session_factory
 from persistence.db.models import (
@@ -80,7 +85,7 @@ from persistence.db.models import (
 )
 from persistence.models import AssetClass, CounterpartyTier, Position, RatingGrade
 from ports.guardrail import GuardrailError
-from ports.notifier import ClientDeliveryError, Notifier
+from ports.notifier import ClientDeliveryError, ClientNotice, Notifier
 from ports.sla_scheduler import SlaScheduler
 from rag.models import Citation
 from streaming.event_agent import latest_close_before
@@ -151,6 +156,17 @@ class MarginCallState(BaseModel):
     call_rationale: str | None = None
     updated_by: list[str] = Field(default_factory=list)
 
+    # MM-144: what the breach check valued, kept for the PDF notice's
+    # breakdown (the notice must show the figures the call was raised on,
+    # not ones re-read at send time). `csa_collateral` is the CSA's eligible
+    # collateral -> haircut, from the same CSA RAG extraction as csa_terms.
+    # Runs checkpointed before MM-144 have none of these; the send step then
+    # reads them from the database (send_notification's `breakdown`).
+    collateral_held: float | None = None
+    effective_threshold: float | None = None
+    collateral_lines: list[CollateralLine] = Field(default_factory=list)
+    csa_collateral: dict[str, float] = Field(default_factory=dict)
+
     @property
     def current_trigger(self) -> ImpactSet:
         return self.trigger or self.impact
@@ -201,6 +217,34 @@ def _collateral_held(session: Session, counterparty_id: str) -> float:
         )
     ).all()
     return sum(value_usd * (1 - haircut_pct) for value_usd, haircut_pct in rows)
+
+
+def _collateral_lines(session: Session, counterparty_id: str) -> list[CollateralLine]:
+    """Collateral held per (type, haircut), for the PDF notice (MM-144). The
+    post-haircut values use _collateral_held's formula, so they add up to it."""
+    rows = session.execute(
+        select(
+            CollateralItemORM.collateral_type,
+            CollateralItemORM.value_usd,
+            CollateralItemORM.haircut_pct,
+        ).where(CollateralItemORM.counterparty_id == counterparty_id)
+    ).all()
+    grouped: dict[tuple[str, float], tuple[float, float]] = {}
+    for collateral_type, value_usd, haircut_pct in rows:
+        value, after = grouped.get((collateral_type, haircut_pct), (0.0, 0.0))
+        grouped[(collateral_type, haircut_pct)] = (
+            value + value_usd,
+            after + value_usd * (1 - haircut_pct),
+        )
+    return [
+        CollateralLine(
+            collateral_type=collateral_type,
+            value=value,
+            haircut_pct=haircut_pct,
+            value_after_haircut=after,
+        )
+        for (collateral_type, haircut_pct), (value, after) in sorted(grouped.items())
+    ]
 
 
 def compute_exposure(state: MarginCallState, session: Session, market_feed: MarketFeed) -> dict:
@@ -258,6 +302,7 @@ def fetch_csa_terms(state: MarginCallState, settings: Settings) -> dict:
             rating_triggers=result.rating_triggers,
         ),
         "csa_citations": result.citations,
+        "csa_collateral": dict(result.haircuts),
     }
 
 
@@ -298,10 +343,11 @@ def evaluate_breach_node(state: MarginCallState, session: Session) -> dict:
     current_rating = _current_rating(session, state.counterparty_id)
     result = evaluate_breach(exposure, collateral_held, state.csa_terms, current_rating)
     currency = state.csa_terms.currency
+    threshold = effective_threshold(state.csa_terms, current_rating)
     exposure_text = exposure_sentence(
         exposure,
         collateral_held,
-        effective_threshold(state.csa_terms, current_rating),
+        threshold,
         result.call_amount,
         currency,
         result.breached,
@@ -334,6 +380,9 @@ def evaluate_breach_node(state: MarginCallState, session: Session) -> dict:
         "counterparty_tier": _counterparty_tier(session, state.counterparty_id),
         "materiality": materiality,
         "call_rationale": rationale,
+        "collateral_held": collateral_held,
+        "effective_threshold": threshold,
+        "collateral_lines": _collateral_lines(session, state.counterparty_id),
     }
 
 
@@ -436,6 +485,8 @@ def send_notification(
     *,
     client_notifier: Notifier | None = None,
     counterparty_name: str | None = None,
+    recipient: ContactRecipient | None = None,
+    breakdown: "NoticeBreakdown | None" = None,
 ) -> dict:
     """Communication Agent (MM-41, docs/AGENTS.md #6): only reached after
     await_approval when the decision is "approved"/"adjusted" -- routing
@@ -444,10 +495,15 @@ def send_notification(
 
     CLIENT_NOTIFIER=slack (default): the LLM drafts around placeholders that
     code fills (MM-116) and the notice is posted to Slack, as before G6.
-    CLIENT_NOTIFIER=whatsapp (G6, MM-118): no LLM at all -- the approved
-    template's four variables are formatted by code (agents.client_notice).
-    A WhatsApp send that fails is not retried and not re-routed to Slack: the
-    result records the failure and the run goes straight to escalation."""
+    CLIENT_NOTIFIER=whatsapp (G6, MM-118): the approved template's four
+    variables are formatted by code (agents.client_notice), sent to
+    `recipient` -- the counterparty's contact (MM-143) -- or, when it has
+    none, to the WHATSAPP_RECIPIENT default. With WHATSAPP_NOTICE_PDF=on
+    (MM-144) the personalised PDF (agents.notice_pdf) goes as the v2
+    template's document; its covering paragraph is the only model-written
+    text. A WhatsApp send that fails -- or a PDF that can't be built -- is
+    not retried and not re-routed to Slack or to the v1 template: the result
+    records the failure and the run goes straight to escalation."""
     if state.breach_result is None or state.csa_terms is None:
         raise PricingError(
             "send_notification requires breach_result and csa_terms to already be set on state"
@@ -481,21 +537,70 @@ def send_notification(
         deadline=deadline,
         label=settings.client_notice_label,
     )
-    notifier = client_notifier or get_notifier(settings)
-    try:
-        receipt = notifier.send_notice(notice)
-    except ClientDeliveryError as exc:
+    # MM-143: the counterparty's contact, else the WHATSAPP_RECIPIENT default.
+    # Only the contact's id and version (and a masked number) are recorded.
+    routing: dict = (
+        {
+            "recipient_source": "contact",
+            "recipient_contact_id": recipient.contact_id,
+            "recipient_contact_version": recipient.version,
+            "recipient_masked": internal.mask_phone(recipient.phone),
+        }
+        if recipient is not None
+        else {
+            "recipient_source": "default",
+            "recipient_masked": (
+                internal.mask_phone(settings.whatsapp_recipient)
+                if settings.whatsapp_recipient
+                else None
+            ),
+        }
+    )
+    if recipient is not None:
+        notice = notice.model_copy(update={"recipient": recipient.phone})
+
+    def _failed(reason: str, **extra: object) -> dict:
         return {
             "notification_result": NotificationResult(
                 notice_text=notice.text,
                 channel="whatsapp",
                 delivery_status="failed",
                 reference=notice.reference,
+                **routing,
             ),
             "notification_sent_at": sent_at,
-            "delivery_failure": str(exc),
+            "delivery_failure": reason,
             "sla_outcome": "breached",
+            **extra,
         }
+
+    if notice_pdf_enabled(settings):
+        # MM-144: build the PDF before anything is sent. If it can't be built
+        # the call escalates; the v1 template is not sent instead (ADR-0016).
+        try:
+            document, filename = prepare_notice_pdf(
+                _notice_pdf_inputs(state, notice, call_amount, sent_at, breakdown), settings
+            )
+        except GuardrailError as exc:
+            verdict = getattr(exc, "verdict", None)
+            return _failed(
+                f"PDF notice not built: the guardrail blocked its covering paragraph ({exc})",
+                guardrail_blocked={
+                    "step": "send_notification",
+                    "error": str(exc),
+                    "guardrail": verdict.guardrail if verdict else None,
+                    "reasons": verdict.reasons if verdict else [],
+                },
+            )
+        except (NoticePdfError, NoticeDraftingError) as exc:
+            return _failed(f"PDF notice not built: {exc}")
+        notice = notice.model_copy(update={"document": document, "document_filename": filename})
+
+    notifier = client_notifier or get_notifier(settings)
+    try:
+        receipt = notifier.send_notice(notice)
+    except ClientDeliveryError as exc:
+        return _failed(str(exc))
     return {
         "notification_result": NotificationResult(
             notice_text=receipt.text,
@@ -503,9 +608,92 @@ def send_notification(
             message_id=receipt.message_id,
             delivery_status=receipt.status,
             reference=notice.reference,
+            template=receipt.template,
+            document_filename=notice.document_filename,
+            **routing,
         ),
         "notification_sent_at": sent_at,
     }
+
+
+def _notice_pdf_inputs(
+    state: MarginCallState,
+    notice: ClientNotice,
+    call_amount: float,
+    sent_at: datetime,
+    breakdown: "NoticeBreakdown | None",
+) -> NoticePdfInputs:
+    """The PDF's figures, all from the run's own calculation (MM-144)."""
+    assert state.breach_result is not None and state.csa_terms is not None  # caller guards
+    if state.variation_margin is None or state.initial_margin is None:
+        raise NoticePdfError("the run has no variation/initial margin to explain")
+    if breakdown is None:
+        if state.collateral_held is None or state.effective_threshold is None:
+            raise NoticePdfError("the run has no collateral/threshold breakdown")
+        breakdown = NoticeBreakdown(
+            collateral_lines=state.collateral_lines,
+            collateral_held=state.collateral_held,
+            effective_threshold=state.effective_threshold,
+        )
+    trigger = state.current_trigger
+    return NoticePdfInputs(
+        reference=notice.reference,
+        counterparty_id=state.counterparty_id,
+        counterparty_name=notice.counterparty_name,
+        currency=state.csa_terms.currency,
+        amount_called=call_amount,
+        computed_call=state.breach_result.call_amount,
+        deadline=notice.deadline,
+        issued_at=sent_at,
+        variation_margin=state.variation_margin,
+        initial_margin=state.initial_margin,
+        collateral_lines=breakdown.collateral_lines,
+        collateral_held=breakdown.collateral_held,
+        csa_terms=state.csa_terms,
+        effective_threshold=breakdown.effective_threshold,
+        csa_collateral=state.csa_collateral,
+        citations=state.csa_citations,
+        price_moves=trigger.price_moves,
+        event_impact=state.event_impact,
+        positions=state.portfolio_mtm.positions if state.portfolio_mtm else [],
+        rationale=state.call_rationale,
+    )
+
+
+class NoticeBreakdown(BaseModel):
+    """Collateral and threshold for the PDF notice of a run checkpointed
+    before MM-144 (its state has neither): read at send time instead."""
+
+    collateral_lines: list[CollateralLine]
+    collateral_held: float
+    effective_threshold: float
+
+
+def _breakdown_at_send(session: Session, state: MarginCallState) -> NoticeBreakdown | None:
+    """NoticeBreakdown for a pre-MM-144 run, from the database now."""
+    if state.csa_terms is None:
+        return None
+    lines = _collateral_lines(session, state.counterparty_id)
+    return NoticeBreakdown(
+        collateral_lines=lines,
+        collateral_held=_collateral_held(session, state.counterparty_id),
+        effective_threshold=effective_threshold(
+            state.csa_terms, _current_rating(session, state.counterparty_id)
+        ),
+    )
+
+
+def _recipient_text(notification: NotificationResult) -> str:
+    """Who an internal post says the notice went to -- masked (MM-143)."""
+    who = (
+        "the counterparty's contact"
+        if notification.recipient_source == "contact"
+        else "the default recipient"
+    )
+    text = f"{who} ({notification.recipient_masked or 'masked'})"
+    if notification.document_filename:
+        text += f", with the PDF notice {notification.document_filename}"
+    return text
 
 
 def send_sla_met_notification(
@@ -1123,6 +1311,13 @@ def build_orchestrator_graph(
         )
         whatsapp = client_channel(settings) == "whatsapp"
         thread_id = thread_id_for(state.impact, state.counterparty_id)
+        recipient: ContactRecipient | None = None
+        breakdown: NoticeBreakdown | None = None
+        if whatsapp:
+            with session_factory() as session:
+                recipient = active_contact(session, state.counterparty_id)
+                if notice_pdf_enabled(settings) and state.collateral_held is None:
+                    breakdown = _breakdown_at_send(session, state)
         with observe_step(tracer, "send_notification"):
             with _guardrail_audit(state, "send_notification"):
                 result = send_notification(
@@ -1132,13 +1327,18 @@ def build_orchestrator_graph(
                     counterparty_name=(
                         _counterparty_name(state.counterparty_id) if whatsapp else None
                     ),
+                    recipient=recipient,
+                    breakdown=breakdown,
                 )
+            blocked = result.pop("guardrail_blocked", None)
             notification: NotificationResult = result["notification_result"]
             payload: dict = {"notification_result": notification.model_dump(mode="json")}
             if whatsapp:
                 # The webhook maps replies quoting this message back to the call.
                 payload["thread_id"] = thread_id
             with session_factory() as session:
+                if blocked is not None:  # MM-144: the PDF's covering paragraph
+                    _audit(session, state, "guardrail_blocked", blocked)
                 _audit(session, state, "send_notification", payload)
                 if result.get("delivery_failure"):
                     _audit(
@@ -1186,6 +1386,7 @@ def build_orchestrator_graph(
                     ),
                     "WhatsApp",
                     notification.message_id or "",
+                    recipient=_recipient_text(notification),
                 ),
             )
         _schedule_sla_check({**state.model_dump(), **result}, log)

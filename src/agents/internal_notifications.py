@@ -99,11 +99,19 @@ def manager_approval_requested(
 
 
 def client_notified(
-    reference: str, counterparty: str, amount: str, deadline: str, channel: str, message_id: str
+    reference: str,
+    counterparty: str,
+    amount: str,
+    deadline: str,
+    channel: str,
+    message_id: str,
+    recipient: str | None = None,
 ) -> str:
+    """`recipient` says who it went to, with the number already masked (MM-143)."""
+    sent_to = f" Sent to {recipient}." if recipient else ""
     return (
         f":outbox_tray: Client notified on {channel} -- margin call {reference} for "
-        f"{counterparty}: {amount}, due by {deadline}. Accepted by the provider "
+        f"{counterparty}: {amount}, due by {deadline}.{sent_to} Accepted by the provider "
         f"(message {message_id}); delivery is confirmed by the webhook."
     )
 

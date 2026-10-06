@@ -29,6 +29,7 @@ from persistence.db.models import (
     CheckpointORM,
     CheckpointWriteORM,
     CollateralItemORM,
+    CounterpartyContactORM,
     CounterpartyORM,
     PortfolioORM,
     PositionORM,
@@ -54,6 +55,10 @@ TEST_ROWS = {
     "ratings": "SELECT counterparty_id FROM ratings WHERE id LIKE 'RLS-%'",
     "collateral_items": "SELECT counterparty_id FROM collateral_items WHERE id LIKE 'RLS-%'",
     "tickets": "SELECT counterparty_id FROM tickets WHERE external_ref = 'mm107'",
+    # MM-143: contacts (phone numbers) are counterparty-scoped too.
+    "counterparty_contacts": (
+        "SELECT counterparty_id FROM counterparty_contacts WHERE counterparty_id LIKE 'RLS-%'"
+    ),
     "audit_log": (
         "SELECT counterparty_id FROM audit_log "
         f"WHERE correlation_id = '{CORRELATION}' AND counterparty_id IS NOT NULL"
@@ -104,6 +109,9 @@ def _cleanup(session: Session) -> None:
     )
     session.execute(delete(UserORM).where(UserORM.username == "mm107-analyst"))
     session.execute(delete(TicketORM).where(TicketORM.external_ref == "mm107"))
+    session.execute(
+        delete(CounterpartyContactORM).where(CounterpartyContactORM.counterparty_id.like("RLS-%"))
+    )
     session.execute(delete(PositionORM).where(PositionORM.id.like("RLS-%")))
     for model in (PortfolioORM, RatingORM, CollateralItemORM):
         session.execute(delete(model).where(model.id.like("RLS-%")))
@@ -135,6 +143,14 @@ def seeded(factory) -> Iterator[None]:
                     ),
                     TicketORM(
                         counterparty_id=cp, status="open", external_ref="mm107", created_at=now
+                    ),
+                    CounterpartyContactORM(
+                        counterparty_id=cp,
+                        contact_name=f"Contact {cp}",
+                        channel="whatsapp",
+                        phone_e164="+15550100000",
+                        active=True,
+                        updated_at=now.replace(tzinfo=None),
                     ),
                     AuditLogORM(
                         correlation_id=CORRELATION,

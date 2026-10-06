@@ -1,8 +1,11 @@
 """G6 end to end on the real graph (SQLite): an approved call goes out on
 WhatsApp (MM-118), the webhook resolves or escalates it (MM-133), and Slack
-gets the internal posts once each (MM-134). The LLM is never called in
-WhatsApp mode, so nothing here mocks a draft."""
+gets the internal posts once each (MM-134). MM-143 routes notices to the
+counterparty's contact; MM-144 attaches the personalised PDF, whose covering
+paragraph is the only LLM call in WhatsApp mode (mocked here)."""
 
+import json
+import re
 from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
@@ -16,14 +19,18 @@ from agents.escalation import IncidentResult
 from agents.internal_notifications import InternalNotifier
 from agents.orchestrator import (
     MarginCallState,
+    _breakdown_at_send,
     build_orchestrator_graph,
     resume_run,
+    send_notification,
     start_run,
     thread_id_for,
 )
 from api.whatsapp_webhook import WebhookDeps, WebhookPayload, process_webhook
+from calc.models import BreachResult, CSATerms
 from config.settings import Settings
 from persistence.audit import list_audit_events
+from persistence.contacts import remove_contact, set_contact
 from persistence.db.models import (
     AuditLogORM,
     Base,
@@ -34,9 +41,10 @@ from persistence.db.models import (
     PriceHistoryORM,
     ReferenceRateORM,
 )
-from ports.guardrail import GuardrailUnavailable, Verdict
+from ports.guardrail import GuardrailBlocked, GuardrailUnavailable, Verdict
 from ports.notifier import ClientDeliveryError, ClientNotice, DeliveryReceipt
-from rag.models import CSATermsResult
+from rag.models import Citation, CSATermsResult
+from rag.retriever import RetrievedChunk
 from streaming.market_feed import PriceQuote
 from streaming.schemas import ImpactSet, MarketEventType
 
@@ -593,3 +601,253 @@ def test_button_quoting_an_unknown_message_is_still_just_a_reply(run, session_fa
     assert (
         graph.get_state({"configurable": {"thread_id": THREAD}}).values.get("sla_outcome") is None
     )
+
+
+# --- MM-143: per-counterparty contacts -------------------------------------------------
+
+CONTACT = "+447700900123"  # fictional (Ofcom drama range)
+CONTACT_DIGITS = "447700900123"
+
+
+def _set_contact(session_factory, number: str = CONTACT) -> None:
+    with session_factory() as session:
+        set_contact(session, "CP-1", "Jane Doe", number)
+
+
+def _audit_text(session_factory) -> str:
+    with session_factory() as session:
+        rows = session.execute(select(AuditLogORM)).scalars().all()
+    return json.dumps([r.payload for r in rows])
+
+
+def test_notice_goes_to_the_counterpartys_contact_and_only_its_tap_counts(run, session_factory):
+    _set_contact(session_factory)
+    graph, whatsapp = run["make"]()
+
+    approved = _to_sla_step(graph)
+
+    assert whatsapp.notices[0].recipient == CONTACT
+    result = approved["notification_result"]
+    assert result.recipient_source == "contact"
+    assert result.recipient_masked == "+…0123"
+    assert result.recipient_contact_id is not None and result.recipient_contact_version
+    # The number is never stored or posted: audit, checkpoint state, Slack.
+    assert CONTACT_DIGITS not in _audit_text(session_factory)
+    assert CONTACT_DIGITS not in result.model_dump_json()
+    assert any("the counterparty's contact (+…0123)" in p for p in run["posts"])
+    assert not any(CONTACT_DIGITS in p for p in run["posts"])
+
+    deps = _deps(graph, session_factory, run["posts"])
+    assert process_webhook(_ack(message_id="wamid.in.a"), deps) == ["ack_ignored"]  # default no.
+    assert process_webhook(_ack(message_id="wamid.in.b", sender=CONTACT_DIGITS), deps) == [
+        "acknowledged"
+    ]
+    ignored = _audit_text(session_factory)
+    assert "the sender is not the contact the notice was sent to" in ignored
+    assert CONTACT_DIGITS not in ignored
+
+
+def test_unmapped_counterparty_uses_the_default_recipient(run):
+    graph, whatsapp = run["make"]()
+
+    result = _to_sla_step(graph)["notification_result"]
+
+    assert whatsapp.notices[0].recipient is None  # the adapter uses WHATSAPP_RECIPIENT
+    assert result.recipient_source == "default"
+    assert result.recipient_masked == "+…0999"
+    assert any("the default recipient (+…0999)" in p for p in run["posts"])
+
+
+def test_ack_after_the_contact_changed_is_ignored(run, session_factory):
+    _set_contact(session_factory)
+    graph, _ = run["make"]()
+    _to_sla_step(graph)
+    _set_contact(session_factory, "+447700900456")  # edited after the send
+    deps = _deps(graph, session_factory, [])
+
+    old = process_webhook(_ack(message_id="wamid.in.c", sender=CONTACT_DIGITS), deps)
+    new = process_webhook(_ack(message_id="wamid.in.d", sender="447700900456"), deps)
+
+    assert old == new == ["ack_ignored"]
+    assert "has changed or been removed since" in _audit_text(session_factory)
+
+
+def test_ack_after_the_contact_was_removed_is_ignored(run, session_factory):
+    _set_contact(session_factory)
+    graph, _ = run["make"]()
+    _to_sla_step(graph)
+    with session_factory() as session:
+        remove_contact(session, "CP-1")
+
+    outcome = process_webhook(
+        _ack(sender=CONTACT_DIGITS), _deps(graph, session_factory, run["posts"])
+    )
+
+    assert outcome == ["ack_ignored"]
+
+
+# --- MM-144: the personalised PDF notice ------------------------------------------------
+
+COVER = (
+    "Margin call {REFERENCE} for {COUNTERPARTY}: this notice explains how {CALL_AMOUNT} "
+    "was calculated. Please transfer eligible collateral by {DEADLINE} and tap Acknowledge."
+)
+
+
+class ScriptedLLM:
+    def __init__(self, *drafts: str) -> None:
+        self._drafts = list(drafts)
+        self.requests: list[str] = []
+
+    def complete(self, system: str, user: str) -> str | None:
+        self.requests.append(user)
+        return self._drafts.pop(0)
+
+    def parse(self, system, user, schema):  # pragma: no cover - not used
+        raise NotImplementedError
+
+
+class BlockingLLM(ScriptedLLM):
+    def complete(self, system: str, user: str) -> str | None:
+        raise GuardrailBlocked(
+            "response", Verdict(allowed=False, guardrail="model_armor", reasons=["jailbreak"])
+        )
+
+
+def _clause_chunks() -> list[RetrievedChunk]:
+    return [
+        RetrievedChunk(
+            text=f"## {section}\n\n{text}",
+            source_file="csa/CP-1.md",
+            doc_type="csa",
+            counterparty_id="CP-1",
+            effective_date="2026-08-16",
+            section=section,
+            distance=0.1,
+        )
+        for section, text in (
+            ("Rounding", "Delivery Amounts are not rounded."),
+            ("Dispute Resolution", "Notify the Valuation Agent before the deadline."),
+        )
+    ]
+
+
+def _pdf_text(pdf: bytes) -> str:
+    def unescape(match: re.Match[bytes]) -> bytes:
+        token = match.group(1)
+        return bytes([int(token, 8)]) if len(token) == 3 else token
+
+    return "\n".join(
+        re.sub(rb"\\([0-7]{3}|.)", unescape, m.group(1)).decode("cp1252")
+        for m in re.finditer(rb"\(((?:\\.|[^\\)])*)\) Tj", pdf)
+    )
+
+
+def test_pdf_notice_carries_the_calculation_and_the_v2_ack_works(run, session_factory):
+    llm = ScriptedLLM(COVER)
+    graph, whatsapp = run["make"](settings=_settings(whatsapp_notice_pdf="on"))
+    csa = _csa().model_copy(
+        update={"citations": [Citation(source_file="csa/CP-1.md", section="Threshold")]}
+    )
+    with (
+        patch("agents.orchestrator.answer_csa_terms", return_value=csa),
+        patch("agents.notice_pdf.get_llm", return_value=llm),
+        patch("agents.notice_pdf.retrieve", return_value=_clause_chunks()),
+    ):
+        approved = _to_sla_step(graph)
+
+    notice = whatsapp.notices[0]
+    reference = call_reference(THREAD)
+    assert notice.document_filename == f"{reference}.pdf"
+    text = _pdf_text(notice.document or b"")
+    values = graph.get_state({"configurable": {"thread_id": THREAD}}).values
+    # Figures from the run's own state, formatted by code.
+    assert notice.amount in text
+    assert f"USD {values['variation_margin'].mtm_today:,.2f}" in text
+    assert f"USD {values['initial_margin'].initial_margin:,.2f}" in text
+    assert "USD 1,000.00" in text and "USD 10,000.00" in text  # threshold, MTA
+    assert "Source: csa/CP-1.md, section 'Threshold'" in text
+    assert "Delivery Amounts are not rounded." in text
+    assert "(Test message - synthetic data)" in text
+    # The model saw placeholders only.
+    assert len(llm.requests) == 1 and not re.search(r"\d", llm.requests[0])
+    result = approved["notification_result"]
+    assert result.document_filename == f"{reference}.pdf"
+    run["draft"].assert_not_called()
+
+    deps = _deps(graph, session_factory, run["posts"])
+    assert process_webhook(_ack(), deps) == ["acknowledged"]  # same button as v1
+    assert any(f"with the PDF notice {reference}.pdf" in p for p in run["posts"])
+
+
+def test_pdf_blocked_by_the_guardrail_escalates_and_sends_nothing(run, session_factory):
+    graph, whatsapp = run["make"](settings=_settings(whatsapp_notice_pdf="on"))
+    with (
+        patch("agents.notice_pdf.get_llm", return_value=BlockingLLM()),
+        patch("agents.notice_pdf.retrieve", return_value=[]),
+    ):
+        result = _to_sla_step(graph)
+
+    assert whatsapp.notices == []  # not the PDF, and not the v1 template instead
+    assert "__interrupt__" not in result
+    assert result["sla_outcome"] == "breached"
+    assert "guardrail blocked" in result["delivery_failure"]
+    assert result["escalation_result"].incident_number == "INC0010001"
+    events = _events(session_factory)
+    assert "guardrail_blocked" in events and "client_notification_failed" in events
+    assert any("NOT delivered" in p for p in run["posts"])
+
+
+def test_unusable_pdf_draft_escalates(run):
+    llm = ScriptedLLM("Pay USD 5 now {REFERENCE}", "still no placeholders")
+    graph, whatsapp = run["make"](settings=_settings(whatsapp_notice_pdf="on"))
+    with (
+        patch("agents.notice_pdf.get_llm", return_value=llm),
+        patch("agents.notice_pdf.retrieve", return_value=[]),
+    ):
+        result = _to_sla_step(graph)
+
+    assert whatsapp.notices == []
+    assert result["delivery_failure"].startswith("PDF notice not built: Unusable")
+    assert result["escalation_result"] is not None
+
+
+def test_pdf_retrieval_failure_escalates(run):
+    graph, whatsapp = run["make"](settings=_settings(whatsapp_notice_pdf="on"))
+    with patch("agents.notice_pdf.retrieve", side_effect=ConnectionError("store down")):
+        result = _to_sla_step(graph)
+
+    assert whatsapp.notices == []
+    assert "CSA clauses could not be retrieved" in result["delivery_failure"]
+
+
+def test_pdf_for_a_run_checkpointed_before_mm144_reads_the_breakdown_at_send(session_factory):
+    state = _state().model_copy(
+        update={
+            "csa_terms": CSATerms(threshold=1_000.0, mta=10_000.0),
+            "breach_result": BreachResult(breached=True, call_amount=5.0),
+        }
+    )
+    with session_factory() as session:
+        breakdown = _breakdown_at_send(session, state)
+
+    assert breakdown is not None
+    assert breakdown.collateral_held == 0 and breakdown.effective_threshold == 1_000.0
+    assert [line.collateral_type for line in breakdown.collateral_lines] == ["cash"]
+    with session_factory() as session:
+        assert _breakdown_at_send(session, _state()) is None  # no CSA terms yet
+
+
+def test_pdf_needs_the_runs_margin_figures(run):
+    state = _state().model_copy(
+        update={
+            "csa_terms": CSATerms(threshold=1_000.0, mta=10_000.0),
+            "breach_result": BreachResult(breached=True, call_amount=50_000.0),
+        }
+    )
+
+    result = send_notification(
+        state, _settings(whatsapp_notice_pdf="on"), client_notifier=FakeWhatsApp()
+    )
+
+    assert "no variation/initial margin" in result["delivery_failure"]

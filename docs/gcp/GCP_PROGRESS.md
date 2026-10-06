@@ -33,8 +33,8 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | **Done** (live run on GCP comes with G5) |
 | G5 | MM-92 | Agent Platform desk assistant, Cloud Run deployment, observability | In progress (MM-123, 124, 126, 127 done; MM-128 … 132 planned) |
-| G6 | MM-93 | WhatsApp client notifications | Code done (MM-118, MM-133, MM-134; one PR). Then: secrets script, Meta webhook setup, flip `client_notifier` |
-| G7 | MM-94 | BigQuery finance warehouse | Code done (MM-139..142; one PR). Then: Terraform apply, backfill, verify |
+| G6 | MM-93 | WhatsApp client notifications | Live (MM-118, MM-133, MM-134). **G6b code done** (MM-143 contacts, MM-144 PDF notice; one PR): migration, contacts and the v2 template approval pending |
+| G7 | MM-94 | BigQuery finance warehouse | Applied 2026-10-06 (masking off: needs an organization); 5-year backfill running; verify + reports next |
 | G8 | MM-95 | Data governance (Dataplex, classification, lineage, audit, retention) | Code done without BigQuery (MM-135, 136, 137; one PR). Then: migration on Cloud SQL, Terraform apply |
 | G9 | MM-96 | Cut-over & AWS/Azure decommission | Not started |
 | G10 | MM-97 | Month-2 cost review & free-fallback swaps | Not started |
@@ -48,6 +48,51 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-06 — MM-143 / MM-144: Per-counterparty WhatsApp contacts and the personalised PDF notice (Phase G6b) (code done; migration, contacts and template approval pending)
+- **Done:**
+  - **MM-143, contacts.**
+    - Table `counterparty_contacts` (ORM `CounterpartyContactORM`, migration `f2a9c4e7b318`, both dialects; RLS policy `counterparty_scope` on Postgres).
+    - `persistence/contacts.py`: E.164 validation, `active_contact`, `contact_phone_if_unchanged`, set/list/remove, and the admin CLI. The CLI reads the number twice from a hidden prompt and prints only its last two digits.
+    - Routing in `send_notification`: the counterparty's active contact, else the `WHATSAPP_RECIPIENT` default. `NotificationResult` records `recipient_source`, the contact's id and version, and a masked number (last four digits). The internal "client notified" Slack post says who it went to, masked.
+    - Webhook: an Acknowledge counts only from the number the notice went to, while that contact is unchanged since the send.
+    - Catalog: `counterparty_contacts` added; `phone_e164` and `contact_name` are `confidential`, `llm: deny` (a `+`-prefixed E.164 number blocks a prompt).
+  - **MM-144, PDF notice** (`WHATSAPP_NOTICE_PDF=off|on`, default `off`; `WHATSAPP_PDF_TEMPLATE_NAME=margin_call_notice_v2`).
+    - `agents/notice_pdf.py`: header, covering paragraph, "How this call was calculated", "Your CSA terms" with citations, synthetic label on every page. `agents/pdf_writer.py`: dependency-free PDF writer (checked with pypdf in strict mode, outside the repo).
+    - The breach check now stores `collateral_held`, `effective_threshold` and `collateral_lines`, and the CSA step stores `csa_collateral` (eligible collateral → haircut, from the same extraction). A pre-MM-144 run reads them at send time.
+    - Covering paragraph: Gemini 2.5 Flash with placeholders only, validated and filled by code (`communication.draft_with_placeholders`, now with a system-prompt parameter), screened by the guardrail.
+    - Rounding, settlement timing and dispute resolution are quoted verbatim from the counterparty's CSA (one retrieval, no LLM). The synthetic CSA corpus gained those three sections (`rag/csa_corpus.py`, `data/documents/csa/*.md`).
+    - `WhatsAppNotifier`: `POST /{phone_number_id}/media` (multipart, `application/pdf`), then `margin_call_notice_v2` with the DOCUMENT header, the same four body variables and the Acknowledge button. `DeliveryReceipt.template` records the template.
+    - Failure: PDF not built (retrieval, unusable draft, guardrail block) or upload failed → nothing sent, call escalates; a guardrail block is audited as `guardrail_blocked`. No fallback to v1.
+- **Decisions:** ADR-0016 amendment (2026-10-06).
+  - Unmapped counterparties fall back to `WHATSAPP_RECIPIENT`; the send records which was used.
+  - The audit trail holds the contact's id and version, never the number, so an Acknowledge is checked against the contact row as it was at send time.
+  - `remove` deletes the row (data minimisation).
+  - PDF failure escalates instead of downgrading to v1.
+  - Hand-written PDF writer instead of reportlab (no new dependency).
+  - The three new CSA clauses describe what the code does (no rounding, the notice's deadline, disputes to a person); calc is unchanged.
+- **Tests:** 1454 pass (`tests/unit`); coverage 98% overall (`persistence/contacts.py` 100%, `agents/notice_pdf.py` 100%, `agents/pdf_writer.py` 100%, `adapters/whatsapp_adapter.py` 100%). New suites:
+  - `test_contacts.py`: validation, masking, versions, routing, CLI (hidden prompt, two digits only).
+  - `test_notice_pdf.py`: figures from code, citations, missing clauses, labels on every page, no phone numbers, placeholder drafting with a mocked LLM, retry then fail loud, guardrail block, retrieval, file structure.
+  - `test_whatsapp_adapter.py`: upload and v2 send request shapes (mocked httpx), upload failure, missing media id, PDF mode off.
+  - `test_whatsapp_flow.py`: contact routing and ack from the contact only, contact changed or removed, the PDF on the real graph with the v2 ack, guardrail block / unusable draft / retrieval failure escalate and send nothing.
+  - `tests/integration/test_rls_live.py` covers `counterparty_contacts` (runs in CI's `migrations` job).
+  - ruff, black and mypy are clean; `terraform fmt` is clean.
+- **Changed:**
+  - **New:** `src/persistence/contacts.py`, `src/agents/{notice_pdf,pdf_writer}.py`, `migrations/versions/f2a9c4e7b318_counterparty_contacts.py`, `tests/unit/{test_contacts,test_notice_pdf}.py`.
+  - **Modified:** `src/persistence/db/models.py`, `src/calc/models.py` (`CollateralLine`), `src/agents/{orchestrator,communication,internal_notifications}.py`, `src/adapters/{whatsapp_adapter,factory}.py`, `src/api/whatsapp_webhook.py`, `src/ports/notifier.py`, `src/config/settings.py`, `src/rag/csa_corpus.py`, `data/documents/csa/*.md`, `docs/data_catalog.yaml`, `infra/gcp/{cloud_run,variables}.tf`, `.env.example`, the tests above, ADR-0016, `GCP_ROADMAP.md`.
+- **Terraform (not applied):** `var.whatsapp_notice_pdf` (default `off`) and `var.whatsapp_pdf_template_name` → API env `WHATSAPP_NOTICE_PDF`, `WHATSAPP_PDF_TEMPLATE_NAME`. No new resources, except one Dataplex catalog entry for the new table (generated from the catalog YAML, free).
+- **Cost impact:** about $0. With the PDF on, each approved call adds one Gemini 2.5 Flash call (~300 input + ~150 output tokens, about $0.0005) and one query embedding (negligible). Media uploads and template sends are free on the test number.
+- **Known issues / tech debt:**
+  - The documents bucket has a 30-day retention policy (G8), so the changed CSA files can't overwrite the uploaded ones until the originals are 30 days old (around 2026-10-31), unless the unlocked policy is shortened first. Until they are re-uploaded and re-ingested, the PDF says "Not stated in the CSA on file" for rounding, settlement timing and dispute resolution.
+  - Template v2 (`4757283454501358`) is pending Meta review; the PDF stays off until it is approved.
+  - The migration was not run on Cloud SQL (it needs the database owner).
+- **Next step (user):**
+  1. Run the migration on Cloud SQL as the database owner through the Auth Proxy: `alembic upgrade head` (to `f2a9c4e7b318`).
+  2. In the Meta app, add and verify up to five recipient numbers (test-number limit).
+  3. Map each counterparty: `python -m persistence.contacts set --counterparty CP-n --name "..."` (pointed at Cloud SQL; the number is typed at the hidden prompt). Unmapped counterparties keep using `WHATSAPP_RECIPIENT`.
+  4. When Meta shows `margin_call_notice_v2` as APPROVED, set `whatsapp_notice_pdf = "on"` and apply after CD has deployed this image.
+  5. Optional: re-upload and re-ingest the CSA documents (`python -m rag.gcs_documents data/documents`, then `python -m rag.ingest`) once the retention policy allows.
 
 ### 2026-10-06 — MM-139 / MM-140 / MM-141 / MM-142: BigQuery finance warehouse (Phase G7) (code done; Terraform apply, backfill and verification pending)
 - **Done:**

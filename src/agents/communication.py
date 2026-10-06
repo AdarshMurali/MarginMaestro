@@ -13,6 +13,7 @@ one."""
 
 import re
 from datetime import UTC, datetime
+from typing import Literal
 
 from openai import OpenAI
 from pydantic import BaseModel
@@ -50,19 +51,20 @@ def _validate_draft(draft: str, allowed: set[str], required: set[str]) -> str | 
     return None
 
 
-def _draft_with_placeholders(
+def draft_with_placeholders(
     llm: LLMClient,
     request: str,
     values: dict[str, str],
     required: set[str],
     what: str,
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> str:
     """Ask for a draft, validate it (one retry naming the problem), then fill
     in the placeholders. Fails loud -- an unusable draft is never sent."""
     prompt = request
     problem: str | None = "empty draft"
     for _ in range(2):
-        text = (llm.complete(SYSTEM_PROMPT, prompt) or "").strip()
+        text = (llm.complete(system_prompt, prompt) or "").strip()
         problem = _validate_draft(text, set(values), required) if text else "empty draft"
         if problem is None:
             return _PLACEHOLDER.sub(lambda m: values[m.group(1)], text)
@@ -97,6 +99,17 @@ class NotificationResult(BaseModel):
     message_id: str | None = None
     delivery_status: str = "sent"
     reference: str | None = None
+    # MM-143: who the WhatsApp notice went to -- the counterparty's contact
+    # (its id and version: an Acknowledge only counts from that contact while
+    # it is unchanged) or the WHATSAPP_RECIPIENT default. The number itself is
+    # never stored; `recipient_masked` keeps the last four digits.
+    recipient_source: Literal["contact", "default"] | None = None
+    recipient_contact_id: int | None = None
+    recipient_contact_version: str | None = None
+    recipient_masked: str | None = None
+    # MM-144: the WhatsApp template used and the PDF notice's file name.
+    template: str | None = None
+    document_filename: str | None = None
 
 
 def format_deadline(deadline: datetime) -> str:
@@ -150,7 +163,7 @@ def draft_margin_call_notice(
         )
         values["RATIONALE"] = rationale
         required.add("RATIONALE")
-    return _draft_with_placeholders(
+    return draft_with_placeholders(
         llm, request, values, required, f"margin call notice for {counterparty_id}"
     )
 
@@ -178,7 +191,7 @@ def draft_sla_met_notice(
         "must appear."
     )
     values = {"COUNTERPARTY": counterparty_id, "CALL_AMOUNT": money(call_amount, currency)}
-    return _draft_with_placeholders(
+    return draft_with_placeholders(
         llm, request, values, set(values), f"SLA-met notice for {counterparty_id}"
     )
 
