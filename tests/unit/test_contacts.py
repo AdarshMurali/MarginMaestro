@@ -172,7 +172,7 @@ def _prompt(*answers: str):
     return prompt
 
 
-def test_cli_set_reads_the_number_hidden_twice_and_prints_only_two_digits(session_factory, capsys):
+def test_cli_set_reads_the_number_hidden_twice_and_prints_no_digits(session_factory, capsys):
     prompt = _prompt(NUMBER, "+1 555 010 0987")
 
     code = main(
@@ -184,8 +184,8 @@ def test_cli_set_reads_the_number_hidden_twice_and_prints_only_two_digits(sessio
     out = capsys.readouterr().out
     assert code == 0
     assert len(prompt.prompts) == 2 and all("hidden" in p for p in prompt.prompts)
-    assert "+…87" in out and "Jane Doe" in out and "active" in out
-    assert "0100987" not in out and "0987" not in out
+    assert "Jane Doe" in out and "active" in out
+    assert not any(ch.isdigit() for ch in out.replace("CP-1", ""))  # no digits of the number
     with session_factory() as session:
         assert active_contact(session, "CP-1").phone == NUMBER  # type: ignore[union-attr]
 

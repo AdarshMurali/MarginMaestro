@@ -249,10 +249,10 @@ def main(
                     session, args.counterparty, args.name, number, active=not args.inactive
                 )
                 state = "active" if row.active else "inactive"
-                print(
-                    f"Saved {args.counterparty} WhatsApp contact {row.contact_name} "
-                    f"({mask_last2(number)}, {state})."
-                )
+                # No digits of the number are echoed back (CodeQL treats the
+                # hidden-prompt input as a secret, rightly): `list` shows the
+                # stored contacts masked.
+                print(f"Saved {args.counterparty} WhatsApp contact {row.contact_name} ({state}).")
             elif args.command == "list":
                 contacts = list_contacts(session)
                 if not contacts:
