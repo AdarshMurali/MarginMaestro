@@ -135,10 +135,12 @@ resource "google_dataplex_entry_group" "marginmaestro" {
 resource "google_dataplex_entry" "asset" {
   for_each = local.catalog_entries
 
-  entry_group_id       = google_dataplex_entry_group.marginmaestro.entry_group_id
-  location             = var.region
-  entry_id             = each.key
-  entry_type           = google_dataplex_entry_type.asset.name
+  entry_group_id = google_dataplex_entry_group.marginmaestro.entry_group_id
+  location       = var.region
+  entry_id       = each.key
+  # Dataplex rejects the project id here ("project IDs are not supported"),
+  # so the entry type is referenced by project number (found on first apply).
+  entry_type           = "projects/${data.google_project.this.number}/locations/${var.region}/entryTypes/${google_dataplex_entry_type.asset.entry_type_id}"
   fully_qualified_name = each.value.fqn
 
   entry_source {
