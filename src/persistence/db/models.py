@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import JSON, ForeignKey, LargeBinary, String
+from sqlalchemy import JSON, ForeignKey, LargeBinary, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -27,6 +27,9 @@ class CounterpartyORM(Base):
         back_populates="counterparty", cascade="all, delete-orphan"
     )
     tickets: Mapped[list["TicketORM"]] = relationship(
+        back_populates="counterparty", cascade="all, delete-orphan"
+    )
+    contacts: Mapped[list["CounterpartyContactORM"]] = relationship(
         back_populates="counterparty", cascade="all, delete-orphan"
     )
 
@@ -233,3 +236,35 @@ class UserCounterpartyAccessORM(Base):
 
     username: Mapped[str] = mapped_column(ForeignKey("users.username"), primary_key=True)
     counterparty_id: Mapped[str] = mapped_column(ForeignKey("counterparties.id"), primary_key=True)
+
+
+class CounterpartyContactORM(Base):
+    """MM-143 (ADR-0016 amendment, 2026-10-06): who receives a counterparty's
+    client notices, one row per (counterparty, channel). Written only by the
+    admin CLI (`python -m persistence.contacts`), which reads the number from
+    a hidden prompt. `phone_e164` is confidential: never logged, never sent
+    to a model (data catalog: `llm: deny`), and masked wherever it is shown.
+    Counterparty-scoped under row-level security on Postgres (migration
+    f2a9c4e7b318)."""
+
+    __tablename__ = "counterparty_contacts"
+    __table_args__ = (UniqueConstraint("counterparty_id", "channel"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    counterparty_id: Mapped[str] = mapped_column(ForeignKey("counterparties.id"))
+    contact_name: Mapped[str] = mapped_column(String(200))
+    channel: Mapped[str] = mapped_column(String(20), default="whatsapp")
+    phone_e164: Mapped[str] = mapped_column(String(16))
+    active: Mapped[bool] = mapped_column(default=True)
+    # Naive UTC. Also the contact's version: a notice records it, and an
+    # Acknowledge only counts while the contact is unchanged since the send
+    # (api.whatsapp_webhook).
+    updated_at: Mapped[datetime]
+
+    counterparty: Mapped["CounterpartyORM"] = relationship(back_populates="contacts")
+
+    def __repr__(self) -> str:  # never the number
+        return (
+            f"CounterpartyContactORM(id={self.id!r}, counterparty_id={self.counterparty_id!r}, "
+            f"channel={self.channel!r}, active={self.active!r})"
+        )

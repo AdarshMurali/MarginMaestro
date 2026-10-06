@@ -227,6 +227,24 @@ tables:
       username: {class: internal}
       counterparty_id: {class: internal}
 
+  counterparty_contacts:
+    owner: margin-operations
+    description: Who receives a counterparty's client notices (MM-143) -- one WhatsApp contact per counterparty; counterparties without one use the WHATSAPP_RECIPIENT default.
+    class: confidential
+    freshness: Changes only when an admin runs python -m persistence.contacts.
+    source: Application (persistence.contacts admin CLI; numbers read from a hidden prompt).
+    columns:
+      id: {class: internal}
+      counterparty_id: {class: internal}
+      contact_name: {class: confidential, llm: deny}
+      channel: {class: internal}
+      phone_e164:
+        class: confidential
+        llm: deny
+        pattern: '\+[1-9]\d{7,14}\b'
+      active: {class: internal}
+      updated_at: {class: internal}
+
   rag_chunks:
     owner: margin-operations
     description: Embedded document chunks for RAG (pgvector, Postgres only). A derived, rebuildable index of the GCS documents.

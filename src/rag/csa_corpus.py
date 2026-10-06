@@ -59,7 +59,10 @@ def generate_csa_terms(
 
 def render_csa_document(doc: CSATermsDocument) -> str:
     """Renders with clear section headers (Threshold, MTA, Eligible Collateral,
-    Rating Triggers) so downstream chunking (MM-24) can keep each clause intact.
+    Rating Triggers, and since MM-144 Rounding, Settlement Timing and Dispute
+    Resolution, which the PDF notice quotes) so downstream chunking (MM-24)
+    can keep each clause intact. The three MM-144 clauses match what the code
+    does: no rounding, the deadline in the notice, disputes handled by a person.
     """
     collateral_lines = "\n".join(
         f"- {c} (haircut: {doc.haircuts[c]:.0%})" for c in doc.eligible_collateral
@@ -93,6 +96,24 @@ haircuts shown:
 ## Rating Triggers
 
 {trigger_lines}
+
+## Rounding
+
+Delivery Amounts are not rounded: the amount called is the amount calculated, \
+to the cent, in {doc.currency}.
+
+## Settlement Timing
+
+Eligible collateral must be transferred so that it is received by the deadline \
+stated in the margin call notice. The deadline is set when the notice is sent.
+
+## Dispute Resolution
+
+If {doc.counterparty_name} disputes a margin call, it must notify the Valuation \
+Agent before the deadline stated in the notice, giving the amount disputed and the \
+reason. The undisputed amount must still be transferred by that deadline. The \
+parties then recalculate the disputed amount from the prices and positions at the \
+valuation time and settle any difference.
 """
 
 

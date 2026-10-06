@@ -199,6 +199,23 @@ ADR: 0016
 - **MM-G63 (MM-134):** `INTERNAL_NOTIFIER=slack` posts once each: approval requested (+ manager second signature), client notified, client acknowledged, delivery failed, escalated (incident number), flagged replies, and the daily run summary. Defaults to `none` (AWS/local unchanged); Terraform sets `slack` on GCP.
 - **Terraform:** `var.client_notifier` (default `slack`, flip to `whatsapp` after the hand-off), `var.internal_notifier` (default `slack`), and the WhatsApp non-secret settings. Output `whatsapp_webhook_url`. Secrets via `scripts/gcp_whatsapp_secrets.ps1` (merges into `marginmaestro-prod`).
 
+**G6b as built (2026-10-06, ADR-0016 amendment), MM-143 + MM-144, one PR:**
+- **MM-143, per-counterparty contacts.**
+  - Table `counterparty_contacts` (migration `f2a9c4e7b318`, both dialects): one row per (counterparty, channel), with `contact_name`, `phone_e164`, `active`, `updated_at`. Row-level security on Postgres like the other counterparty-scoped tables.
+  - Routing: the counterparty's active contact, else the `WHATSAPP_RECIPIENT` default (keeps the demo working for unmapped counterparties). The send records `recipient_source`, the contact's id and version, and a masked number; never the number.
+  - Webhook: an Acknowledge counts only from the number the notice went to, and only while that contact is unchanged since the send (edited, deactivated or removed → ignored and audited).
+  - Admin CLI `python -m persistence.contacts set|list|remove`: the number is read twice from a hidden prompt (`getpass`), validated as E.164, and shown only as its last two digits.
+  - Catalog: `phone_e164` and `contact_name` are `confidential`, `llm: deny`; a `+`-prefixed E.164 number in a prompt blocks it.
+- **MM-144, personalised PDF notice** (`WHATSAPP_NOTICE_PDF=off|on`, default off).
+  - `agents/notice_pdf.py` builds the PDF; `agents/pdf_writer.py` is a ~200-line, dependency-free PDF writer (standard Helvetica, no embedded fonts).
+  - Content: header (reference, counterparty, amount, deadline), a covering paragraph, "How this call was calculated" (MTM today/prior, VM, IM with VIX, exposure, threshold after rating triggers, collateral after haircuts per type, MTA, call; the market move and its impact for intraday calls; the five largest positions), "Your CSA terms" (threshold, MTA, eligible collateral and haircuts, rating triggers, with section citations; rounding, settlement timing and dispute resolution quoted verbatim from the CSA), and the synthetic-data label on every page.
+  - The covering paragraph is the only model text: Gemini 2.5 Flash drafts with placeholders, code validates (no digits, no unknown placeholders, one retry) and fills it, and the guardrail screens it.
+  - The breakdown uses figures the breach check stored on the state (`collateral_held`, `effective_threshold`, `collateral_lines`, `csa_collateral`); a run checkpointed before MM-144 reads them at send time.
+  - Adapter: `POST /{phone_number_id}/media` (multipart, `application/pdf`), then template `margin_call_notice_v2` (DOCUMENT header, the same four body variables and Acknowledge button as v1). The webhook handles both templates the same way.
+  - **Failure is loud:** a PDF that can't be built (retrieval, unusable draft, guardrail block) or a failed upload escalates the call. The v1 template is not sent instead.
+  - The synthetic CSAs gained Rounding, Settlement Timing and Dispute Resolution sections, matching what the code does.
+- **Terraform:** `var.whatsapp_notice_pdf` (default `off`) and `var.whatsapp_pdf_template_name` wired to the API's env. No new resources besides one Dataplex catalog entry generated from the catalog YAML.
+
 ### Phase G7 — BigQuery analytics & audit warehouse (Epic: MM-94)
 ADR: 0013
 

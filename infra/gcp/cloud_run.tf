@@ -51,6 +51,9 @@ locals {
     WHATSAPP_TEMPLATE_NAME     = var.whatsapp_template_name
     WHATSAPP_TEMPLATE_LANGUAGE = var.whatsapp_template_language
     WHATSAPP_GRAPH_VERSION     = var.whatsapp_graph_version
+    # MM-144: the personalised PDF notice (template v2); off until Meta approves v2.
+    WHATSAPP_NOTICE_PDF        = var.whatsapp_notice_pdf
+    WHATSAPP_PDF_TEMPLATE_NAME = var.whatsapp_pdf_template_name
 
     # Internal callers (Pub/Sub push, Cloud Scheduler, Cloud Tasks) sign as
     # mm-invoker-sa, with the service's own URL as the audience (MM-124).

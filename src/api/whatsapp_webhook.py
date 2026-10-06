@@ -7,8 +7,11 @@ deterministic code; no LLM ever acts on a client message.
 **Trust.** The endpoint is public (Meta can't sign in), so nothing is read
 before the `X-Hub-Signature-256` HMAC of the raw body (WHATSAPP_APP_SECRET)
 checks out, compared in constant time. An Acknowledge tap is then only
-honoured if the sender is the counterparty's contact, the button belongs to
-the call's latest notice, and the call is waiting for a response.
+honoured if the sender is the contact the notice was sent to (MM-143: the
+counterparty's contact, unchanged since the send, or the WHATSAPP_RECIPIENT
+default), the button belongs to the call's latest notice, and the call is
+waiting for a response. The same rules hold for both templates: v1 and the
+PDF notice's v2 (MM-144) carry the same Acknowledge button.
 
 **Processing: inline, exactly once.** Each status (`wa-status:<id>:<status>`)
 and each message (`wa-msg:<id>`) is claimed in `processed_events` before it
@@ -55,6 +58,7 @@ from agents.internal_notifications import InternalNotifier
 from config.settings import Settings
 from persistence.audit import record_audit_event
 from persistence.claims import claim_once, release_claim
+from persistence.contacts import contact_phone_if_unchanged
 from persistence.db.models import AuditLogORM
 from ports.guardrail import Guardrail, GuardrailError, Verdict
 from ports.redactor import Redactor
@@ -310,6 +314,25 @@ def _handle_message(message: Message, deps: WebhookDeps) -> str:
     return _handle_reply(message, deps)
 
 
+def _notice_recipient(deps: WebhookDeps, notification: Any) -> str | None:
+    """The number (digits only) the call's notice was sent to (MM-143):
+
+    - sent to the counterparty's contact: that contact's number, but only
+      while the contact is the version the notice recorded -- None once it
+      has been edited, deactivated or removed, so nobody else's tap counts;
+    - sent to the default (or a run from before MM-143): WHATSAPP_RECIPIENT,
+      "" when that isn't configured.
+    """
+    contact_id = getattr(notification, "recipient_contact_id", None)
+    if getattr(notification, "recipient_source", None) != "contact" or contact_id is None:
+        return normalize_phone(deps.settings.whatsapp_recipient or "")
+    with deps.session_factory() as session:
+        phone = contact_phone_if_unchanged(
+            session, contact_id, notification.recipient_contact_version or ""
+        )
+    return normalize_phone(phone) if phone else None
+
+
 def _handle_ack(message: Message, thread_id: str, deps: WebhookDeps) -> str:
     values, pending = _values(deps, thread_id)
     if not values:
@@ -317,11 +340,13 @@ def _handle_ack(message: Message, thread_id: str, deps: WebhookDeps) -> str:
         return _handle_reply(message, deps)
 
     reason: str | None = None
-    contact = normalize_phone(deps.settings.whatsapp_recipient or "")
     notification = values.get("notification_result")
+    contact = _notice_recipient(deps, notification)
     quoted = message.context.id if message.context else None
-    if not contact or normalize_phone(message.sender) != contact:
-        reason = "the sender is not the counterparty's registered contact"
+    if contact is None:
+        reason = "the contact the notice was sent to has changed or been removed since"
+    elif not contact or normalize_phone(message.sender) != contact:
+        reason = "the sender is not the contact the notice was sent to"
     elif quoted and notification is not None and quoted != notification.message_id:
         reason = "the button belongs to an older notice"
     elif "await_sla_response" not in pending:

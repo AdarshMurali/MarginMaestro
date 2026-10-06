@@ -154,6 +154,23 @@ variable "whatsapp_graph_version" {
   default     = "v23.0"
 }
 
+variable "whatsapp_notice_pdf" {
+  description = "MM-144: on = send the personalised PDF notice (uploaded to /media, sent as the DOCUMENT header of whatsapp_pdf_template_name); off = the v1 template. Flip to on only once Meta has APPROVED the v2 template."
+  type        = string
+  default     = "off"
+
+  validation {
+    condition     = contains(["off", "on"], var.whatsapp_notice_pdf)
+    error_message = "whatsapp_notice_pdf must be \"off\" or \"on\"."
+  }
+}
+
+variable "whatsapp_pdf_template_name" {
+  description = "MM-144: the template with a DOCUMENT header, the same 4 body variables and Acknowledge button as v1 (margin_call_notice_v2, id 4757283454501358, submitted 2026-10-06)."
+  type        = string
+  default     = "margin_call_notice_v2"
+}
+
 # --- G8: data governance (ADR-0015) -------------------------------------------
 
 variable "lineage_exporter" {

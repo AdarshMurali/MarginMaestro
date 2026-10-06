@@ -7,7 +7,7 @@ fills the model's placeholders from code (MM-116)."""
 
 from typing import Literal, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DeliveryReceipt(BaseModel):
@@ -18,6 +18,8 @@ class DeliveryReceipt(BaseModel):
     # (WhatsApp `statuses` webhook, ADR-0016 amendment). "sent": the provider
     # confirmed it synchronously (Slack).
     status: Literal["accepted", "sent"] = "sent"
+    # WhatsApp: the template used (None for free-form text).
+    template: str | None = None
 
 
 class ClientNotice(BaseModel):
@@ -39,6 +41,13 @@ class ClientNotice(BaseModel):
     # Plain-text rendering, for channels without a template (Slack, and
     # WhatsApp free-form inside the 24-hour window).
     text: str
+    # MM-143: the counterparty's contact (E.164), or None for the channel's
+    # configured default. Personal data: kept out of repr and never stored.
+    recipient: str | None = Field(default=None, repr=False)
+    # MM-144: the personalised PDF notice (WHATSAPP_NOTICE_PDF=on), sent as
+    # the document header of the `margin_call_notice_v2` template.
+    document: bytes | None = Field(default=None, repr=False)
+    document_filename: str | None = None
 
 
 class ClientDeliveryError(Exception):

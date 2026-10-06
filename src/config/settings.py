@@ -209,6 +209,14 @@ class Settings(BaseSettings):
     whatsapp_recipient: str | None = None
     whatsapp_app_secret: str | None = None
     whatsapp_verify_token: str | None = None
+    # MM-144: on = the personalised PDF notice (uploaded to Meta's media
+    # endpoint, sent as the document header of WHATSAPP_PDF_TEMPLATE_NAME).
+    # off (default) = the v1 template above, unchanged. Stays off until Meta
+    # approves the v2 template. MM-143's per-counterparty contacts
+    # (persistence.contacts) apply in both modes; WHATSAPP_RECIPIENT is the
+    # default for counterparties without one.
+    whatsapp_notice_pdf: str = "off"
+    whatsapp_pdf_template_name: str = "margin_call_notice_v2"
     # ADR-0016: every client-facing send of synthetic data carries a label.
     # Production (real counterparties) would set this to "".
     client_notice_label: str = "(TEST)"

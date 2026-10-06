@@ -249,3 +249,174 @@ def test_own_http_client_is_closed_after_the_send(monkeypatch):
 
 def test_normalize_phone_keeps_digits_only():
     assert normalize_phone("+1 (555) 010-0999") == "15550100999"
+
+
+# --- MM-143: the counterparty's contact ------------------------------------------------
+
+
+def test_the_notices_recipient_overrides_the_default():
+    client, recorder = _client(_accepted())
+    notice = _notice().model_copy(update={"recipient": "+44 7700 900123"})
+
+    WhatsAppNotifier(_settings(), http_client=client).send_notice(notice)
+
+    assert json.loads(recorder.requests[0].content)["to"] == "447700900123"
+    assert "447700900123" not in repr(notice)
+
+
+def test_without_a_contact_or_default_nothing_is_sent():
+    client, recorder = _client(_accepted())
+
+    with pytest.raises(ClientDeliveryError, match="recipient"):
+        WhatsAppNotifier(_settings(whatsapp_recipient="   "), http_client=client).send_notice(
+            _notice()
+        )
+    assert recorder.requests == []
+
+
+def test_a_contact_number_without_digits_is_refused():
+    client, recorder = _client(_accepted())
+    notice = _notice().model_copy(update={"recipient": "+"})
+
+    with pytest.raises(ClientDeliveryError, match="No WhatsApp recipient for CP-3"):
+        WhatsAppNotifier(_settings(), http_client=client).send_notice(notice)
+    assert recorder.requests == []
+
+
+# --- MM-144: the PDF notice (template v2) -------------------------------------------------
+
+PDF = b"%PDF-1.4 fake"
+
+
+class _Sequence:
+    """Answers each request in turn: the upload first, then the send."""
+
+    def __init__(self, *responses: httpx.Response) -> None:
+        self.requests: list[httpx.Request] = []
+        self._responses = list(responses)
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return self._responses.pop(0)
+
+
+def _pdf_notice():
+    return _notice().model_copy(
+        update={"document": PDF, "document_filename": f"{call_reference(THREAD)}.pdf"}
+    )
+
+
+def _pdf_settings(**overrides) -> Settings:
+    return _settings(whatsapp_notice_pdf="on", **overrides)
+
+
+def test_pdf_notice_uploads_the_media_then_sends_template_v2_with_it():
+    sequence = _Sequence(httpx.Response(200, json={"id": "media-123"}), _accepted())
+    client = httpx.Client(transport=httpx.MockTransport(sequence.handler))
+
+    receipt = WhatsAppNotifier(_pdf_settings(), http_client=client).send_notice(_pdf_notice())
+
+    upload, send = sequence.requests
+    assert str(upload.url) == "https://graph.facebook.com/v23.0/1382503808268641/media"
+    assert upload.headers["Authorization"] == f"Bearer {TOKEN}"
+    assert upload.headers["content-type"].startswith("multipart/form-data")
+    form = upload.content
+    assert b'name="messaging_product"\r\n\r\nwhatsapp' in form
+    assert b'name="type"\r\n\r\napplication/pdf' in form
+    assert b'filename="' + f"{call_reference(THREAD)}.pdf".encode() + b'"' in form
+    assert b"Content-Type: application/pdf" in form and PDF in form
+
+    assert str(send.url).endswith("/messages")
+    body = json.loads(send.content)
+    template = body["template"]
+    assert template["name"] == "margin_call_notice_v2"
+    header, body_params, button = template["components"]
+    assert header == {
+        "type": "header",
+        "parameters": [
+            {
+                "type": "document",
+                "document": {"id": "media-123", "filename": f"{call_reference(THREAD)}.pdf"},
+            }
+        ],
+    }
+    assert [p["text"] for p in body_params["parameters"]] == [
+        call_reference(THREAD),
+        "Acme Capital (TEST)",
+        "USD 2,500,000.00",
+        "17:00 UTC on 3 October 2026",
+    ]  # the same four values as v1
+    assert button["parameters"] == [{"type": "payload", "payload": f"ack:{THREAD}"}]
+    assert body["biz_opaque_callback_data"] == THREAD
+    assert (receipt.status, receipt.template) == ("accepted", "margin_call_notice_v2")
+    assert receipt.text.endswith(".pdf")
+
+
+def test_pdf_template_name_comes_from_settings():
+    sequence = _Sequence(httpx.Response(200, json={"id": "m"}), _accepted())
+    client = httpx.Client(transport=httpx.MockTransport(sequence.handler))
+
+    WhatsAppNotifier(
+        _pdf_settings(whatsapp_pdf_template_name="notice_pdf_v3"), http_client=client
+    ).send_notice(_pdf_notice())
+
+    assert json.loads(sequence.requests[1].content)["template"]["name"] == "notice_pdf_v3"
+
+
+def test_a_failed_upload_sends_nothing_and_never_falls_back_to_v1():
+    sequence = _Sequence(
+        httpx.Response(400, json={"error": {"code": 131053, "message": "Media upload error"}})
+    )
+    client = httpx.Client(transport=httpx.MockTransport(sequence.handler))
+
+    with pytest.raises(ClientDeliveryError, match="upload rejected.*131053"):
+        WhatsAppNotifier(_pdf_settings(), http_client=client).send_notice(_pdf_notice())
+    assert len(sequence.requests) == 1  # no /messages call at all
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, json={}),
+        httpx.Response(200, text="not json"),
+        httpx.Response(200, json=[]),
+    ],
+)
+def test_an_upload_without_a_media_id_fails(response):
+    sequence = _Sequence(response)
+    client = httpx.Client(transport=httpx.MockTransport(sequence.handler))
+
+    with pytest.raises(ClientDeliveryError, match="upload"):
+        WhatsAppNotifier(_pdf_settings(), http_client=client).send_notice(_pdf_notice())
+
+
+def test_pdf_mode_without_a_document_or_template_fails_loud():
+    client, recorder = _client(_accepted())
+
+    with pytest.raises(ClientDeliveryError, match="no PDF"):
+        WhatsAppNotifier(_pdf_settings(), http_client=client).send_notice(_notice())
+    with pytest.raises(ClientDeliveryError, match="WHATSAPP_PDF_TEMPLATE_NAME"):
+        WhatsAppNotifier(
+            _pdf_settings(whatsapp_pdf_template_name=""), http_client=client
+        ).send_notice(_pdf_notice())
+    assert recorder.requests == []
+
+
+def test_pdf_mode_off_sends_v1_even_with_a_document():
+    client, recorder = _client(_accepted())
+
+    receipt = WhatsAppNotifier(_settings(), http_client=client).send_notice(_pdf_notice())
+
+    body = json.loads(recorder.requests[0].content)
+    assert body["template"]["name"] == "margin_call_notice"
+    assert [c["type"] for c in body["template"]["components"]] == ["body", "button"]
+    assert receipt.template == "margin_call_notice"
+
+
+def test_invalid_pdf_setting_fails_loud():
+    client, _ = _client(_accepted())
+
+    with pytest.raises(ValueError, match="WHATSAPP_NOTICE_PDF"):
+        WhatsAppNotifier(_settings(whatsapp_notice_pdf="maybe"), http_client=client).send_notice(
+            _notice()
+        )
