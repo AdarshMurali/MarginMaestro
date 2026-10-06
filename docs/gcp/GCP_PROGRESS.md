@@ -16,7 +16,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 
 ## Current state (snapshot)
 
-- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123, 124, 126, 127 done (API, event flow, SLA timers, CD and observability live on GCP). Re-planned 2026-10-04: Agent Platform hosts the ADK desk assistant (MM-128 … MM-132), and the orchestrator stays on Cloud Run. **MM-128, 130, 131, 132 done; MM-129 live, closing after the 2026-10-06 billing check. G5b (MM-125) done and verified live.** G6 in progress. MM-125 (margin-call policy, G5b, ADR-0020) code done, `daily-margin-run` job apply pending; then G6 WhatsApp. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
+- **Phase:** G0–G3 **done**. G4 (MM-91) in progress — **G4 done** (MM-119…122; epic MM-91 closed 2026-10-02). G5 (MM-92) in progress — MM-123, 124, 126, 127 done (API, event flow, SLA timers, CD and observability live on GCP). Re-planned 2026-10-04: Agent Platform hosts the ADK desk assistant (MM-128 … MM-132), and the orchestrator stays on Cloud Run. **MM-128, 130, 131, 132 done; MM-129 live, closing after the 2026-10-06 billing check. G5b (MM-125) done and verified live.** G6 live (one Acknowledge re-test pending); G8 live without BigQuery (audit migration pending); G7 parked; G9 docs done, decommission pending approval. MM-125 (margin-call policy, G5b, ADR-0020) code done, `daily-margin-run` job apply pending; then G6 WhatsApp. Cloud SQL **stopped** until G5 — one switch, `demo_online` in local tfvars (MM-120).
 - **Images / CD:** Docker Hub stays the image registry (no Artifact Registry repo — ADR-0017 amendment, 2026-09-29). Automated Cloud Run deploy from GitHub Actions is MM-G57 (G5).
 - **GCP account:** `lavanyaasha71@gmail.com`, trial started **2026-09-28** ($300 / 90 days, ends ~2026-12-27). Month-2 cost review (G10) due **~2026-11-28**. Project `marginmaestro-demo` (no organization — pick "No organization" in the console project picker), billing account `01DE19-0D8CAC-54439D`, region `us-central1`. Local gcloud configuration: `marginmaestro`.
 - **Decisions:** ADR-0008 … ADR-0017 accepted (`docs/gcp/adr/`).
@@ -48,6 +48,29 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-06 — G6 and G8 live; G9 docs (MM-118, MM-133, MM-134, MM-135, MM-136, MM-137, MM-138)
+- **G6, WhatsApp to clients and Slack internally, live:**
+  - **Setup.** The user ran `gcp_whatsapp_secrets.ps1` and configured the Meta webhook (verified after a new API revision loaded the secret). `client_notifier = "whatsapp"` was applied.
+  - **Delivery.** Approving CP-2 sent the `margin_call_notice` template to the test phone, and it was **delivered**. Internal Slack got the "approval received" and "client notified" posts.
+  - **Two live findings, both fixed:**
+    1. Meta only forwards events to apps subscribed to the WhatsApp Business Account. Only Meta's own test app was subscribed, so `POST /2410321463128008/subscribed_apps` was run with our token and **MarginMaestro-Dev** is now subscribed.
+    2. The Acknowledge tap arrived **without** our `ack:<thread>` payload and was flagged as a reply. A button press is now matched to its call by the notice it quotes (PR #106).
+  - **SLA path.** The user didn't tap again in time, so CP-2's SLA breached at 17:07 UTC and **escalated** (status `escalated`). That verified the escalation path; the fixed acknowledgement still needs one live tap.
+  - Also: a checkpoint serializer allow-list (PR #107). LangGraph warned it will block unregistered state types, which would make saved runs unreadable.
+- **G8, governance without BigQuery, applied and verified (PRs #108, #110):**
+  - **Applied.** The first apply added 16 resources. The 21 Dataplex entries failed because the API rejects project ids in `entry_type`; after the fix, 21 were added.
+  - **Catalog.** Dataplex lists 21 entries: 16 Cloud SQL tables and 5 document families.
+  - **Scan.** The Sensitive Data Protection job scanned 16 KB of documents: **no findings**.
+  - **Audit logs.** Data-access logs show document reads, IAM database logins and secret access (tiny volume).
+  - **Daily run.** A manual run with `LLM_DATA_CLASS_FILTER=catalog` on completed normally and exported lineage per call. The lineage graph links today's CP-2 call to its trigger event, 8 Cloud SQL tables and the documents bucket.
+  - **Pending:** the append-only audit migration (`e3f8a1c5d927`) needs the database owner's password, so the user runs it. MM-137 closes after that.
+- **G9 docs (MM-138):** README (status, stack table, layout) and CLAUDE.md's tech stack now describe GCP as the live runtime, with AWS paused and BigQuery parked. The GCP architecture diagrams were added by the user (PR #109).
+- **Next:**
+  1. The user runs the audit migration.
+  2. One live Acknowledge tap closes G6.
+  3. MM-129 billing check.
+  4. Decommission AWS/Azure (MM-G92) only with explicit user approval.
 
 ### 2026-10-05 — MM-135 / MM-136 / MM-137: Data governance without BigQuery (Phase G8) (code done; migration and Terraform apply pending)
 - **Done:**

@@ -20,15 +20,18 @@ It is a **portfolio / proof-of-concept** built to production-engineering standar
 
 ## Tech stack (don't swap without an ADR)
 
-- **Orchestration:** LangGraph (explicit state-graph over agents).
-- **LLM:** OpenAI `gpt-4o-mini` (usage-minimized) for this project's development — Ollama isn't viable on the dev machine's specs (see ADR-0006). `LLM_PROVIDER=ollama` remains supported in `Settings` for anyone running on hardware where it works.
-- **Embeddings:** OpenAI `text-embedding-3-small` (see ADR-0006 — supersedes the earlier local BGE choice; query/document embeddings must share one model, and Ollama isn't viable on the dev machine anyway).
-- **RAG store:** ChromaDB. **Relational:** Azure SQL (free tier).
-- **Streaming:** Kafka (Redpanda locally). Flink is **deferred** — only if a genuine windowed job is built (see `docs/adr/0003`).
-- **Observability:** OpenTelemetry traces (one span per orchestrator lifecycle step) exported to **Jaeger**; **Prometheus** scrapes the API's `GET /metrics`; **Grafana** (host port `3001` — `3000` is the frontend dev server) auto-provisions the agent-activity dashboard from `infra/grafana/`.
-- **API:** FastAPI. **Frontend:** Next.js on Vercel.
-- **Tools exposed as MCP servers:** market data, Slack, ServiceNow, RAG retriever. (Jira is this project's own dev-story tracker, not an agent-facing tool — see `docs/adr/0007`; it has no MCP server.)
-- **Notifications:** Slack; on GCP, client notices go on WhatsApp (`CLIENT_NOTIFIER=whatsapp`, an in-process adapter behind the approval gate — never an MCP tool) and Slack carries internal traffic (`INTERNAL_NOTIFIER=slack`) — see `docs/gcp/adr/0016`. **Escalation incidents:** ServiceNow (see `docs/adr/0007` — scoped to the SLA-escalation path only). **Dev-story tracker:** Jira (`MM-#` tickets; unaffected by the ServiceNow decision). **Secrets:** AWS Parameter Store.
+> **Live runtime: Google Cloud** (GCP track, `docs/gcp/`). The original AWS EC2 + Azure SQL deployment is paused pending decommission (MM-G92). Adapters keep the pre-GCP stack runnable locally by env flag (ADR-0017).
+
+- **Orchestration:** LangGraph for the margin-call workflow (explicit state-graph, on Cloud Run); **Google ADK** for the conversational desk assistant on **Vertex AI Agent Runtime** (Sessions + Memory Bank; ADR-0019).
+- **LLM:** **Gemini on Vertex AI** (`LLM_PROVIDER=vertex`) on GCP, every call through the guardrail pipeline (Model Armor + in-code, SDP masking, the catalog-driven data-class filter). OpenAI `gpt-4o-mini` remains the local/fallback provider (ADR-0006).
+- **Embeddings:** Vertex AI text embeddings on GCP; OpenAI `text-embedding-3-small` locally. Query and document embeddings must share one model (ADR-0006).
+- **Relational + RAG store:** **Cloud SQL Postgres + pgvector** with row-level security (ADR-0011); ChromaDB / SQL Server remain for local dev. **Documents:** Cloud Storage.
+- **Eventing:** **Pub/Sub** push, **Cloud Tasks** (one SLA timer per call), **Cloud Scheduler** (price refresh, EOD closes, daily margin run) on GCP; Kafka (Redpanda) locally. Flink is **deferred** (`docs/adr/0003`).
+- **Observability:** OpenTelemetry traces (one root span per margin-call run) to **Cloud Trace** on GCP, Jaeger locally; structured logs to **Cloud Logging**; incident alert in **Cloud Monitoring**. Locally, **Prometheus** scrapes `GET /metrics` and **Grafana** (host port `3001`) auto-provisions from `infra/grafana/`.
+- **API:** FastAPI on **Cloud Run** (scale to zero). **Frontend:** Next.js on Vercel.
+- **Governance (G8):** Dataplex catalog generated from `docs/data_catalog.yaml`, Data Lineage per margin call, data-access audit logs, append-only audit trail. **BigQuery (G7) is parked** pending the user's decision.
+- **Tools exposed as MCP servers:** read-only market data, RAG retriever and margin-call status on **Cloud Run** (private; only the desk agent may invoke — MM-128). Slack/ServiceNow MCP servers are local-only and never deployed. (Jira is this project's own dev-story tracker, not an agent-facing tool — see `docs/adr/0007`; it has no MCP server.)
+- **Notifications:** Slack; on GCP, client notices go on WhatsApp (`CLIENT_NOTIFIER=whatsapp`, an in-process adapter behind the approval gate — never an MCP tool) and Slack carries internal traffic (`INTERNAL_NOTIFIER=slack`) — see `docs/gcp/adr/0016`. **Escalation incidents:** ServiceNow (see `docs/adr/0007` — scoped to the SLA-escalation path only). **Dev-story tracker:** Jira (`MM-#` tickets; unaffected by the ServiceNow decision). **Secrets:** Secret Manager on GCP (`SECRETS_SOURCE=gcp`); AWS Secrets Manager for the paused AWS stack.
 - **CI/CD:** GitHub Actions + Docker Hub (Docker Hub stays the registry on GCP too; CI logs in to GCP keylessly via Workload Identity Federation — MM-100). **Quality:** SonarCloud + pytest-cov. **Security scanning:** CodeQL (SAST), Dependabot (dependency CVEs + fix PRs), secret scanning with push protection — see `docs/adr/0018`. **IaC:** Terraform.
 
 ## Commands (keep these current)
