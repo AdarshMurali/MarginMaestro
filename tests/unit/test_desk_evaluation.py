@@ -254,3 +254,58 @@ def test_agent_info_declares_every_tool():
 
     declared = {f.name for f in info.agents["margin_desk"].tools[0].function_declarations}
     assert declared == set(TOOL_DESCRIPTIONS)
+
+
+# --- judge model (2026-10-06: the Pro default made each run cost Rs 100-150) ----
+
+
+def _capturing_client(captured: list):
+    def evaluate(**kwargs):
+        captured.append(kwargs["metrics"])
+        return SimpleNamespace(summary_metrics=[])
+
+    return SimpleNamespace(evals=SimpleNamespace(evaluate=evaluate))
+
+
+def test_rubrics_are_graded_by_flash_by_default():
+    captured: list = []
+    turn = checks.turn_record("c", _events("ok"))
+
+    desk_eval.rubric_scores(_capturing_client(captured), GOLDEN_CASES[:1], [turn])
+
+    judges = {m.metric_kwargs.get("judge_model") for m in captured[0]}
+    assert judges == {"gemini-2.5-flash"}
+
+
+def test_pro_judge_is_opt_in():
+    captured: list = []
+    turn = checks.turn_record("c", _events("ok"))
+
+    desk_eval.rubric_scores(
+        _capturing_client(captured), GOLDEN_CASES[:1], [turn], desk_eval.JUDGE_MODELS["pro"]
+    )
+
+    assert {m.metric_kwargs["judge_model"] for m in captured[0]} == {"gemini-3.1-pro-preview"}
+
+
+def test_cli_passes_the_chosen_judge(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    seen: list[str] = []
+    monkeypatch.setattr(desk_eval, "_google_session", lambda: object())
+    monkeypatch.setattr(desk_eval, "AgentRuntimeDesk", lambda *a: FakeDesk())
+    monkeypatch.setattr(desk_eval, "GOLDEN_CASES", GOLDEN_CASES[:1])
+    monkeypatch.setattr(
+        desk_eval, "rubric_scores", lambda client, cases, turns, judge: seen.append(judge) or {}
+    )
+    monkeypatch.setattr("vertexai.Client", lambda project, location: object())
+    agent = "projects/p/locations/us-central1/reasoningEngines/1"
+
+    desk_eval.main(["--agent", agent])
+    desk_eval.main(["--agent", agent, "--judge", "pro"])
+
+    assert seen == ["gemini-2.5-flash", "gemini-3.1-pro-preview"]
+
+
+def test_unknown_judge_is_rejected():
+    with pytest.raises(SystemExit):
+        desk_eval.main(["--agent", "projects/p/locations/l/reasoningEngines/1", "--judge", "ultra"])

@@ -2,7 +2,8 @@
 # Runs the golden question set against the deployed agent: deterministic
 # checks (tool choice, refusals, scope, grounding of every amount) plus
 # Vertex AI Gen AI evaluation rubrics. Fails on any regression.
-# Manual only: each run costs a few cents of Gemini tokens.
+# Manual only. Cost per run: ~Rs 15-20 with the default Flash judge, ~Rs 100-150
+# with judge=pro (2026-10-06: Pro was the default and four runs cost ~Rs 500).
 name: Desk assistant evaluation
 
 on:
@@ -12,6 +13,11 @@ on:
         description: "Also score Vertex AI rubrics (hallucination, response quality)"
         type: boolean
         default: true
+      judge:
+        description: "Rubric judge: flash (cheap, ~Rs 15-20/run) or pro (stricter, ~Rs 100-150/run)"
+        type: choice
+        options: [flash, pro]
+        default: flash
 
 permissions:
   contents: read
@@ -43,8 +49,9 @@ jobs:
           PYTHONPATH: src
           AGENT: ${{ vars.DESK_AGENT_RESOURCE }}
           RUBRICS: ${{ inputs.rubrics }}
+          JUDGE: ${{ inputs.judge }}
         run: |
-          flags=""
+          flags="--judge $JUDGE"
           [ "$RUBRICS" = "true" ] || flags="--no-rubrics"
           python -m evaluation.desk_eval --agent "$AGENT" $flags
 

@@ -7,8 +7,9 @@
 2. Deterministic checks (evaluation.checks): tool choice, refusals, scope,
    and grounding of every amount. All must pass.
 3. Vertex AI Gen AI evaluation rubrics (hallucination, final response
-   quality) over the same turns; each mean score must reach its threshold.
-   Skip with --no-rubrics.
+   quality) over the same turns, graded by Gemini Flash by default
+   (--judge pro for the stricter, ~6-10x pricier judge); each mean score
+   must reach its threshold. Skip with --no-rubrics.
 
 Writes desk-eval-report.json and desk-eval-summary.md to the working
 directory. Exits 1 on any failure, so the CI job goes red on a regression.
@@ -28,6 +29,12 @@ from evaluation.checks import CheckResult, TurnRecord, check, summarize, turn_re
 from evaluation.golden import GOLDEN_CASES, TOOL_DESCRIPTIONS, GoldenCase
 
 logger = structlog.get_logger()
+
+# Rubric judge (2026-10-06): the managed rubrics default to a Gemini Pro
+# judge, which made each run cost about Rs 100-150. Flash is the default
+# (~Rs 15-20 a run); Pro is opt-in for a stricter review.
+JUDGE_MODELS = {"flash": "gemini-2.5-flash", "pro": "gemini-3.1-pro-preview"}
+DEFAULT_JUDGE_MODEL = JUDGE_MODELS["flash"]
 
 REPORT_FILE = "desk-eval-report.json"
 SUMMARY_FILE = "desk-eval-summary.md"
@@ -61,9 +68,13 @@ def run_cases(desk: Any, cases: list[GoldenCase]) -> list[tuple[TurnRecord, Chec
 
 
 def rubric_scores(
-    client: Any, cases: list[GoldenCase], turns: list[TurnRecord]
+    client: Any,
+    cases: list[GoldenCase],
+    turns: list[TurnRecord],
+    judge_model: str = DEFAULT_JUDGE_MODEL,
 ) -> dict[str, float | None]:
-    """Mean score per rubric metric from Vertex AI Gen AI evaluation."""
+    """Mean score per rubric metric from Vertex AI Gen AI evaluation, graded
+    by `judge_model`."""
     from google.genai import types as genai_types
     from vertexai._genai import types
 
@@ -95,7 +106,10 @@ def rubric_scores(
     # Tool choice is scored by the deterministic trajectory checks instead:
     # the managed tool_use_quality rubric rejected our agent traces
     # ("tool_usage is required") even with tool calls present (2026-10-05).
-    metrics = [types.RubricMetric.HALLUCINATION, types.RubricMetric.FINAL_RESPONSE_QUALITY]
+    metrics = [
+        types.RubricMetric.HALLUCINATION(judge_model=judge_model),
+        types.RubricMetric.FINAL_RESPONSE_QUALITY(judge_model=judge_model),
+    ]
     result = client.evals.evaluate(
         dataset=types.EvaluationDataset(eval_cases=eval_cases), metrics=metrics
     )
@@ -186,6 +200,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--agent", required=True, help="projects/.../reasoningEngines/<id>")
     parser.add_argument("--no-rubrics", action="store_true", help="deterministic checks only")
+    parser.add_argument(
+        "--judge",
+        choices=sorted(JUDGE_MODELS),
+        default="flash",
+        help="rubric judge: flash (default, cheap) or pro (~6-10x the cost, stricter)",
+    )
     args = parser.parse_args(argv)
 
     location = args.agent.split("/locations/", 1)[1].split("/", 1)[0]
@@ -198,7 +218,9 @@ def main(argv: list[str] | None = None) -> int:
         import vertexai
 
         client = vertexai.Client(project=project, location=location)
-        scores = rubric_scores(client, GOLDEN_CASES, [turn for turn, _ in results])
+        scores = rubric_scores(
+            client, GOLDEN_CASES, [turn for turn, _ in results], JUDGE_MODELS[args.judge]
+        )
 
     data = report(results, scores)
     # Fixed names in the working directory: no output path comes from the
