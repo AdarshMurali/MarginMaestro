@@ -33,6 +33,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G3 | MM-90 | AI guardrails (Model Armor, SDP, in-code) | **Done** |
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | **Done** (live run on GCP comes with G5) |
 | G5 | MM-92 | Agent Platform desk assistant, Cloud Run deployment, observability | In progress (MM-123, 124, 126, 127 done; MM-128 … 132 planned) |
+| G5c | MM-92 | Firebase App Hosting frontend (MM-145) + Firestore real-time status (MM-146), ADR-0021 | Code done 2026-10-07; apply, GitHub authorization and first rollout pending |
 | G6 | MM-93 | WhatsApp client notifications | Live (MM-118, MM-133, MM-134). **G6b code done** (MM-143 contacts, MM-144 PDF notice; one PR): migration, contacts and the v2 template approval pending |
 | G7 | MM-94 | BigQuery finance warehouse | Applied 2026-10-06 (masking off: needs an organization); 5-year backfill running; verify + reports next |
 | G8 | MM-95 | Data governance (Dataplex, classification, lineage, audit, retention) | Code done without BigQuery (MM-135, 136, 137; one PR). Then: migration on Cloud SQL, Terraform apply |
@@ -48,6 +49,36 @@ At the end of each story, prepend an entry to **Log** using this template:
 | 2026-09-30 | — | Cloud SQL stopped (`NEVER`) | Storage-only billing until G5; Vertex AI per-token only |
 
 ## Log
+
+### 2026-10-07 — MM-145 / MM-146: Firebase App Hosting frontend + Firestore real-time call status (Phase G5c) (code done; apply, GitHub authorization and first rollout pending)
+- **Done:**
+  - **MM-146, real-time status.**
+    - `src/realtime/publisher.py`: `margin_call_status/{thread_id}` doc (`thread_id`, `counterparty_id`, `status`, `call_amount`, `currency`, `sla_deadline`, `updated_at`, `book`) written after every `start_run` / `resume_run` / `reevaluate_run`, so every transition is covered: raised, re-evaluated, approved, manager-approved, notified, acknowledged / SLA met, escalated, rejected. Copied from `api.margin_calls.summarize_run` (the feed's own summary, nothing computed). Best effort (`realtime_publish_failed` warning), idempotent (whole-doc replace keyed by thread id; unchanged status not rewritten). `REALTIME=none` (default) | `firestore`.
+    - `src/realtime/tokens.py` + `GET /realtime/token` (`require_user`): Firebase custom token, claims `{firm_wide, cps}` from `scope_for`, signed as `FIREBASE_TOKEN_SIGNER` through IAM signBlob (google-auth `iam.Signer`, no firebase-admin, no key). 503 when real-time is off or signing fails.
+    - `firebase/firestore.rules`: signed-in reads of `margin_call_status` only for `firm_wide` or `counterparty_id in cps`; no client writes; deny-all fallback.
+    - Frontend: `lib/firebase.ts` (in-memory auth persistence), `lib/use-live-call-status.ts` (`signInWithCustomToken` + `onSnapshot`, query shaped to the rules), Approvals page and dashboard refetch on a pushed change and poll only as the fallback; a "Live / Auto-refresh" badge.
+  - **MM-145, App Hosting.** `frontend/apphosting.yaml` (min 0, 1 CPU, 512 MiB; `BACKEND_API_URL` = the Cloud Run API, `NEXT_PUBLIC_API_BASE_URL=/api`, `AUTH_TRUST_HOST`, `AUTH_URL` = the App Hosting domain, `AUTH_SECRET` / `AUTH_BACKEND_SECRET` as `secret:` refs). `next.config.ts` maps App Hosting's build-time `FIREBASE_WEBAPP_CONFIG` to `NEXT_PUBLIC_FIREBASE_*` (Vercel sets them explicitly). No host-specific code.
+  - Terraform `infra/gcp/firebase.tf`: Firebase APIs, Firestore `(default)` (native, us-central1, delete protection), rules ruleset + release, `mm-api-sa` → `roles/datastore.user` + `serviceAccountTokenCreator` on itself, `mm-apphosting-sa` (`firebaseapphosting.computeRunner`, accessor + viewer on the two frontend secrets only), Developer Connect GitHub connection (+ its service agent's `secretmanager.admin`, Google's documented requirement), and — gated by `app_hosting_github_connected` + `app_hosting_web_app_id` — the repository link, the App Hosting backend (`root_directory=/frontend`) and its rollout policy (`main`). Cloud Run env: `REALTIME`, `FIRESTORE_DATABASE`, `FIREBASE_TOKEN_SIGNER`, `CORS_ALLOWED_ORIGINS` = Vercel + App Hosting (`frontend_origin` → `frontend_origins` list).
+- **Decisions:** ADR-0021. Firestore is a notification channel, Postgres stays the source of truth (the browser refetches through the API, RLS applies). Custom-token claims + rules mirror `app_can_see()`. google-cloud-firestore for writes, google-auth for signing (no firebase-admin). Firm-wide listeners watch the 50 most recently updated docs (bounded reads).
+- **Changed:** `src/realtime/` (new), `src/agents/orchestrator.py` (`_publish_status`), `src/api/main.py` (`/realtime/token`), `src/api/margin_calls.py` (`summarize_run`), `src/api/schemas.py`, `src/config/settings.py`, `pyproject.toml` (`google-cloud-firestore` in `gcp`), `firebase/firestore.rules`, `frontend/` (apphosting.yaml, next.config.ts, lib/firebase.ts, lib/use-live-call-status.ts, lib/api.ts, components/live-badge.tsx, approvals + dashboard pages, `firebase` npm package), `infra/gcp/firebase.tf` / `variables.tf` / `cloud_run.tf`, tests (`test_realtime_publisher.py`, `test_realtime_token.py`, `test_firestore_rules.py`), README, `.env.example`, `frontend/.env.example`.
+- **Cost impact:** ~$0–0.10/month. Firestore and Firebase Auth inside the free quota; App Hosting = Cloud Run min 0 (free tier) + one Cloud Build per push to `main` (~4–6 min, 2,500 free min/month) + images in a Google-managed Artifact Registry repo (0.5 GB free, then $0.10/GB-month) + egress (10 GiB/month no-cost). `app_hosting_auto_rollout=false` stops per-push builds.
+- **Known issues / tech debt:**
+  - Rules are checked statically in CI (`test_firestore_rules.py`); an emulator test (`firebase emulators:exec` + `@firebase/rules-unit-testing`) needs Java + firebase-tools and isn't wired in.
+  - A change to an analyst's access rows reaches their Firebase claims on the next page load (new token).
+  - `AUTH_BACKEND_SECRET` now lives in two places (the API's JSON secret and `mm-frontend-auth-backend-secret`); rotate both together.
+  - App Hosting's Next.js 16 support is assumed from its adapter; verify on the first rollout.
+- **Next step — user (once):**
+  1. Firebase console → **Authentication → Get started** (initializes Firebase Auth; no sign-in provider needed for custom tokens).
+  2. Firebase console → Project settings → **Add app → Web** (`marginmaestro-web`), note its App ID (`1:793928354019:web:…`, not a secret) → `app_hosting_web_app_id` in tfvars.
+  3. After the first apply: open the `app_hosting_github_authorization` output's `action_uri`, sign in to GitHub and install the **Firebase App Hosting** GitHub app on `AdarshMurali/MarginMaestro`.
+  4. Add the frontend secret values (never in Terraform): `gcloud secrets versions add mm-frontend-auth-backend-secret --data-file=-` with the same value as the API secret's `auth_backend_secret` (Vercel's `AUTH_BACKEND_SECRET`), and `mm-frontend-auth-secret` with a fresh `openssl rand -base64 32` (or Vercel's `AUTH_SECRET`). Pipe from a file/stdin, never on the command line.
+  5. Optional, for live updates on Vercel too: set `NEXT_PUBLIC_FIREBASE_API_KEY / _AUTH_DOMAIN / _PROJECT_ID / _APP_ID` in the Vercel project from the web app's config, and redeploy.
+- **Next step — parent (apply order):**
+  1. After CD deploys this image: `terraform plan` / `apply` (APIs, Firestore, rules, IAM, secrets, Developer Connect connection; Cloud Run env `REALTIME=firestore`). If the Developer Connect service-agent binding fails because the agent doesn't exist yet: `gcloud beta services identity create --service=developerconnect.googleapis.com --project=marginmaestro-demo`, then re-apply. Verify the Cloud Run image sha after apply (stale-plan rule).
+  2. User steps 1–4.
+  3. Set `app_hosting_github_connected = true` and `app_hosting_web_app_id`, `terraform apply` again (repository link, backend, rollout policy). Start the first rollout: push to `main`, or `firebase apphosting:rollouts:create marginmaestro-web --git-branch main --project marginmaestro-demo`.
+  4. Verify: open `https://marginmaestro-web--marginmaestro-demo.us-central1.hosted.app`, log in as `approver`; open the Approvals page in a second browser as `manager` (or the dashboard as `auditor`) — both show **Live**. Approve a call in one; the other updates within ~1 s with no reload. Log in as `analyst1` and confirm only CP-1 … CP-4 changes arrive. Firestore console: `margin_call_status` docs carry ids/status/amount only. Vercel keeps working (Auto-refresh unless step 5).
+  5. Jira: transition MM-145 / MM-146 to Done after merge.
 
 ### 2026-10-06 — MM-143 / MM-144: Per-counterparty WhatsApp contacts and the personalised PDF notice (Phase G6b) (code done; migration, contacts and template approval pending)
 - **Done:**

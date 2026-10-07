@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 
 import {
@@ -9,7 +9,9 @@ import {
   type ExposureBoardResponse,
   type MarginCallFeedResponse,
 } from "@/lib/api";
+import { LiveBadge } from "@/components/live-badge";
 import { formatUsdCompact } from "@/lib/format";
+import { useLiveCallStatus } from "@/lib/use-live-call-status";
 import { cn } from "@/lib/utils";
 
 const TICKER_POLL_MS = 10_000;
@@ -69,24 +71,22 @@ export default function DashboardPage() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const refetch = () => {
-      getMarginCallFeed()
-        .then((result) => {
-          if (!cancelled) setFeed(result);
-        })
-        .catch(() => {
-          if (!cancelled) setError(true);
-        });
-    };
-    refetch();
-    const id = setInterval(refetch, TICKER_POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
+  const refetchFeed = useCallback(() => {
+    getMarginCallFeed()
+      .then(setFeed)
+      .catch(() => setError(true));
   }, []);
+
+  // MM-146: Firestore pushes each call status change and the feed refetches;
+  // the timer only runs as the fallback when the live listener is off.
+  const live = useLiveCallStatus(refetchFeed);
+
+  useEffect(() => {
+    refetchFeed();
+    if (live) return;
+    const id = setInterval(refetchFeed, TICKER_POLL_MS);
+    return () => clearInterval(id);
+  }, [refetchFeed, live]);
 
   const counterparties = exposure?.counterparties ?? [];
   const breached = counterparties.filter((c) => c.status === "breached").length;
@@ -129,9 +129,12 @@ export default function DashboardPage() {
         )}
 
         <section className="flex flex-col gap-3">
-          <span className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">
-            Needs attention
-          </span>
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">
+              Needs attention
+            </span>
+            <LiveBadge live={live} pollSeconds={TICKER_POLL_MS / 1000} />
+          </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <StatTile
               label="Breached counterparties"

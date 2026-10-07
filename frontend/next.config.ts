@@ -1,6 +1,33 @@
 import type { NextConfig } from "next";
 
+// MM-146: the Firebase web config for the real-time listener (public, not a
+// secret). Set NEXT_PUBLIC_FIREBASE_* explicitly (Vercel, local), or let
+// Firebase App Hosting supply it: App Hosting sets FIREBASE_WEBAPP_CONFIG (a
+// JSON object) at build time for the backend's web app. Absent both, the
+// frontend keeps polling.
+function firebaseWebEnv(): Record<string, string> {
+  let fromAppHosting: Record<string, string> = {};
+  try {
+    fromAppHosting = JSON.parse(process.env.FIREBASE_WEBAPP_CONFIG ?? "{}");
+  } catch {
+    fromAppHosting = {};
+  }
+  // `||`, not `??`: an explicitly empty value (.env.example) also falls back.
+  const pick = (explicit: string | undefined, key: string) =>
+    explicit || fromAppHosting[key] || "";
+  return {
+    NEXT_PUBLIC_FIREBASE_API_KEY: pick(process.env.NEXT_PUBLIC_FIREBASE_API_KEY, "apiKey"),
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: pick(
+      process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+      "authDomain",
+    ),
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID: pick(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID, "projectId"),
+    NEXT_PUBLIC_FIREBASE_APP_ID: pick(process.env.NEXT_PUBLIC_FIREBASE_APP_ID, "appId"),
+  };
+}
+
 const nextConfig: NextConfig = {
+  env: firebaseWebEnv(),
   // Deployed on Vercel (HTTPS) against a backend that's currently HTTP-only
   // (no domain/cert yet -- see docs/ROADMAP.md Phase 10). A browser page
   // served over HTTPS can't fetch a plain http:// URL directly (blocked as

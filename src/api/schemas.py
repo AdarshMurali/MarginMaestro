@@ -328,6 +328,18 @@ class PublicStatsResponse(BaseModel):
     calls_raised: int
 
 
+class RealtimeTokenResponse(BaseModel):
+    """A Firebase custom token for the browser's Firestore listener (MM-146).
+    `counterparty_ids` / `firm_wide` repeat the token's claims so the browser
+    can shape its query to what the security rules will allow."""
+
+    token: str
+    collection: str
+    firm_wide: bool
+    counterparty_ids: list[str]
+    expires_in: int
+
+
 class AuthVerifyRequest(BaseModel):
     username: str
     password: str

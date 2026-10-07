@@ -88,10 +88,10 @@ variable "api_image" {
   default     = "docker.io/adarshmurali/marginmaestro:latest"
 }
 
-variable "frontend_origin" {
-  description = "Browser origin allowed by the API's CORS policy (the Vercel frontend)."
-  type        = string
-  default     = "https://marginmaestro.vercel.app"
+variable "frontend_origins" {
+  description = "Browser origins allowed by the API's CORS policy. The Firebase App Hosting URL (MM-145) is added automatically (firebase.tf)."
+  type        = list(string)
+  default     = ["https://marginmaestro.vercel.app"]
 }
 
 variable "desk_agent_resource" {
@@ -265,4 +265,41 @@ variable "warehouse_masking" {
   description = "BigQuery dynamic data masking of confidential columns (MM-142). Needs the project to be in an organization; off here, so confidential columns are blocked (not masked) for readers without fine-grained read."
   type        = bool
   default     = false
+}
+
+# --- Firebase: App Hosting frontend (MM-145) + Firestore real-time status (MM-146) ---
+
+variable "realtime" {
+  description = "REALTIME on Cloud Run (MM-146): firestore (a status doc per margin call, pushed to subscribed browsers) or none (the frontend polls)."
+  type        = string
+  default     = "firestore"
+
+  validation {
+    condition     = contains(["none", "firestore"], var.realtime)
+    error_message = "realtime must be \"none\" or \"firestore\"."
+  }
+}
+
+variable "app_hosting_backend_id" {
+  description = "Firebase App Hosting backend id; also the first label of its default domain (<id>--<project>.<region>.hosted.app)."
+  type        = string
+  default     = "marginmaestro-web"
+}
+
+variable "app_hosting_web_app_id" {
+  description = "The Firebase Web App id the App Hosting backend belongs to (1:<number>:web:<hash>; Firebase console > Project settings > Your apps). Not a secret. Empty = no backend yet."
+  type        = string
+  default     = ""
+}
+
+variable "app_hosting_github_connected" {
+  description = "Set true only after the Firebase GitHub app has been authorized on the repo (output app_hosting_github_authorization). Gates the repository link, the App Hosting backend and its rollouts."
+  type        = bool
+  default     = false
+}
+
+variable "app_hosting_auto_rollout" {
+  description = "Build and roll out the frontend on every push to main. false = rollouts only when started by hand (fewer Cloud Build minutes)."
+  type        = bool
+  default     = true
 }

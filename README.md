@@ -82,7 +82,8 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full written design, 
 | Documents | **Cloud Storage** | CSA, policy, dispute and escalation documents (30-day retention, scanned by SDP) |
 | Eventing | **Pub/Sub + Cloud Tasks + Cloud Scheduler** | Live price refresh, impact events, one SLA timer per call, the daily margin run |
 | API | **FastAPI on Cloud Run** | Scales to zero; IAM database login; OIDC for internal callers |
-| Frontend | **Next.js on Vercel** | Real-time ops dashboard and the "Ask the Desk" chat, git-linked to auto-deploy on push to `main` |
+| Frontend | **Next.js on Firebase App Hosting + Vercel** | Real-time ops dashboard and the "Ask the Desk" chat; the same app on both hosts against the same API, each git-linked to auto-deploy on push to `main` (App Hosting: managed Cloud Run, scales to zero; MM-145, ADR-0021) |
+| Real-time status | **Firestore + Firebase Auth** | One small status doc per margin call, pushed to every open Approvals page and dashboard the moment a call changes; per-user scope via custom-token claims and security rules; Postgres stays the source of truth (MM-146, ADR-0021) |
 | Agent platform | **Vertex AI Agent Runtime** | The desk assistant: Sessions + Memory Bank, `min_instances=0`; evaluated with **Gen AI evaluation** in CI |
 | Tool interface | **MCP servers on Cloud Run** | Read-only market data, CSA/policy search and margin-call status; private, invoked only by the desk agent |
 | Notifications | **WhatsApp Cloud API + Slack** | Client notices on WhatsApp (approved template, signed webhook for replies and delivery status); Slack for internal approvals, alerts and escalations |

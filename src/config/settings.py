@@ -58,6 +58,17 @@ class Settings(BaseSettings):
     # needs GCP_PROJECT_ID). The dataset is created by Terraform.
     warehouse: str = "none"
     warehouse_dataset: str = "marginmaestro_analytics"
+    # MM-146 (ADR-0021): real-time margin-call status for the frontend. none
+    # (default: local/AWS unchanged, the frontend polls) | firestore (a small
+    # status doc per call in Firestore, pushed to subscribed browsers; best
+    # effort, never fails a call; needs GCP_PROJECT_ID).
+    realtime: str = "none"
+    firestore_database: str = "(default)"
+    realtime_collection: str = "margin_call_status"
+    # The service account that signs Firebase custom tokens for GET
+    # /realtime/token, through the IAM signBlob API (no key file). On Cloud
+    # Run: the API's own service account (Terraform sets it).
+    firebase_token_signer: str | None = None
     # MM-117: cost / loop bounds. Per run: <= max_agent_steps graph steps, each
     # LLM call <= llm_max_prompt_chars in and llm_max_output_tokens out.
     max_agent_steps: int = 25
