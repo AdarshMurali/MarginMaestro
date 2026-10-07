@@ -1,0 +1,6 @@
+# Tableau extracts and packaged workbooks hold the data (large); commit only .twb + screenshots.
+*.hyper
+*.tde
+*.twbx
+*.twbr
+~*
