@@ -160,8 +160,11 @@ resource "google_secret_manager_secret_iam_member" "app_hosting_reads_frontend_s
 
 # Developer Connect stores the GitHub OAuth token it receives as a secret in
 # this project, as its own service agent (Google's documented requirement for
-# a GitHub connection).
+# a GitHub connection). Reviewed Checkov skip, scoped to this one binding: the
+# member is a Google-managed service agent (not one of ours), and Developer
+# Connect needs to create the token secret and set its IAM.
 resource "google_project_iam_member" "developer_connect_secrets" {
+  #checkov:skip=CKV_GCP_42:Google-managed Developer Connect service agent; Google's documented requirement for a GitHub connection (ADR-0021)
   project = var.project_id
   role    = "roles/secretmanager.admin"
   member  = "serviceAccount:service-${data.google_project.this.number}@gcp-sa-devconnect.iam.gserviceaccount.com"
