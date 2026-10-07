@@ -418,7 +418,10 @@ function ReportTable({
             {rows.map((row) => (
               <tr key={row.join("|")} className="border-t border-neutral-100">
                 {row.map((cell, i) => (
-                  <td key={`${headers[i]}-${cell}`} className={cn("px-3 py-2", i > 0 && "font-mono")}>
+                  <td
+                    key={`${headers[i]}-${cell}`}
+                    className={cn("px-3 py-2 text-black", i > 0 && "font-mono")}
+                  >
                     {cell}
                   </td>
                 ))}
