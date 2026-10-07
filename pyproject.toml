@@ -47,7 +47,7 @@ auth = ["bcrypt", "pyjwt"]
 # gcp: runtime deps baked into the one app image (AWS + GCP, ground rule 6).
 # adk: the desk assistant (MM-129) -- deployed to Agent Runtime, not in the app image.
 # gcp-ops: tooling outside the app (billing kill-switch function), CI only.
-gcp = ["google-cloud-secret-manager", "google-genai", "google-cloud-storage", "google-cloud-modelarmor", "google-cloud-dlp", "google-cloud-pubsub", "google-cloud-tasks", "google-cloud-bigquery"]
+gcp = ["google-cloud-secret-manager", "google-genai", "google-cloud-storage", "google-cloud-modelarmor", "google-cloud-dlp", "google-cloud-pubsub", "google-cloud-tasks", "google-cloud-bigquery", "google-cloud-firestore"]
 adk = ["google-adk>=2.11,<3", "google-cloud-aiplatform[agent-engines,evaluation]>=1.148.1,<2"]
 gcp-ops = ["google-cloud-billing", "functions-framework"]
 observability = [

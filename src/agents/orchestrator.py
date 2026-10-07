@@ -88,6 +88,7 @@ from ports.guardrail import GuardrailError
 from ports.notifier import ClientDeliveryError, ClientNotice, Notifier
 from ports.sla_scheduler import SlaScheduler
 from rag.models import Citation
+from realtime.publisher import get_status_publisher
 from streaming.event_agent import latest_close_before
 from streaming.market_feed import MarketFeed, get_market_feed
 from streaming.schemas import ImpactSet, MarketEventType
@@ -882,6 +883,22 @@ def _run_span(
         yield
 
 
+def _publish_status(graph: CompiledStateGraph, thread_id: str) -> None:
+    """MM-146: after every invocation (start, resume, re-evaluation) the run
+    is at rest -- paused at a gate or ended -- so its status doc is pushed to
+    Firestore from the persisted state. Best effort: never fails the call."""
+    publisher = get_status_publisher()
+    if not publisher.enabled:
+        return
+    try:
+        values = graph.get_state({"configurable": {"thread_id": thread_id}}).values
+    except Exception as exc:  # noqa: BLE001 -- the call itself already succeeded
+        logger.warning("realtime_state_read_failed", thread_id=thread_id, error=type(exc).__name__)
+        return
+    if values:
+        publisher.publish(thread_id, dict(values))
+
+
 def start_run(graph: CompiledStateGraph, state: MarginCallState) -> dict:
     thread_id = thread_id_for(state.impact, state.counterparty_id)
     # MM-117: bound the steps one invocation may take (loop / cost guard).
@@ -899,6 +916,7 @@ def start_run(graph: CompiledStateGraph, state: MarginCallState) -> dict:
     # (Cloud Trace / Jaeger) instead of each step being its own trace.
     with _run_span("start", thread_id, state.correlation_id, state.counterparty_id):
         result = graph.invoke(state, config=config)
+    _publish_status(graph, thread_id)
     log.info(
         (
             "orchestrator_run_paused_for_approval"
@@ -920,6 +938,7 @@ def resume_run(graph: CompiledStateGraph, thread_id: str, resume_payload: dict) 
     correlation_id, counterparty_id = thread_id.rsplit(":", 1)
     with _run_span("resume", thread_id, correlation_id, counterparty_id):
         result = graph.invoke(Command(resume=resume_payload), config=config)
+    _publish_status(graph, thread_id)
     log.info("orchestrator_run_ended", approval_decision=result.get("approval_decision"))
     return result
 
@@ -945,7 +964,9 @@ def reevaluate_run(
     )
     graph.update_state(config, {"trigger": trigger, "updated_by": updated_by}, as_node=START)
     with _run_span("reevaluate", thread_id, correlation_id, counterparty_id):
-        return graph.invoke(None, config=config)
+        result = graph.invoke(None, config=config)
+    _publish_status(graph, thread_id)
+    return result
 
 
 # The lifecycle stages in which a call is open (MM-125): raised, not yet

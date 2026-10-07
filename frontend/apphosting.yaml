@@ -1,0 +1,55 @@
+# Firebase App Hosting (MM-145, ADR-0021): the same Next.js app Vercel serves,
+# built from frontend/ on every push to main, against the same Cloud Run API.
+# Only env differs between the two hosts -- no host-specific code.
+
+runConfig:
+  # Scale to zero: no cost while nobody is looking (first request pays a cold start).
+  minInstances: 0
+  maxInstances: 2
+  cpu: 1
+  memoryMiB: 512
+  concurrency: 80
+
+env:
+  # Server-side: NextAuth's login check and the /api/* rewrite proxy to the API
+  # (next.config.ts reads it at build time, lib/auth.ts at run time).
+  - variable: BACKEND_API_URL
+    value: https://marginmaestro-api-793928354019.us-central1.run.app
+    availability:
+      - BUILD
+      - RUNTIME
+
+  # Browser calls go to this same origin's /api/*, proxied to the API above.
+  - variable: NEXT_PUBLIC_API_BASE_URL
+    value: /api
+    availability:
+      - BUILD
+      - RUNTIME
+
+  # NextAuth v5 behind App Hosting's load balancer: trust the forwarded host,
+  # and pin this host's own URL (Vercel sets its own).
+  - variable: AUTH_TRUST_HOST
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: AUTH_URL
+    value: https://marginmaestro-web--marginmaestro-demo.us-central1.hosted.app
+    availability:
+      - RUNTIME
+
+  # Secrets: Secret Manager secrets created by infra/gcp/firebase.tf; values
+  # added out-of-band (docs/gcp/GCP_PROGRESS.md, MM-145 user steps).
+  - variable: AUTH_SECRET
+    secret: mm-frontend-auth-secret
+    availability:
+      - RUNTIME
+  # Signs the short-lived JWT the API verifies -- the same value as the API's
+  # auth_backend_secret (and Vercel's AUTH_BACKEND_SECRET).
+  - variable: AUTH_BACKEND_SECRET
+    secret: mm-frontend-auth-backend-secret
+    availability:
+      - RUNTIME
+
+  # MM-146: Firebase web config for the real-time listener. App Hosting
+  # provides FIREBASE_WEBAPP_CONFIG at build time for the backend's web app;
+  # next.config.ts maps it to NEXT_PUBLIC_FIREBASE_*. Nothing to set here.

@@ -65,7 +65,15 @@ locals {
     INTERNAL_BASE_URL = local.api_base_url
     CLOUD_TASKS_QUEUE = google_cloud_tasks_queue.sla_checks.name
 
-    CORS_ALLOWED_ORIGINS = var.frontend_origin
+    # Vercel and Firebase App Hosting (MM-145) serve the same frontend.
+    CORS_ALLOWED_ORIGINS = join(",", local.frontend_origins)
+
+    # MM-146 (ADR-0021): a status doc per margin call in Firestore, pushed to
+    # subscribed browsers; GET /realtime/token signs Firebase custom tokens as
+    # mm-api-sa (datastore.user + tokenCreator on itself, firebase.tf).
+    REALTIME              = var.realtime
+    FIRESTORE_DATABASE    = google_firestore_database.default.name
+    FIREBASE_TOKEN_SIGNER = google_service_account.component["api"].email
 
     # Traces go to Cloud Trace (MM-127); mm-api-sa has roles/cloudtrace.agent.
     TRACE_EXPORTER = "cloudtrace"

@@ -232,6 +232,21 @@ export function getMarginCallTrace(threadId: string): Promise<MarginCallTraceRes
   );
 }
 
+/** MM-146: a Firebase custom token for the real-time status listener. Its
+ * claims carry the caller's counterparty scope; Firestore's security rules
+ * enforce it, so the query below only has to match it. */
+export interface RealtimeTokenResponse {
+  token: string;
+  collection: string;
+  firm_wide: boolean;
+  counterparty_ids: string[];
+  expires_in: number;
+}
+
+export function getRealtimeToken(): Promise<RealtimeTokenResponse> {
+  return getJson<RealtimeTokenResponse>("/realtime/token");
+}
+
 export type ApprovalDecision = "approved" | "rejected" | "adjusted";
 
 export interface ApprovalResponse {

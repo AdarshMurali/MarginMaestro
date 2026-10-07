@@ -123,6 +123,14 @@ def _summarize(thread_id: str, values: dict, settings: Settings) -> MarginCallSu
     )
 
 
+def summarize_run(
+    thread_id: str, values: dict, settings: Settings | None = None
+) -> MarginCallSummary:
+    """One run's feed row from its checkpoint values. Also what the real-time
+    status doc copies (MM-146), so the pushed status can't drift from the feed."""
+    return _summarize(thread_id, values, settings or get_settings())
+
+
 def _all_summaries(
     graph: CompiledStateGraph, session: Session, settings: Settings
 ) -> list[MarginCallSummary]:

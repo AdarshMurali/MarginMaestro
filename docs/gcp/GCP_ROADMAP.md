@@ -54,6 +54,8 @@
 | 22 | **Cloud Audit Logs** | Admin + data-access logs on Cloud SQL, BigQuery, GCS, Secret Manager | — (new) | G8 | Low |
 | 23 | **IAM + Workload Identity Federation** | Least-privilege service account per service; keyless GitHub Actions login (this repo, `main` only) for automated Cloud Run deploys | AWS IAM | G0, G5 | Free |
 | 24 | **Cloud Billing budgets + kill-switch function** | $150 (₹12,600) cumulative trial budget (usage before credits), alerts at ≈ $25/$50/$75/$100/$125, automatic billing detach at $150 | — (new) | G0 | Free |
+| 25 | **Firebase App Hosting** | The Next.js frontend, built from GitHub `main` (managed Cloud Run, scales to zero); Vercel stays up against the same API (MM-145, ADR-0021) | — (alongside Vercel) | G5c | Low (Cloud Run / Cloud Build free tiers; images ≈ $0.10/GB-month past 0.5 GB) |
+| 26 | **Firestore + Firebase Auth** | Real-time margin-call status: one doc per call, pushed to open browsers; custom-token claims + security rules mirror row-level security (MM-146, ADR-0021) | 30 s polling | G5c | Free (1 GiB, 50k reads / 20k writes a day) |
 | — | *Non-GCP:* WhatsApp Business Cloud API | Client-facing margin-call notices + replies | Slack (client side only) | G6 | $0 (test number, ≤ 5 recipients) |
 | — | *Non-GCP, unchanged:* Slack, ServiceNow PDI, GitHub Actions, SonarCloud, Terraform | Internal ops alerts, SLA escalation incidents, CI, quality, IaC | — | — | Free |
 
@@ -174,6 +176,12 @@ Added 2026-10-02 after the first live run on GCP. Runs after G5, before G6 (user
   - A call still awaiting its first approval is re-evaluated in place (`reevaluate_run`); the approval gate re-arms with the new amount.
   - A call that is already signed or sent is never changed. The trigger is audited on it.
 - **Notice:** quotes `{DEADLINE}` = `notification_sent_at + MARGIN_CALL_SLA_MINUTES` and the code-built `{RATIONALE}`. Both are placeholders the model never fills.
+
+### Phase G5c — Firebase: App Hosting frontend + Firestore real-time status (MM-145, MM-146, under epic MM-92)
+ADR: 0021. Added 2026-10-07 for the AI Builder Cup 2026 (deadline 18 Oct: Firebase, Firestore, Cloud Run and Gemini in a GCP-deployed prototype).
+
+- **MM-145, Firebase App Hosting.** The same Next.js app on App Hosting (`frontend/apphosting.yaml`, backend `marginmaestro-web`, us-central1, min 0 instances), built from GitHub `main` through a Developer Connect connection (one-time browser authorization, gated by `app_hosting_github_connected`). Vercel stays up; both hosts use the same Cloud Run API, and only env differs. Frontend secrets `mm-frontend-auth-secret` / `mm-frontend-auth-backend-secret` in Secret Manager. CORS allows both origins (`frontend_origins` + the App Hosting URL).
+- **MM-146, Firestore real-time status.** `src/realtime/`: a status doc per call (`margin_call_status/{thread_id}`) written after every orchestrator invocation, copied from the feed's summary (best effort, idempotent, `REALTIME=none|firestore`). `GET /realtime/token` mints a Firebase custom token with the caller's scope as claims (IAM signBlob, no key file). `firebase/firestore.rules`: read own counterparties (or firm-wide), no client writes. The Approvals page and dashboard refetch on a pushed change; polling stays as the fallback.
 
 ### Phase G6 — WhatsApp client notifications (Epic: MM-93)
 ADR: 0016

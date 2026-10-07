@@ -74,6 +74,7 @@ from api.schemas import (
     PriceRefreshResponse,
     PublicStatsResponse,
     PubSubPushEnvelope,
+    RealtimeTokenResponse,
     ReportsStatusResponse,
     SimulateEventRequest,
     SimulateEventResponse,
@@ -88,6 +89,7 @@ from persistence.daily_close import load_daily_closes, refresh_reference_rates
 from persistence.db.engine import get_session_factory
 from persistence.db.rls import RLS_SCOPE_KEY, can_see, scope_for
 from ports.event_bus import EventBus
+from realtime.tokens import TOKEN_TTL_SECONDS, CustomTokenMinter, scope_claims
 from streaming.impact_consumer import daily_margin_run_impact, handle_impact
 from streaming.inbound import PubSubInbound
 from streaming.live_feed_publisher import publish_live_prices
@@ -455,6 +457,44 @@ async def public_stats() -> PublicStatsResponse:
         counterparties=counterparty_count,
         runs_evaluated=len(calls),
         calls_raised=sum(1 for c in calls if c.call_amount is not None and c.call_amount > 0),
+    )
+
+
+@lru_cache
+def get_token_minter() -> CustomTokenMinter:
+    """One IAM signer per process (MM-146)."""
+    signer = get_settings().firebase_token_signer
+    if not signer:
+        raise HTTPException(status_code=503, detail="FIREBASE_TOKEN_SIGNER is not configured")
+    return CustomTokenMinter(signer)
+
+
+@app.get("/realtime/token", response_model=RealtimeTokenResponse)
+def realtime_token(identity: Identity = Depends(require_user)) -> RealtimeTokenResponse:
+    """MM-146 (ADR-0021): a Firebase custom token whose claims carry the
+    caller's row-level-security scope, so Firestore's security rules show the
+    browser only the status docs of counterparties it may see. 503 when
+    real-time updates are off -- the frontend then keeps polling."""
+    settings = get_settings()
+    if settings.realtime != "firestore":
+        raise HTTPException(status_code=503, detail="Real-time updates are disabled")
+    session_factory = get_db_session_factory()
+    with session_factory() as lookup:
+        scope = scope_for(identity.role, identity.username, lookup)
+    claims = scope_claims(scope)
+    try:
+        token = get_token_minter().mint(identity.username, claims)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("realtime_token_failed", error=type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Real-time token unavailable") from exc
+    return RealtimeTokenResponse(
+        token=token,
+        collection=settings.realtime_collection,
+        firm_wide=claims["firm_wide"],
+        counterparty_ids=claims["cps"],
+        expires_in=TOKEN_TTL_SECONDS,
     )
 
 

@@ -12,8 +12,10 @@ import {
   postRespond,
   type MarginCallSummary,
 } from "@/lib/api";
+import { LiveBadge } from "@/components/live-badge";
 import { formatDateTime, formatUsd } from "@/lib/format";
 import { DARK_GREEN, LIGHT_GREEN } from "@/lib/brand";
+import { useLiveCallStatus } from "@/lib/use-live-call-status";
 import { cn } from "@/lib/utils";
 
 const FEED_POLL_MS = 30_000;
@@ -315,22 +317,27 @@ export default function ApprovalsPage() {
       .catch(() => setError(true));
   }, []);
 
-  // Calls also change outside this page -- a client's WhatsApp acknowledgement,
-  // the SLA timer, the daily margin run -- so the feed refreshes on a timer and
-  // whenever the tab comes back into view. Found 2026-10-06: an acknowledged
-  // call still showed "overdue" because the page had only loaded once.
+  // Calls also change outside this page -- another approver, a client's
+  // WhatsApp acknowledgement, the SLA timer, the daily margin run. MM-146:
+  // Firestore pushes each change (useLiveCallStatus) and the feed refetches;
+  // without it (no Firebase config, or real-time off) the feed polls on a
+  // timer. Either way it also refreshes when the tab comes back into view.
+  // Found 2026-10-06: an acknowledged call still showed "overdue" because the
+  // page had only loaded once.
+  const live = useLiveCallStatus(refetch);
+
   useEffect(() => {
     refetch();
-    const id = setInterval(refetch, FEED_POLL_MS);
+    const id = live ? null : setInterval(refetch, FEED_POLL_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") refetch();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
-      clearInterval(id);
+      if (id !== null) clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [refetch]);
+  }, [refetch, live]);
 
   const awaitingApproval = items?.filter((item) => item.status === "awaiting_approval") ?? [];
   const awaitingManagerApproval =
@@ -343,7 +350,10 @@ export default function ApprovalsPage() {
   return (
     <main className="flex min-h-full flex-1 flex-col bg-white">
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-12">
-        <h1 className="text-2xl font-semibold tracking-tight text-black">Approvals &amp; SLA</h1>
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-2xl font-semibold tracking-tight text-black">Approvals &amp; SLA</h1>
+          <LiveBadge live={live} pollSeconds={FEED_POLL_MS / 1000} />
+        </div>
 
         {error && (
           <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
