@@ -23,3 +23,5 @@ MarginMaestro automates the margin-call lifecycle for a collateral desk on Googl
   - A BigQuery finance warehouse: 5 years, 62M position-days, five risk reports.
   - Dataplex catalog, Data Lineage per call, audit logs.
   - Secret Manager, Cloud Trace/Logging/Monitoring, and Terraform for all infrastructure.
+
+**Prototype:** https://marginmaestro-web--marginmaestro-demo.us-central1.hosted.app (demo logins in the README)

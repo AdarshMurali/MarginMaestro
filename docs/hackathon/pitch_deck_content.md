@@ -88,5 +88,5 @@ Dashboard, Approvals, Margin-call trace, Reports, Ask the Desk, the WhatsApp not
 ## 13. Links
 - **GitHub:** https://github.com/AdarshMurali/MarginMaestro
 - **Demo video (3 min):** *(add after recording)*
-- **Product:** *(Firebase App Hosting URL once deployed)* (also https://marginmaestro.vercel.app)
+- **Product:** https://marginmaestro-web--marginmaestro-demo.us-central1.hosted.app (also https://marginmaestro.vercel.app)
 - **Demo logins:** approver / manager / analyst1 (passwords in the README)

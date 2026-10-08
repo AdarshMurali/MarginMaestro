@@ -21,7 +21,7 @@ const LIFECYCLE_STAGES = [
   { title: "Exposure", detail: "MTM, VM and IM are recomputed in deterministic Python." },
   { title: "Breach check", detail: "Exposure is checked against the CSA threshold, grounded via RAG." },
   { title: "Approval", detail: "A human reviews and approves before anything goes out." },
-  { title: "Notify", detail: "The client is notified over Slack; an SLA timer starts." },
+  { title: "Notify", detail: "The client gets a WhatsApp notice, the desk a Slack alert; an SLA timer starts." },
   { title: "Escalate", detail: "No response in time routes to ServiceNow automatically." },
 ];
 
