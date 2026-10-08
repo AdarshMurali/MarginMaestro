@@ -34,7 +34,7 @@ At the end of each story, prepend an entry to **Log** using this template:
 | G4 | MM-91 | Pub/Sub, Cloud Tasks SLA timers, Cloud Scheduler | **Done** (live run on GCP comes with G5) |
 | G5 | MM-92 | Agent Platform desk assistant, Cloud Run deployment, observability | In progress (MM-123, 124, 126, 127 done; MM-128 … 132 planned) |
 | G5c | MM-92 | Firebase App Hosting frontend (MM-145) + Firestore real-time status (MM-146), ADR-0021 | **Done** 2026-10-08: live at the App Hosting URL, Firestore Live verified |
-| G6 | MM-93 | WhatsApp client notifications | Live (MM-118, MM-133, MM-134). **G6b code done** (MM-143 contacts, MM-144 PDF notice; one PR): migration, contacts and the v2 template approval pending |
+| G6 | MM-93 | WhatsApp client notifications | **Live, full lifecycle verified 2026-10-08** (MM-118, MM-133, MM-134, MM-143, MM-144): all 8 counterparties mapped to 3 verified numbers, `margin_call_notice_v2` APPROVED, `whatsapp_notice_pdf=on` applied, CP-2 approved → PDF notice delivered → client Acknowledged on WhatsApp |
 | G7 | MM-94 | BigQuery finance warehouse | Applied 2026-10-06 (masking off: needs an organization); 5-year backfill running; verify + reports next |
 | G8 | MM-95 | Data governance (Dataplex, classification, lineage, audit, retention) | Code done without BigQuery (MM-135, 136, 137; one PR). Then: migration on Cloud SQL, Terraform apply |
 | G9 | MM-96 | Cut-over & AWS/Azure decommission | Not started |
