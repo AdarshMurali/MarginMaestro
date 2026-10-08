@@ -2,6 +2,8 @@
 
 This document describes the system design: the margin-call lifecycle, the event triggers, the agent mesh and orchestration, the streaming backbone, the data flows, and the cross-cutting concerns (security, observability, audit).
 
+> **Live runtime is Google Cloud.** Sections 1–8 below (the lifecycle, triggers, agent mesh, RAG pipeline) describe the design and are unchanged by the GCP move. Section 9 (component/deployment view) describes the **original AWS/Vercel/Azure SQL deployment**, which is now paused (`docs/AWS_PAUSE_RESUME.md`); the adapters keep it runnable locally by env flag (ADR-0017). For what is actually live today — Cloud Run, Pub/Sub, Cloud Tasks, Gemini on Vertex AI, Cloud SQL + pgvector, Firebase App Hosting + Firestore, BigQuery, WhatsApp client notices — see `docs/gcp/GCP_ROADMAP.md` / `GCP_PROGRESS.md` and the diagrams in `docs/architecture/gcp-tech-architecture-*.svg` and `functional-architecture.svg`.
+
 ---
 
 ## 1. Problem framing
