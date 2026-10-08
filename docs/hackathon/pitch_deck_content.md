@@ -48,7 +48,7 @@ Every step goes to: the audit log, lineage, the BigQuery facts and the Firestore
 Use real screenshots instead (slide 10).
 
 ## 7. Architecture diagram
-Use `docs/architecture/gcp-tech-architecture-multicolor.png`. Add Firebase App Hosting and Firestore if they're missing.
+Use `docs/architecture/gcp-tech-architecture-multicolor.png` (technical) and/or `docs/architecture/functional-architecture.png` (business-process view, same visual style) — both already show Firebase App Hosting, Firestore live status, BigQuery + Tableau reporting, Data Lineage and the CI security tools.
 
 ## 8. Technologies
 - **Gemini 2.5 Flash on Vertex AI:** CSA extraction, notice drafting, desk assistant.
@@ -80,7 +80,7 @@ Dashboard, Approvals, Margin-call trace, Reports, Ask the Desk, the WhatsApp not
 
 ## 12. Future development
 - BigQuery ML breach-likelihood score.
-- Real counterparty contacts and a production WhatsApp number.
+- A production WhatsApp number (today's 8 counterparties share 3 verified test numbers).
 - More asset classes and CSA types.
 - Agent Identity once Model Armor supports regional mTLS.
 - Multi-desk tenancy.
