@@ -6,37 +6,35 @@ import { useSession } from "next-auth/react";
 
 import { LogoMarkV2 } from "@/components/logo-v2";
 import { SessionBar } from "@/components/session-bar";
-import { BLACK, LIGHT_GREEN, WHITE } from "@/lib/brand";
+import { TickerTape } from "@/components/ticker-tape";
 import { cn } from "@/lib/utils";
 
 const TABS: { href: string; label: string; isActive: (pathname: string) => boolean }[] = [
   { href: "/dashboard", label: "Home", isActive: (p) => p === "/dashboard" },
-  { href: "/exposure", label: "Positions & Exposure", isActive: (p) => p === "/exposure" },
+  { href: "/exposure", label: "Exposure", isActive: (p) => p.startsWith("/exposure") },
   {
     href: "/margin-calls",
-    label: "Margin Calls",
+    label: "Margin calls",
     isActive: (p) => p === "/margin-calls",
   },
+  { href: "/approvals", label: "Approvals & SLA", isActive: (p) => p === "/approvals" },
   {
     href: "/agent-trace",
-    label: "Agent Trace",
+    label: "Agent trace",
     isActive: (p) => p === "/agent-trace" || p.endsWith("/trace"),
   },
-  { href: "/approvals", label: "Approvals & SLA", isActive: (p) => p === "/approvals" },
-  { href: "/simulate", label: "Simulate Event", isActive: (p) => p === "/simulate" },
-  { href: "/desk", label: "Ask the Desk", isActive: (p) => p === "/desk" },
+  { href: "/simulate", label: "Simulate", isActive: (p) => p === "/simulate" },
+  { href: "/desk", label: "Ask the desk", isActive: (p) => p === "/desk" },
   { href: "/reports", label: "Reports", isActive: (p) => p === "/reports" },
 ];
 
 const NO_CHROME_ROUTES = new Set(["/", "/login", "/landing", "/landing-v3", "/logo-preview"]);
 
-/** Persistent nav shell (MM-58) -- wraps every authenticated page with the
- * brand mark, the nav tabs, and the session bar. Renders nothing but
- * `children` on "/" (public landing page, promoted from landing-v2 on
- * 2026-08-06 -- has its own header, no session yet), /login (own centered
- * layout, no session yet), /landing* (earlier standalone design-exploration
- * routes, 2026-08-03), or /logo-preview (standalone logo comparison page,
- * 2026-08-05), or before a session exists. */
+/** Persistent nav shell (MM-58; White Paper theme 2026-10-15) -- wraps every
+ * authenticated page with a white top bar (brand mark, tabs, session) and a
+ * black scrolling ticker tape. Renders only `children` on "/" (public
+ * landing page with its own header), /login, the /landing* design
+ * explorations, /logo-preview, or before a session exists. */
 export function NavShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { status } = useSession();
@@ -46,37 +44,40 @@ export function NavShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-full flex-1 flex-col">
-      <header
-        className="flex flex-col gap-3 border-b border-white/10 px-6 py-3 sm:flex-row sm:items-center sm:justify-between"
-        style={{ backgroundColor: BLACK }}
-      >
-        <div className="flex items-center gap-6">
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <LogoMarkV2 size={24} />
-            <span className="font-heading text-sm font-semibold tracking-tight">
-              <span style={{ color: WHITE }}>Margin</span>
-              <span style={{ color: LIGHT_GREEN }}>Maestro</span>
+    <div className="flex min-h-full flex-1 flex-col bg-white">
+      <header className="border-b border-[#E5E5E5] bg-white">
+        <div className="mx-auto flex min-h-16 w-full max-w-[1360px] flex-wrap items-center gap-x-7 gap-y-2 px-6 py-2">
+          <Link href="/dashboard" className="flex items-center gap-2.5">
+            <LogoMarkV2 size={30} />
+            <span className="text-base font-extrabold tracking-tight text-[#0A0A0A]">
+              Margin<span className="font-medium">Maestro</span>
             </span>
           </Link>
-          <nav className="flex flex-wrap items-center gap-1">
-            {TABS.map((tab) => (
-              <Link
-                key={tab.href}
-                href={tab.href}
-                className={cn(
-                  "rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
-                  tab.isActive(pathname) ? "bg-white/10" : "text-white/55 hover:text-white",
-                )}
-                style={tab.isActive(pathname) ? { color: LIGHT_GREEN } : undefined}
-              >
-                {tab.label}
-              </Link>
-            ))}
+          <nav aria-label="Primary" className="flex flex-wrap items-center gap-1">
+            {TABS.map((tab) => {
+              const active = tab.isActive(pathname);
+              return (
+                <Link
+                  key={tab.href}
+                  href={tab.href}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "inline-flex min-h-10 items-center rounded-lg px-3 text-sm font-semibold transition-colors",
+                    active
+                      ? "bg-[#F2F2F2] text-[#0A0A0A]"
+                      : "text-[#5C5C5C] hover:bg-[#F7F7F7] hover:text-[#0A0A0A]",
+                  )}
+                >
+                  {tab.label}
+                </Link>
+              );
+            })}
           </nav>
+          <div className="flex-1" />
+          <SessionBar />
         </div>
-        <SessionBar />
       </header>
+      <TickerTape />
       <div className="flex flex-1 flex-col">{children}</div>
     </div>
   );
