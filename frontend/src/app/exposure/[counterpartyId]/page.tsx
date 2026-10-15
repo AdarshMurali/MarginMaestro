@@ -14,12 +14,12 @@ import {
   type MarginCallSummary,
 } from "@/lib/api";
 import { formatDateTime, formatUsd } from "@/lib/format";
-import { DARK_GREEN } from "@/lib/brand";
+import { INK } from "@/lib/brand";
 
 function DetailTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col items-center gap-1 rounded-xl border border-neutral-200 bg-white px-4 py-5 text-center">
-      <span className="font-mono text-xl font-semibold" style={{ color: DARK_GREEN }}>
+      <span className="font-mono text-xl font-semibold" style={{ color: INK }}>
         {value}
       </span>
       <span className="text-xs text-neutral-500">{label}</span>
@@ -95,7 +95,7 @@ export default function CounterpartyExposurePage() {
   return (
     <main className="flex min-h-full flex-1 flex-col bg-white">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-12">
-        <Link href="/exposure" className="text-sm font-medium" style={{ color: DARK_GREEN }}>
+        <Link href="/exposure" className="text-sm font-medium" style={{ color: INK }}>
           &larr; Back to positions &amp; exposure
         </Link>
 

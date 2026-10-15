@@ -6,7 +6,7 @@ import Link from "next/link";
 import { LifecycleStatusLight } from "@/components/lifecycle-status-light";
 import { getMarginCallBuckets, type MarginCallBucketFeedResponse } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
-import { DARK_GREEN } from "@/lib/brand";
+import { INK } from "@/lib/brand";
 
 // Fixed column template -- status pill | counterparty | date | arrow -- so
 // every row's fields line up regardless of how long a status label or
@@ -90,7 +90,7 @@ export default function AgentTraceIndexPage() {
                   </span>
                   <span
                     className="text-right text-xs font-medium opacity-0 transition-opacity group-hover:opacity-100"
-                    style={{ color: DARK_GREEN }}
+                    style={{ color: INK }}
                   >
                     View &rarr;
                   </span>

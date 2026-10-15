@@ -14,7 +14,7 @@ import {
 } from "@/lib/api";
 import { LiveBadge } from "@/components/live-badge";
 import { formatDateTime, formatUsd } from "@/lib/format";
-import { DARK_GREEN, LIGHT_GREEN } from "@/lib/brand";
+import { INK } from "@/lib/brand";
 import { useLiveCallStatus } from "@/lib/use-live-call-status";
 import { cn } from "@/lib/utils";
 
@@ -34,8 +34,7 @@ function PrimaryButton({
   return (
     <button
       {...props}
-      className="rounded-full px-4 py-1.5 text-sm font-medium text-black transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-      style={{ backgroundColor: LIGHT_GREEN }}
+      className="inline-flex min-h-9 items-center rounded-[10px] bg-[#0A0A0A] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#262626] disabled:cursor-not-allowed disabled:opacity-40"
     >
       {children}
     </button>
@@ -98,7 +97,7 @@ function ApprovalCard({
       <p className="text-neutral-500">{item.reason}</p>
       <p className="font-mono text-black">
         Call amount:{" "}
-        <span style={{ color: DARK_GREEN }}>{formatUsd(item.call_amount, item.currency)}</span>
+        <span style={{ color: INK }}>{formatUsd(item.call_amount, item.currency)}</span>
       </p>
 
       {error && <p className="text-red-600">{error}</p>}
@@ -181,7 +180,7 @@ function ManagerApprovalCard({
       <p className="text-neutral-500">{item.reason}</p>
       <p className="font-mono text-black">
         Call amount:{" "}
-        <span style={{ color: DARK_GREEN }}>{formatUsd(item.call_amount, item.currency)}</span>
+        <span style={{ color: INK }}>{formatUsd(item.call_amount, item.currency)}</span>
       </p>
 
       {error && <p className="text-red-600">{error}</p>}
@@ -241,7 +240,7 @@ function SlaCard({
       <span className="font-medium text-black">{item.counterparty_id}</span>
       <p className="font-mono text-black">
         Call amount:{" "}
-        <span style={{ color: DARK_GREEN }}>{formatUsd(item.call_amount, item.currency)}</span>
+        <span style={{ color: INK }}>{formatUsd(item.call_amount, item.currency)}</span>
       </p>
       {item.sla_deadline && (
         <p className="text-neutral-500">
@@ -292,7 +291,7 @@ function TabTrigger({
         "relative flex-1 rounded-lg px-3 py-2.5 text-sm font-medium outline-none transition-colors",
         active ? "bg-white text-black shadow-sm" : "text-neutral-500 hover:text-black",
       )}
-      style={active ? { color: DARK_GREEN } : undefined}
+      style={active ? { color: INK } : undefined}
     >
       {label}
       <span className="ml-1.5 font-mono text-xs text-neutral-400">({count})</span>

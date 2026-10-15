@@ -10,10 +10,10 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import { getPriceHistory, type PricePoint } from "@/lib/api";
-import { DARK_GREEN } from "@/lib/brand";
+import { INK } from "@/lib/brand";
 
 const chartConfig = {
-  price: { label: "Price (USD)", color: DARK_GREEN },
+  price: { label: "Price (USD)", color: INK },
 } satisfies ChartConfig;
 
 type LoadState = "loading" | "ready" | "error";

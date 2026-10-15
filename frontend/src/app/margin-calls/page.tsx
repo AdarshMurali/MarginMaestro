@@ -6,7 +6,7 @@ import Link from "next/link";
 import { LifecycleStatusLight } from "@/components/lifecycle-status-light";
 import { getMarginCallBuckets, type MarginCallBucket, type MarginCallBucketFeedResponse } from "@/lib/api";
 import { formatDateTime, formatUsd } from "@/lib/format";
-import { DARK_GREEN } from "@/lib/brand";
+import { INK } from "@/lib/brand";
 
 function BucketCard({ bucket }: { bucket: MarginCallBucket }) {
   const call = bucket.latest;
@@ -57,7 +57,7 @@ function BucketCard({ bucket }: { bucket: MarginCallBucket }) {
           <Link
             href={`/margin-calls/${encodeURIComponent(call.thread_id)}/trace`}
             className="text-xs font-medium underline-offset-4 hover:underline"
-            style={{ color: DARK_GREEN }}
+            style={{ color: INK }}
           >
             View agent trace &rarr;
           </Link>
