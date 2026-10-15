@@ -1,15 +1,17 @@
 export { auth as proxy } from "@/lib/auth";
 
 // Whole app requires login (confirmed design decision, MM-57), except:
-// - "/" itself: the public landing page (promoted from landing-v2,
-//   2026-08-06) -- this is where users land first and get the option to
-//   sign in, so it can't require a session already.
+// - "/" itself: the public landing page -- this is where users land first
+//   and get the option to sign in, so it can't require a session already.
 // - /login and NextAuth's own API routes.
-// - /landing, /landing-v3, /logo-preview: earlier standalone
-//   design-exploration routes (2026-08-03/05), same reasoning as "/".
 // Every other route redirects to /login via NextAuth's `auth` wrapper,
 // which redirects automatically when `pages.signIn` is configured and
 // there is no session.
+//
+// The earlier /landing, /landing-v3, /landing-apple/-mono/-v4/-aurum and
+// /logo-preview design-exploration routes (2026-08-03 .. 2026-09-17) were
+// removed once the White Paper theme (MM-147, 2026-10-15) picked a winner;
+// "/" and /login carry that theme directly now.
 export const config = {
-  matcher: ["/((?!api/auth|landing|logo-preview|_next/static|_next/image|favicon.ico|$).*)"],
+  matcher: ["/((?!api/auth|_next/static|_next/image|favicon.ico|$).*)"],
 };

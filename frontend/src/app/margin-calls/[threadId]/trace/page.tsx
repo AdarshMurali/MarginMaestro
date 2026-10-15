@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 
 import { AgentTrace } from "@/components/agent-trace";
 import { getMarginCallTrace, type MarginCallTraceResponse } from "@/lib/api";
-import { DARK_GREEN } from "@/lib/brand";
+import { INK } from "@/lib/brand";
 
 export default function MarginCallTracePage() {
   const params = useParams<{ threadId: string }>();
@@ -43,7 +43,7 @@ export default function MarginCallTracePage() {
           <button
             onClick={() => router.back()}
             className="w-fit text-sm font-medium underline-offset-4 hover:underline"
-            style={{ color: DARK_GREEN }}
+            style={{ color: INK }}
           >
             &larr; Back
           </button>

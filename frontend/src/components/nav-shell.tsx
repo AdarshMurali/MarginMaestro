@@ -28,13 +28,13 @@ const TABS: { href: string; label: string; isActive: (pathname: string) => boole
   { href: "/reports", label: "Reports", isActive: (p) => p === "/reports" },
 ];
 
-const NO_CHROME_ROUTES = new Set(["/", "/login", "/landing", "/landing-v3", "/logo-preview"]);
+const NO_CHROME_ROUTES = new Set(["/", "/login"]);
 
 /** Persistent nav shell (MM-58; White Paper theme 2026-10-15) -- wraps every
  * authenticated page with a white top bar (brand mark, tabs, session) and a
  * black scrolling ticker tape. Renders only `children` on "/" (public
- * landing page with its own header), /login, the /landing* design
- * explorations, /logo-preview, or before a session exists. */
+ * landing page, own header) and /login (own centered layout), or before a
+ * session exists. */
 export function NavShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { status } = useSession();

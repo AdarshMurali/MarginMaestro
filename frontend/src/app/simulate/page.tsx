@@ -12,7 +12,7 @@ import {
   type SimulateEventResponse,
 } from "@/lib/api";
 import { formatUsd } from "@/lib/format";
-import { DARK_GREEN, LIGHT_GREEN } from "@/lib/brand";
+import { INK } from "@/lib/brand";
 
 const EVENT_KINDS: { value: SimulateEventKind; label: string }[] = [
   { value: "price_shock", label: "Price shock" },
@@ -125,8 +125,7 @@ export default function SimulatePage() {
           <button
             disabled={busy || !canSubmit}
             onClick={trigger}
-            className="w-fit rounded-full px-4 py-1.5 text-sm font-medium text-black transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ backgroundColor: LIGHT_GREEN }}
+            className="inline-flex w-fit min-h-9 items-center rounded-[10px] bg-[#0A0A0A] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#262626] disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy ? "Simulating..." : "Trigger simulation"}
           </button>
@@ -164,7 +163,7 @@ export default function SimulatePage() {
                       <Link
                         href={`/margin-calls/${encodeURIComponent(item.thread_id)}/trace`}
                         className="underline underline-offset-4"
-                        style={{ color: DARK_GREEN }}
+                        style={{ color: INK }}
                       >
                         View trace &rarr;
                       </Link>

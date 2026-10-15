@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { getCounterparties, type CounterpartyListResponse } from "@/lib/api";
-import { DARK_GREEN } from "@/lib/brand";
+import { INK } from "@/lib/brand";
 
 export default function ExposurePage() {
   const [list, setList] = useState<CounterpartyListResponse | null>(null);
@@ -61,7 +61,7 @@ export default function ExposurePage() {
                 </div>
                 <span
                   className="text-xs font-medium opacity-0 transition-opacity group-hover:opacity-100"
-                  style={{ color: DARK_GREEN }}
+                  style={{ color: INK }}
                 >
                   Open &rarr;
                 </span>

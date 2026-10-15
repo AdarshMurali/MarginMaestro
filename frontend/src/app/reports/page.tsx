@@ -36,7 +36,7 @@ import {
   type ReportsStatusResponse,
   type StressBacktestReport,
 } from "@/lib/api";
-import { DARK_GREEN } from "@/lib/brand";
+import { INK } from "@/lib/brand";
 import { formatUsdCompact } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -138,7 +138,7 @@ function Empty() {
 // --- 1. exposure & threshold headroom ------------------------------------------------
 
 const exposureConfig = {
-  exposure: { label: "Exposure", color: DARK_GREEN },
+  exposure: { label: "Exposure", color: INK },
   threshold: { label: "Threshold", color: GREY },
   headroom: { label: "Headroom", color: AMBER },
 } satisfies ChartConfig;
@@ -186,7 +186,7 @@ function ExposureTrend({ book, period }: { book: ReportBook; period: ReportPerio
 // --- 2. collateral adequacy ----------------------------------------------------------
 
 const adequacyConfig = {
-  counterparties: { label: "Counterparties", color: DARK_GREEN },
+  counterparties: { label: "Counterparties", color: INK },
 } satisfies ChartConfig;
 
 function CollateralAdequacy({ book, period }: { book: ReportBook; period: ReportPeriod }) {
@@ -239,7 +239,7 @@ function CollateralAdequacy({ book, period }: { book: ReportBook; period: Report
 // --- 3. concentration ------------------------------------------------------------------
 
 const concentrationConfig = {
-  gross: { label: "Gross market value", color: DARK_GREEN },
+  gross: { label: "Gross market value", color: INK },
 } satisfies ChartConfig;
 
 function Concentration({ book, period }: { book: ReportBook; period: ReportPeriod }) {
@@ -288,7 +288,7 @@ function Concentration({ book, period }: { book: ReportBook; period: ReportPerio
 // --- 4. margin-call performance ----------------------------------------------------------
 
 const performanceConfig = {
-  sla_met: { label: "SLA met", color: DARK_GREEN },
+  sla_met: { label: "SLA met", color: INK },
   sla_breached: { label: "SLA breached", color: RED },
   open_calls: { label: "Open", color: GREY },
 } satisfies ChartConfig;
@@ -341,7 +341,7 @@ function MarginCallPerformance({ book, period }: { book: ReportBook; period: Rep
 // --- 5. stress / backtest ------------------------------------------------------------------
 
 const stressConfig = {
-  calls_raised: { label: "Calls raised", color: DARK_GREEN },
+  calls_raised: { label: "Calls raised", color: INK },
   max_vix: { label: "Max VIX", color: AMBER },
 } satisfies ChartConfig;
 

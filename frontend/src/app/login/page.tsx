@@ -7,7 +7,7 @@ import Link from "next/link";
 
 import { LogoMarkV2 } from "@/components/logo-v2";
 import { getHealth } from "@/lib/api";
-import { BLACK, LIGHT_GREEN, WHITE, HERO_GRADIENT } from "@/lib/brand";
+import { MUTED, LINE, TEXT_RED } from "@/lib/brand";
 
 function LoginForm() {
   const router = useRouter();
@@ -44,12 +44,11 @@ function LoginForm() {
   };
 
   return (
-    <div
-      className="fade-up relative z-10 w-full max-w-sm rounded-2xl p-6 shadow-2xl shadow-black/40"
-      style={{ backgroundColor: WHITE, color: BLACK }}
-    >
-      <h1 className="text-lg font-semibold">Sign in</h1>
-      <p className="mt-1 text-sm text-neutral-500">Enter your credentials to reach the dashboard.</p>
+    <div className="fade-up relative z-10 w-full max-w-sm rounded-2xl border p-6 shadow-sm" style={{ borderColor: LINE }}>
+      <h1 className="text-lg font-bold">Sign in</h1>
+      <p className="mt-1 text-sm" style={{ color: MUTED }}>
+        Enter your credentials to reach the dashboard.
+      </p>
       <form className="mt-6 flex flex-col gap-3" onSubmit={submit}>
         <input
           type="text"
@@ -57,7 +56,7 @@ function LoginForm() {
           autoComplete="username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          className="rounded-lg border border-neutral-200 px-4 py-2.5 text-sm text-black outline-none transition-colors focus:border-[#D3F770] focus:ring-2 focus:ring-[#D3F770]/40"
+          className="rounded-lg border border-[#D4D4D4] px-4 py-2.5 text-sm text-[#0A0A0A] outline-none transition-colors focus:border-[#0A0A0A] focus:ring-2 focus:ring-[#0A0A0A]/10"
         />
         <input
           type="password"
@@ -65,14 +64,17 @@ function LoginForm() {
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="rounded-lg border border-neutral-200 px-4 py-2.5 text-sm text-black outline-none transition-colors focus:border-[#D3F770] focus:ring-2 focus:ring-[#D3F770]/40"
+          className="rounded-lg border border-[#D4D4D4] px-4 py-2.5 text-sm text-[#0A0A0A] outline-none transition-colors focus:border-[#0A0A0A] focus:ring-2 focus:ring-[#0A0A0A]/10"
         />
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && (
+          <p className="text-sm" style={{ color: TEXT_RED }}>
+            {error}
+          </p>
+        )}
         <button
           type="submit"
           disabled={busy || !username || !password}
-          className="mt-1 rounded-full px-6 py-2.5 text-sm font-semibold transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ backgroundColor: LIGHT_GREEN, color: BLACK }}
+          className="mt-1 inline-flex min-h-11 items-center justify-center rounded-[10px] bg-[#0A0A0A] px-6 text-sm font-bold text-white transition-colors hover:bg-[#262626] disabled:cursor-not-allowed disabled:opacity-40"
         >
           {busy ? "Signing in..." : "Sign in"}
         </button>
@@ -83,12 +85,9 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <main
-      className="login-v2 relative flex min-h-full flex-1 flex-col items-center justify-center gap-8 overflow-hidden px-6 py-16"
-      style={{ background: HERO_GRADIENT }}
-    >
+    <main className="login relative flex min-h-full flex-1 flex-col items-center justify-center gap-8 bg-white px-6 py-16 text-[#0A0A0A]">
       <style>{`
-        .login-v2 .fade-up {
+        .login .fade-up {
           animation: loginFadeUp 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
         }
         @keyframes loginFadeUp {
@@ -96,31 +95,18 @@ export default function LoginPage() {
           to { opacity: 1; transform: translateY(0); }
         }
         @media (prefers-reduced-motion: reduce) {
-          .login-v2 .fade-up { animation: none; }
+          .login .fade-up { animation: none; }
         }
       `}</style>
-
-      {/* Same 64px/0.04-opacity grid as the landing hero, top-to-bottom fade */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{
-          backgroundImage:
-            "repeating-linear-gradient(0deg, rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 1px, transparent 1px, transparent 64px)," +
-            "repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 1px, transparent 1px, transparent 64px)",
-          maskImage: "linear-gradient(to bottom, black, transparent)",
-        }}
-      />
 
       <Link href="/" className="relative z-10 flex flex-col items-center gap-3 text-center">
         <div className="flex items-center gap-3">
           <LogoMarkV2 size={40} />
-          <span className="text-2xl font-semibold tracking-tight">
-            <span style={{ color: WHITE }}>Margin</span>
-            <span style={{ color: LIGHT_GREEN }}>Maestro</span>
+          <span className="text-2xl font-extrabold tracking-tight">
+            Margin<span className="font-medium">Maestro</span>
           </span>
         </div>
-        <span className="max-w-sm text-sm text-white/70">
+        <span className="max-w-sm text-sm" style={{ color: MUTED }}>
           Stop reading documents. Start making decisions.
         </span>
       </Link>
@@ -130,10 +116,10 @@ export default function LoginPage() {
       </Suspense>
 
       <div className="relative z-10 flex flex-col items-center gap-2 text-center">
-        <p className="max-w-sm text-xs text-white/50">
-          Demo accounts: approver / viewer -- ask the team for credentials.
+        <p className="max-w-sm text-xs" style={{ color: MUTED }}>
+          Demo accounts: approver / analyst1 / manager / auditor -- see the README for passwords.
         </p>
-        <Link href="/" className="text-xs text-white/50 underline-offset-4 hover:text-white/80 hover:underline">
+        <Link href="/" className="text-xs underline-offset-4 hover:underline" style={{ color: MUTED }}>
           &larr; Back to home
         </Link>
       </div>

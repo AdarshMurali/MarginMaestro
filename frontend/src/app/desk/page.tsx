@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 
 import { postDeskChat } from "@/lib/api";
-import { DARK_GREEN, LIGHT_GREEN } from "@/lib/brand";
+import { INK } from "@/lib/brand";
 
 // MM-129: "Ask the margin desk" -- a chat with the ADK agent on Agent
 // Runtime. The page only shows the conversation: the agent picks its tools
@@ -121,7 +121,7 @@ export default function DeskPage() {
                 className="max-w-[85%] whitespace-pre-wrap rounded-xl px-4 py-2.5 text-sm"
                 style={
                   turn.role === "analyst"
-                    ? { backgroundColor: DARK_GREEN, color: "white" }
+                    ? { backgroundColor: INK, color: "white" }
                     : { backgroundColor: "#f5f5f5", color: "black" }
                 }
               >
@@ -132,8 +132,8 @@ export default function DeskPage() {
                   {turn.tools.map((tool) => (
                     <span
                       key={tool}
-                      className="rounded-full px-2 py-0.5 text-[11px]"
-                      style={{ backgroundColor: LIGHT_GREEN, color: DARK_GREEN }}
+                      className="rounded-full bg-[#F2F2F2] px-2 py-0.5 text-[11px]"
+                      style={{ color: INK }}
                     >
                       {TOOL_LABELS[tool] ?? tool}
                     </span>
@@ -166,7 +166,7 @@ export default function DeskPage() {
             type="submit"
             disabled={busy || !input.trim()}
             className="rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-            style={{ backgroundColor: DARK_GREEN }}
+            style={{ backgroundColor: INK }}
           >
             Send
           </button>
