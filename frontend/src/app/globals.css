@@ -7,9 +7,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-geist-sans);
+  --font-sans: var(--font-app-sans);
+  --font-mono: var(--font-app-mono);
+  --font-heading: var(--font-app-sans);
   --color-status-success: var(--status-success);
   --color-status-warning: var(--status-warning);
   --color-status-danger: var(--status-danger);
@@ -52,58 +52,69 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* MarginMaestro is dark-only (design pass, MM-51/docs/ROADMAP.md Phase 8
-   note): this project has no light-mode toggle, so :root intentionally
-   mirrors .dark rather than shipping an unused light theme -- <html> always
-   carries the "dark" class (see layout.tsx). */
-:root,
-.dark {
-  --background: #0b0f17;
-  --foreground: #e8eaed;
-  --card: #12192a;
-  --card-foreground: #e8eaed;
-  --popover: #12192a;
-  --popover-foreground: #e8eaed;
-  --primary: #e8a33d;
-  --primary-foreground: #171208;
-  --secondary: #1b2333;
-  --secondary-foreground: #e8eaed;
-  --muted: #1b2333;
-  --muted-foreground: #94a3b8;
-  --accent: #1f2937;
-  --accent-foreground: #e8eaed;
-  --destructive: #ef4444;
+/* White Paper theme (home redesign "E4", 2026-10-15): the app is light --
+   white surfaces, near-black ink, and only three status colours (green /
+   amber / red) used for small marks, never big fills. The authenticated
+   pages already drew themselves on white; this makes the shared tokens
+   (shadcn components, body, borders) agree with them. The public landing
+   and login pages keep their own black hero styling. */
+:root {
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --primary: #0a0a0a;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f4;
+  --secondary-foreground: #0a0a0a;
+  --muted: #f4f4f4;
+  --muted-foreground: #5c5c5c;
+  --accent: #f2f2f2;
+  --accent-foreground: #0a0a0a;
+  --destructive: #c42a30;
   --destructive-foreground: #ffffff;
-  --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.12);
-  --ring: #e8a33d;
-  /* Status-color convention, used consistently everywhere in the dashboard
-     (exposure lights, call status, SLA countdowns): brand light-green =
-     healthy/met, amber = approaching/at-risk, red = breached/escalated,
-     neutral gray = in-progress/agent-is-working. Pulled from the same
-     black/white/green palette as the rest of the app (see lib/brand.ts and
-     the #dc2626/#b45309 danger/warning tones used on the dashboard) instead
-     of the old dark-navy/gold theme's stock Tailwind blue -- "evaluating"
-     etc. are pending states, not alerts, so they get a neutral tone rather
-     than competing with red/amber/green for attention. */
-  --status-success: #d3f770;
-  --status-warning: #b45309;
-  --status-danger: #dc2626;
+  --border: #e5e5e5;
+  --input: #d4d4d4;
+  --ring: #0a0a0a;
+  /* Status colours: green = healthy/met, amber = approaching/at risk,
+     red = breached/escalated, grey = in progress. */
+  --status-success: #00b86b;
+  --status-warning: #f5a623;
+  --status-danger: #e5484d;
   --status-info: #737373;
-  --chart-1: #e8a33d;
-  --chart-2: #3b82f6;
-  --chart-3: #22c55e;
-  --chart-4: #ef4444;
-  --chart-5: #a78bfa;
+  --chart-1: #0a0a0a;
+  --chart-2: #5c5c5c;
+  --chart-3: #00b86b;
+  --chart-4: #e5484d;
+  --chart-5: #f5a623;
   --radius: 0.625rem;
-  --sidebar: #0e131f;
-  --sidebar-foreground: #e8eaed;
-  --sidebar-primary: #e8a33d;
-  --sidebar-primary-foreground: #171208;
-  --sidebar-accent: #1b2333;
-  --sidebar-accent-foreground: #e8eaed;
-  --sidebar-border: rgba(255, 255, 255, 0.08);
-  --sidebar-ring: #e8a33d;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0a0a0a;
+  --sidebar-primary: #0a0a0a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f2f2f2;
+  --sidebar-accent-foreground: #0a0a0a;
+  --sidebar-border: #e5e5e5;
+  --sidebar-ring: #0a0a0a;
+}
+
+/* Scrolling ticker tape in the top bar: the list is rendered twice and
+   slides by half its width, so it loops seamlessly. Pauses on hover and
+   stays still for people who prefer reduced motion. */
+@keyframes mm-tape {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.mm-tape {
+  display: flex;
+  width: max-content;
+  animation: mm-tape 60s linear infinite;
+}
+.mm-tape-wrap:hover .mm-tape { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .mm-tape { animation: none; }
 }
 
 @layer base {
