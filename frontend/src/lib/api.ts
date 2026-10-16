@@ -337,7 +337,7 @@ export interface MarketUniverseResponse {
 }
 
 export function getMarketUniverse(): Promise<MarketUniverseResponse> {
-  return getJson<MarketUniverseResponse>("/market-universe");
+  return getJson<MarketUniverseResponse>("/market-universe", { auth: false });
 }
 
 // MM-129: "Ask the margin desk" -- one chat turn with the ADK agent on Agent
