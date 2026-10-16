@@ -1,7 +1,6 @@
 import Link from "next/link";
 import {
   ArrowRight,
-  BadgeCheck,
   Calculator,
   FileSearch,
   MessageCircle,
@@ -49,18 +48,6 @@ const BUILT_ON = [
   { logo: "/logos/github-actions.svg", name: "GitHub Actions" },
   { logo: "/logos/terraform.svg", name: "Terraform" },
 ];
-
-function SignInButton({ label = "Sign in to the dashboard" }: { label?: string }) {
-  return (
-    <Link
-      href="/login"
-      className="group inline-flex min-h-11 items-center gap-2 rounded-[10px] bg-[#0A0A0A] px-6 text-sm font-bold text-white transition-colors hover:bg-[#262626]"
-    >
-      {label}
-      <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5" aria-hidden />
-    </Link>
-  );
-}
 
 export default function LandingPage() {
   return (
@@ -116,42 +103,35 @@ export default function LandingPage() {
             WebkitMaskImage: "linear-gradient(to bottom, black, transparent 85%)",
           }}
         />
-        <div className="relative mx-auto flex w-full max-w-6xl flex-col items-start gap-16 lg:flex-row lg:items-center lg:justify-between">
+        <div className="relative mx-auto flex w-full max-w-6xl flex-col items-start gap-16 lg:flex-row lg:items-center lg:justify-between lg:gap-10">
           <div className="flex max-w-xl flex-col items-start gap-6">
-            <span className="fade-up inline-flex items-center gap-2 rounded-full border border-[#E5E5E5] bg-white px-3 py-1 text-xs font-semibold text-[#3D3D3D]">
-              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: BRAND_GREEN }} />
-              Margin-call automation with a human in the loop
-            </span>
-            <h1 className="fade-up d1 text-4xl font-extrabold leading-[1.04] tracking-[-0.035em] text-balance sm:text-[56px]">
+            <h1 className="fade-up text-4xl font-extrabold leading-[1.05] tracking-[-0.03em] text-balance sm:text-5xl">
               Stop reading documents.
               <br />
               <span className="text-[#8A8A8A]">Start making decisions.</span>
             </h1>
-            <p className="fade-up d2 max-w-md text-[16px] leading-relaxed" style={{ color: MUTED }}>
-              AI agents watch every counterparty&apos;s exposure, ground every threshold in the
-              actual CSA, draft the call with the numbers computed in code, and wait for you
-              before anything reaches a client.
+            <p className="fade-up d1 max-w-md text-[15px] leading-relaxed" style={{ color: MUTED }}>
+              AI agents watch every counterparty&apos;s exposure in real time, ground every
+              threshold in the actual CSA agreement, and pause for a human before anything ever
+              reaches a client.
             </p>
-            <div className="fade-up d3 flex flex-wrap items-center gap-3">
-              <SignInButton />
+            <div className="fade-up d2 flex flex-wrap items-center gap-3">
+              <Link
+                href="/login"
+                className="inline-flex min-h-11 items-center rounded-[10px] bg-[#0A0A0A] px-6 text-sm font-bold text-white transition-colors hover:bg-[#262626]"
+              >
+                Sign in to the dashboard
+              </Link>
               <a
                 href="#how-it-works"
-                className="inline-flex min-h-11 items-center rounded-[10px] border border-[#D4D4D4] bg-white px-6 text-sm font-semibold transition-colors hover:bg-[#F7F7F7]"
+                className="inline-flex min-h-11 items-center rounded-[10px] border border-[#D4D4D4] px-6 text-sm font-semibold transition-colors hover:bg-[#F7F7F7]"
               >
                 See how it works
               </a>
             </div>
-            <ul className="fade-up d3 mt-2 flex flex-wrap gap-x-5 gap-y-2 text-[13px] text-[#3D3D3D]">
-              {["Clause-cited thresholds", "Code-computed amounts", "Approval on every call"].map((t) => (
-                <li key={t} className="inline-flex items-center gap-1.5">
-                  <BadgeCheck size={16} style={{ color: "#00B86B" }} aria-hidden />
-                  {t}
-                </li>
-              ))}
-            </ul>
           </div>
 
-          <div className="fade-up d2 w-full lg:w-[520px] lg:shrink-0">
+          <div className="fade-up d2 w-full lg:w-[460px] lg:shrink-0 xl:w-[480px]">
             <HeroIllustration />
           </div>
         </div>
