@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 
 import { HeroIllustration } from "@/components/landing/hero-illustration";
-import { LiveStrip } from "@/components/landing/live-strip";
 import { LogoMarkV2 } from "@/components/logo-v2";
 import { BRAND_GREEN, MUTED } from "@/lib/brand";
 
@@ -137,11 +136,8 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ---------- live strip: real counts + watched tickers ---------- */}
-      <LiveStrip />
-
       {/* ---------- lifecycle ---------- */}
-      <section id="how-it-works" className="scroll-mt-6 px-6 py-20">
+      <section id="how-it-works" className="scroll-mt-6 border-t border-[#E5E5E5] px-6 py-20">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-10">
           <div className="max-w-2xl">
             <span className="text-xs font-bold uppercase tracking-[0.12em]" style={{ color: MUTED }}>
