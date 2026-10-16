@@ -140,10 +140,23 @@ def summarize_run(
 # Found live: this loop was the dominant cost behind a slow dashboard load,
 # and it only got slower as more margin-call runs accumulated over the
 # project's life -- every demo/test run adds a thread nothing ever reads
-# again, but every feed request still paid for it. Capped well below the DB
-# engine's default connection-pool ceiling (5 + 10 overflow) so this alone
-# can't starve other concurrent requests sharing the same pool.
-_STATE_FETCH_WORKERS = 8
+# again, but every feed request still paid for it.
+#
+# Capped LOW -- not against SQLAlchemy's own pool ceiling, but against
+# Cloud SQL's db-f1-micro tier itself, which has very few connection slots
+# total (shared-core instance). The first version of this fix capped at 8
+# and held that many connections open at once per request; combined with
+# /exposure's equivalent fix (api/exposure.py) running at the same time,
+# that was enough to hit Postgres's own "remaining connection slots are
+# reserved" error in production (found live, same day). The *sequential*
+# code this replaced never had this problem: it opened one connection,
+# used it, and released it before opening the next, so it was never
+# holding more than one or two open at a time regardless of how many
+# threads existed. A low cap keeps some of the concurrency win without
+# reintroducing that risk; it is not a connection-pool size, it's a
+# "how many connections this one request may hold open simultaneously"
+# ceiling, and it adds on top of whatever else is running at once.
+_STATE_FETCH_WORKERS = 3
 
 
 def _fetch_state_values(graph: CompiledStateGraph, thread_id: str) -> dict:
