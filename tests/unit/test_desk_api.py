@@ -275,6 +275,26 @@ def test_chat_errors_from_the_agent_land_on_the_job_not_the_request(client, sess
     assert body["answer"] is None
 
 
+def test_a_non_http_failure_from_the_agent_also_lands_on_the_job(client, session_factory):
+    """Found live: Agent Runtime can drop the connection outright
+    (requests.exceptions.ConnectionError), which isn't an HTTPException.
+    In sync dispatch that runs inline in this request's own thread, so
+    without a broad except it crashed the request as an opaque 500
+    instead of becoming job state."""
+    fake = MagicMock()
+    fake.chat.side_effect = ConnectionError("Remote end closed connection without response")
+    with (
+        patch("api.main.get_desk_client", return_value=fake),
+        patch("api.main.get_db_session_factory", return_value=session_factory),
+    ):
+        response = client.post("/desk/chat", json={"message": "hi"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "error"
+    assert "Remote end closed connection" in body["error"]
+
+
 def test_get_job_returns_the_same_row_a_second_time(client, session_factory):
     fake = MagicMock()
     fake.chat.return_value = desk.DeskChatResponse(session_id="s-1", answer="ok", tools_used=["a"])
