@@ -190,24 +190,51 @@ def run_desk_chat_job(
     A job already past "pending" is left alone: an unknown or already-run
     job is a Cloud Tasks retry arriving after the original attempt (or
     after it) succeeded or failed -- nothing to redo, and redoing it would
-    silently replace an answer the analyst may have already read."""
+    silently replace an answer the analyst may have already read.
+
+    The DB session that looks the job up is closed before `.chat()` runs,
+    and a fresh one opened to write the result -- found live: a cold
+    Agent Runtime call can run 90+ seconds, and holding one of
+    db-f1-micro's few connections checked out for that whole span is the
+    same connection-exhaustion failure mode as the dashboard N+1 fix
+    earlier (MM-147), self-inflicted this time. The stale connection
+    itself then surfaced as "server closed the connection unexpectedly"
+    on commit.
+
+    `.chat()`'s failures are caught broadly, not just HTTPException: in
+    sync dispatch this runs inline inside POST /desk/chat's request
+    thread, so anything else it raises (seen live: Agent Runtime dropping
+    the connection outright, requests.exceptions.ConnectionError) would
+    otherwise crash the request as an opaque 500 instead of landing on
+    the job as intended -- and leave the job stuck "pending" forever."""
     from persistence.db.models import DeskChatJobORM
 
     with session_factory() as session:
         job = session.get(DeskChatJobORM, job_id)
         if job is None or job.status != "pending":
             return
-        try:
-            result = desk_client_factory().chat(job.username, job.message, job.session_id)
-        except HTTPException as exc:
-            job.status = "error"
-            job.error_detail = str(exc.detail)
-            job.updated_at = datetime.now(UTC)
-            session.commit()
+        username, message, session_id = job.username, job.message, job.session_id
+
+    try:
+        result = desk_client_factory().chat(username, message, session_id)
+    except HTTPException as exc:
+        error_detail = str(exc.detail)
+        result = None
+    except Exception as exc:  # noqa: BLE001 -- any failure becomes job state, not a crash
+        error_detail = str(exc)
+        result = None
+
+    with session_factory() as session:
+        job = session.get(DeskChatJobORM, job_id)
+        if job is None:
             return
-        job.status = "done"
-        job.session_id = result.session_id
-        job.answer = result.answer
-        job.tools_used = result.tools_used
+        if result is None:
+            job.status = "error"
+            job.error_detail = error_detail
+        else:
+            job.status = "done"
+            job.session_id = result.session_id
+            job.answer = result.answer
+            job.tools_used = result.tools_used
         job.updated_at = datetime.now(UTC)
         session.commit()
