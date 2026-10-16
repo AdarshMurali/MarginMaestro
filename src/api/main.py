@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from functools import lru_cache
 from typing import TYPE_CHECKING, Literal, TypeVar
+from uuid import uuid4
 
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
@@ -18,7 +19,15 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import ValidationError
 from sqlalchemy.orm import Session, sessionmaker
 
-from adapters.factory import get_event_bus, get_guardrail, get_internal_notifier, get_redactor
+from adapters.factory import (
+    get_desk_job_dispatcher as _build_desk_job_dispatcher,
+)
+from adapters.factory import (
+    get_event_bus,
+    get_guardrail,
+    get_internal_notifier,
+    get_redactor,
+)
 from adapters.pubsub_admin import topic_for_subscription
 from agents import internal_notifications as internal
 from agents.internal_notifications import InternalNotifier
@@ -33,7 +42,13 @@ from api.auth import (
     require_user,
     verify_credentials,
 )
-from api.desk import AgentRuntimeDesk, DeskChatRequest, DeskChatResponse, get_desk
+from api.desk import (
+    AgentRuntimeDesk,
+    DeskChatJobResponse,
+    DeskChatRequest,
+    get_desk,
+    run_desk_chat_job,
+)
 from api.exposure import (
     build_exposure_board,
     get_counterparty_exposure,
@@ -87,6 +102,7 @@ from config.settings import get_settings
 from observability.tracing import configure_tracing
 from persistence.daily_close import load_daily_closes, refresh_reference_rates
 from persistence.db.engine import get_session_factory
+from persistence.db.models import DeskChatJobORM
 from persistence.db.rls import RLS_SCOPE_KEY, can_see, scope_for
 from ports.event_bus import EventBus
 from realtime.tokens import TOKEN_TTL_SECONDS, CustomTokenMinter, scope_claims
@@ -109,6 +125,7 @@ from warehouse.reports import (
 from warehouse.schemas import Book, BookDateError
 
 if TYPE_CHECKING:
+    from ports.job_dispatcher import DeskJobDispatcher
     from warehouse.client import WarehouseClient
 
 configure_logging()
@@ -156,6 +173,19 @@ def get_db_session_factory() -> sessionmaker[Session]:
 def get_desk_client() -> AgentRuntimeDesk:
     """One authorized HTTP session to Agent Runtime per process (MM-129)."""
     return get_desk(get_settings())
+
+
+@lru_cache
+def get_desk_job_dispatcher() -> "DeskJobDispatcher":
+    """DESK_JOB_DISPATCH=sync|cloudtasks (MM-147 follow-up). `run_job` runs
+    a job inline for sync dispatch -- defined here, not in adapters/, since
+    it needs the same session factory and desk client the rest of the API
+    already builds from settings."""
+
+    def run_job(job_id: str) -> None:
+        run_desk_chat_job(job_id, get_db_session_factory(), get_desk_client)
+
+    return _build_desk_job_dispatcher(get_settings(), run_job)
 
 
 @lru_cache
@@ -584,15 +614,84 @@ def report_stress_backtest(
     return _report(ReportService.stress_backtest, identity, book, period)
 
 
-@app.post("/desk/chat", response_model=DeskChatResponse)
+def _desk_job_response(job_id: str, username: str) -> DeskChatJobResponse:
+    """Shared by POST /desk/chat (right after dispatch) and GET
+    /desk/chat/{job_id} (polling) -- both just need the row's current
+    state. 404, not 403, for a job that exists but isn't the caller's own:
+    same reasoning as every other out-of-scope lookup in this API (e.g.
+    _require_thread_visible) -- don't confirm another analyst's job id is
+    real."""
+    with get_db_session_factory()() as session:
+        job = session.get(DeskChatJobORM, job_id)
+    if job is None or job.username != username:
+        raise HTTPException(status_code=404, detail="Chat job not found")
+    return DeskChatJobResponse(
+        job_id=job.id,
+        status=job.status,
+        session_id=job.session_id,
+        answer=job.answer,
+        tools_used=job.tools_used or [],
+        error=job.error_detail,
+    )
+
+
+@app.post("/desk/chat", response_model=DeskChatJobResponse)
 def desk_chat(
     body: DeskChatRequest, identity: Identity = Depends(require_user)
-) -> DeskChatResponse:
-    """'Ask the margin desk' (MM-129): one chat turn with the ADK agent, as
-    the signed-in analyst. Sync endpoint: the call to Agent Runtime blocks,
-    so FastAPI runs it in the threadpool. Rate limited per user (LLM cost)."""
+) -> DeskChatJobResponse:
+    """'Ask the margin desk' (MM-129, async MM-147 follow-up): queues one
+    chat turn with the ADK agent, as the signed-in analyst, and returns
+    immediately -- the actual Agent Runtime call can take 90+ seconds on a
+    cold start, well past Firebase Hosting's edge proxy timeout to the
+    frontend (found live: the backend call succeeded every time; the
+    browser just never saw the answer). The frontend polls GET
+    /desk/chat/{job_id} until status is no longer "pending"; in the
+    DESK_JOB_DISPATCH=sync default (local dev) the job is usually already
+    "done" by the time this returns. Rate limited per user (LLM cost).
+
+    get_desk_client() is checked here, eagerly, before any job row exists
+    -- the desk assistant being unconfigured (DESK_ASSISTANT=none) is a
+    deployment precondition, not a per-turn failure, so it still fails the
+    request directly (503) rather than becoming a job the frontend would
+    poll forever waiting to find out is unresolvable."""
     DESK_LIMITER.check(identity.username, get_settings().rate_limit_per_minute)
-    return get_desk_client().chat(identity.username, body.message, body.session_id)
+    get_desk_client()
+    job_id = str(uuid4())
+    now = datetime.now(UTC)
+    with get_db_session_factory()() as session:
+        session.add(
+            DeskChatJobORM(
+                id=job_id,
+                username=identity.username,
+                message=body.message,
+                session_id=body.session_id,
+                status="pending",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.commit()
+    get_desk_job_dispatcher().dispatch(job_id)
+    return _desk_job_response(job_id, identity.username)
+
+
+@app.get("/desk/chat/{job_id}", response_model=DeskChatJobResponse)
+def desk_chat_job(job_id: str, identity: Identity = Depends(require_user)) -> DeskChatJobResponse:
+    """Polled by the frontend while a turn's status is "pending"."""
+    return _desk_job_response(job_id, identity.username)
+
+
+@app.post(
+    "/internal/desk/run-job/{job_id}",
+    dependencies=[Depends(require_internal_caller)],
+)
+def internal_desk_run_job(job_id: str) -> Response:
+    """Cloud Tasks' target for DESK_JOB_DISPATCH=cloudtasks (MM-147
+    follow-up). run_desk_chat_job() is itself a no-op for a job that isn't
+    still "pending", so a Cloud Tasks retry after a success or failure is
+    safe."""
+    run_desk_chat_job(job_id, get_db_session_factory(), get_desk_client)
+    return Response(status_code=204)
 
 
 @app.post("/simulate", response_model=SimulateEventResponse)

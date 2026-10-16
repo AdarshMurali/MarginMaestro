@@ -144,6 +144,13 @@ class Settings(BaseSettings):
     cloud_tasks_location: str = "us-central1"
     cloud_tasks_queue: str = "sla-checks"
     internal_base_url: str | None = None
+    # MM-147 follow-up: how a queued "Ask the Desk" turn actually runs.
+    # sync = inline, before POST /desk/chat returns (default: local dev,
+    # tests). cloudtasks = one Cloud Tasks task per turn, calling
+    # {internal_base_url}/internal/desk/run-job/{job_id} as the invoker SA,
+    # so the POST returns immediately regardless of how long Agent Runtime
+    # takes. Reuses the same queue/invoker settings as sla_scheduler.
+    desk_job_dispatch: str = "sync"
 
     chroma_host: str = "localhost"
     chroma_port: int = 8100

@@ -3,6 +3,7 @@ pre-GCP stack exactly (OpenAI, Chroma, Kafka, Slack), so the AWS deployment
 needs no config change (ground rule 6). GCP adapters are added here as each
 phase lands: Gemini (G2, MM-109), pgvector (G2), Pub/Sub (G4), WhatsApp (G6)."""
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from openai import OpenAI
@@ -17,6 +18,7 @@ from adapters.selection import choose as _choice
 from config.settings import Settings
 from ports.embedder import Embedder
 from ports.event_bus import EventBus
+from ports.job_dispatcher import DeskJobDispatcher
 from ports.llm import LLMClient
 from ports.notifier import Notifier
 from ports.redactor import Redactor
@@ -232,6 +234,39 @@ def get_sla_scheduler(settings: Settings) -> SlaScheduler:
         f"/queues/{settings.cloud_tasks_queue}"
     )
     return CloudTasksSlaScheduler(
+        queue_path=queue,
+        base_url=str(settings.internal_base_url),
+        invoker_service_account=str(settings.internal_caller_service_account),
+        audience=str(settings.internal_caller_audience),
+    )
+
+
+def get_desk_job_dispatcher(
+    settings: Settings, run_job: Callable[[str], None]
+) -> DeskJobDispatcher:
+    """DESK_JOB_DISPATCH=sync|cloudtasks (MM-147 follow-up). `run_job` is
+    what `sync` dispatch calls directly -- the caller (api.main) already has
+    the session factory and desk client it needs, so the dispatcher itself
+    stays agnostic to how a job actually runs."""
+    from adapters.desk_job_dispatcher import CloudTasksDeskJobDispatcher, SyncDeskJobDispatcher
+
+    choice = _choice("DESK_JOB_DISPATCH", settings.desk_job_dispatch, ("sync", "cloudtasks"))
+    if choice == "sync":
+        return SyncDeskJobDispatcher(run_job)
+    required = {
+        "GCP_PROJECT_ID": settings.gcp_project_id,
+        "INTERNAL_BASE_URL": settings.internal_base_url,
+        "INTERNAL_CALLER_SERVICE_ACCOUNT": settings.internal_caller_service_account,
+        "INTERNAL_CALLER_AUDIENCE": settings.internal_caller_audience,
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise ValueError(f"DESK_JOB_DISPATCH=cloudtasks requires {', '.join(missing)}")
+    queue = (
+        f"projects/{settings.gcp_project_id}/locations/{settings.cloud_tasks_location}"
+        f"/queues/{settings.cloud_tasks_queue}"
+    )
+    return CloudTasksDeskJobDispatcher(
         queue_path=queue,
         base_url=str(settings.internal_base_url),
         invoker_service_account=str(settings.internal_caller_service_account),

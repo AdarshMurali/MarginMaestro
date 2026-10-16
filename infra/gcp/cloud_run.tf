@@ -65,6 +65,14 @@ locals {
     INTERNAL_BASE_URL = local.api_base_url
     CLOUD_TASKS_QUEUE = google_cloud_tasks_queue.sla_checks.name
 
+    # "Ask the Desk" turns (MM-147 follow-up): one Cloud Tasks task per
+    # turn, queued immediately, so POST /desk/chat never holds the HTTP
+    # response open for Agent Runtime's call -- found live, that call can
+    # take 90+ seconds cold, past Firebase Hosting's edge proxy timeout to
+    # the frontend. Reuses the same queue as the SLA timer above; both are
+    # internal-caller-signed tasks hitting this same service.
+    DESK_JOB_DISPATCH = "cloudtasks"
+
     # Vercel and Firebase App Hosting (MM-145) serve the same frontend.
     CORS_ALLOWED_ORIGINS = join(",", local.frontend_origins)
 

@@ -245,6 +245,24 @@ tables:
       active: {class: internal}
       updated_at: {class: internal}
 
+  desk_chat_jobs:
+    owner: margin-operations
+    description: One row per "Ask the Desk" turn (MM-147 follow-up) -- queued so POST /desk/chat can return before Agent Runtime's call completes; polled until status is no longer pending.
+    class: confidential
+    freshness: Written by POST /desk/chat and the job runner; a terminal row (done/error) is never updated again.
+    source: Application (api.desk).
+    columns:
+      id: {class: internal}
+      username: {class: internal}
+      message: {class: confidential, llm: mask}
+      session_id: {class: internal}
+      status: {class: internal}
+      answer: {class: confidential, llm: mask}
+      tools_used: {class: internal}
+      error_detail: {class: internal}
+      created_at: {class: internal}
+      updated_at: {class: internal}
+
   rag_chunks:
     owner: margin-operations
     description: Embedded document chunks for RAG (pgvector, Postgres only). A derived, rebuildable index of the GCS documents.

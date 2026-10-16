@@ -3,8 +3,37 @@
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 
-import { postDeskChat } from "@/lib/api";
+import { getDeskChatJob, postDeskChat, type DeskChatJobResponse } from "@/lib/api";
 import { INK } from "@/lib/brand";
+
+// MM-147 follow-up: Agent Runtime can take 90+ seconds on a cold start, so
+// the API queues the turn and this page polls for it rather than holding
+// one long request open (which Firebase Hosting's edge proxy was cutting
+// off before the real answer came back -- found live). 1.5s keeps the UI
+// feeling responsive without hammering the API; 2 minutes is well past the
+// slowest cold call seen (~93s) with headroom. A standalone module-level
+// function, not a closure inside the component: React's purity lint flags
+// Date.now() even inside an async event-handler closure nested in a
+// component body.
+const POLL_MS = 1500;
+const POLL_TIMEOUT_MS = 120_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollUntilDone(initial: DeskChatJobResponse): Promise<DeskChatJobResponse> {
+  let reply = initial;
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  while (reply.status === "pending") {
+    if (Date.now() > deadline) {
+      throw new Error("The desk assistant is taking longer than usual -- try again shortly.");
+    }
+    await sleep(POLL_MS);
+    reply = await getDeskChatJob(reply.job_id);
+  }
+  return reply;
+}
 
 // MM-129: "Ask the margin desk" -- a chat with the ADK agent on Agent
 // Runtime. The page only shows the conversation: the agent picks its tools
@@ -52,11 +81,15 @@ export default function DeskPage() {
     setBusy(true);
     setError(null);
     try {
-      const reply = await postDeskChat(session.backendAccessToken, message, sessionId);
+      const started = await postDeskChat(session.backendAccessToken, message, sessionId);
+      const reply = await pollUntilDone(started);
+      if (reply.status === "error") {
+        throw new Error(reply.error ?? "The desk assistant is unavailable.");
+      }
       setSessionId(reply.session_id);
       setTurns((current) => [
         ...current,
-        { role: "desk", text: reply.answer, tools: reply.tools_used },
+        { role: "desk", text: reply.answer ?? "", tools: reply.tools_used },
       ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "The desk assistant is unavailable.");

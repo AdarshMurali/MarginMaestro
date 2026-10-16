@@ -13,13 +13,17 @@ Cloud Run service account (mm-api-sa) holds aiplatform.user.
 
 import json
 from collections.abc import Callable, Iterable
-from typing import Any, Protocol, cast
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import structlog
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from config.settings import Settings
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session, sessionmaker
 
 logger = structlog.get_logger()
 
@@ -35,6 +39,21 @@ class DeskChatResponse(BaseModel):
     session_id: str
     answer: str
     tools_used: list[str] = []
+
+
+class DeskChatJobResponse(BaseModel):
+    """POST /desk/chat and GET /desk/chat/{job_id} share this shape (MM-147
+    follow-up). In sync dispatch the job is usually already "done" by the
+    time POST returns, so `answer`/`tools_used`/`session_id` are populated
+    immediately -- the frontend only needs to poll when `status` comes back
+    "pending"."""
+
+    job_id: str
+    status: str  # pending | done | error
+    session_id: str | None = None
+    answer: str | None = None
+    tools_used: list[str] = []
+    error: str | None = None
 
 
 class HttpSession(Protocol):
@@ -145,3 +164,50 @@ def get_desk(
         )
     location = settings.desk_agent_resource.split("/locations/", 1)[1].split("/", 1)[0]
     return AgentRuntimeDesk(settings.desk_agent_resource, location, http_factory())
+
+
+def run_desk_chat_job(
+    job_id: str,
+    session_factory: "sessionmaker[Session]",
+    desk_client_factory: Callable[[], AgentRuntimeDesk],
+) -> None:
+    """Runs one queued turn and writes the result back onto its job row
+    (MM-147 follow-up) -- called either directly (sync dispatch, inline
+    inside POST /desk/chat) or from POST /internal/desk/run-job/{job_id}
+    (cloudtasks dispatch). Only `desk_client.chat()`'s own failures (a
+    dead/unknown session, Agent Runtime erroring) land on the job as
+    status="error" -- whether the desk assistant is configured at all is
+    checked eagerly in the endpoint, before any job row exists, so that
+    still fails the request directly rather than waiting to be polled.
+
+    `desk_client_factory` (typically the already-memoized `get_desk_client`)
+    is only called once a job is confirmed still "pending" -- found live:
+    building it unconditionally meant an unknown or already-run job (the
+    common case for a Cloud Tasks retry, see below) still paid for it, and
+    on a deployment where the desk assistant genuinely isn't configured,
+    that turned what should be a clean no-op into a 503.
+
+    A job already past "pending" is left alone: an unknown or already-run
+    job is a Cloud Tasks retry arriving after the original attempt (or
+    after it) succeeded or failed -- nothing to redo, and redoing it would
+    silently replace an answer the analyst may have already read."""
+    from persistence.db.models import DeskChatJobORM
+
+    with session_factory() as session:
+        job = session.get(DeskChatJobORM, job_id)
+        if job is None or job.status != "pending":
+            return
+        try:
+            result = desk_client_factory().chat(job.username, job.message, job.session_id)
+        except HTTPException as exc:
+            job.status = "error"
+            job.error_detail = str(exc.detail)
+            job.updated_at = datetime.now(UTC)
+            session.commit()
+            return
+        job.status = "done"
+        job.session_id = result.session_id
+        job.answer = result.answer
+        job.tools_used = result.tools_used
+        job.updated_at = datetime.now(UTC)
+        session.commit()

@@ -8,14 +8,27 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from api import desk
 from api.auth import Identity, require_user
 from api.main import app
 from config.settings import Settings
+from persistence.db.models import Base, DeskChatJobORM
 
 RESOURCE = "projects/proj-x/locations/us-central1/reasoningEngines/123"
 BASE = f"https://us-central1-aiplatform.googleapis.com/v1/{RESOURCE}"
+
+
+@pytest.fixture
+def session_factory():
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine)
 
 
 def _response(status: int = 200, body: dict | None = None, lines: list[str] | None = None):
@@ -189,15 +202,22 @@ def client():
     app.dependency_overrides.pop(require_user, None)
 
 
-def test_chat_endpoint_forwards_the_authenticated_analyst(client):
+def test_chat_endpoint_forwards_the_authenticated_analyst(client, session_factory):
     reply = desk.DeskChatResponse(session_id="s-1", answer="ok", tools_used=[])
     fake = MagicMock()
     fake.chat.return_value = reply
-    with patch("api.main.get_desk_client", return_value=fake):
+    with (
+        patch("api.main.get_desk_client", return_value=fake),
+        patch("api.main.get_db_session_factory", return_value=session_factory),
+    ):
         response = client.post("/desk/chat", json={"message": "hi"})
 
     assert response.status_code == 200
-    assert response.json()["answer"] == "ok"
+    body = response.json()
+    assert body["status"] == "done"
+    assert body["answer"] == "ok"
+    assert body["session_id"] == "s-1"
+    assert body["job_id"]
     fake.chat.assert_called_once_with("analyst1", "hi", None)
 
 
@@ -213,12 +233,13 @@ def test_chat_endpoint_requires_a_user():
     assert response.status_code in (401, 500)  # 500 only if AUTH_BACKEND_SECRET is unset
 
 
-def test_chat_endpoint_is_rate_limited(client):
+def test_chat_endpoint_is_rate_limited(client, session_factory):
     fake = MagicMock()
     fake.chat.return_value = desk.DeskChatResponse(session_id="s", answer="ok")
     settings = SimpleNamespace(rate_limit_per_minute=2)
     with (
         patch("api.main.get_desk_client", return_value=fake),
+        patch("api.main.get_db_session_factory", return_value=session_factory),
         patch("api.main.get_settings", return_value=settings),
         patch(
             "api.main.DESK_LIMITER",
@@ -229,6 +250,163 @@ def test_chat_endpoint_is_rate_limited(client):
 
     assert codes == [200, 200, 429]
     assert desk_limiter is not None
+
+
+# --- async job flow (MM-147 follow-up) ---------------------------------------------
+
+
+def test_chat_errors_from_the_agent_land_on_the_job_not_the_request(client, session_factory):
+    """desk_client.chat()'s own failures (dead session, agent error) become
+    the job's status -- the POST still returns 200, since the request
+    itself (queuing the turn) succeeded; only desk_assistant being
+    unconfigured fails the request directly (see the 503 test below)."""
+    fake = MagicMock()
+    fake.chat.side_effect = HTTPException(status_code=502, detail="Desk assistant unavailable")
+    with (
+        patch("api.main.get_desk_client", return_value=fake),
+        patch("api.main.get_db_session_factory", return_value=session_factory),
+    ):
+        response = client.post("/desk/chat", json={"message": "hi"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["error"] == "Desk assistant unavailable"
+    assert body["answer"] is None
+
+
+def test_get_job_returns_the_same_row_a_second_time(client, session_factory):
+    fake = MagicMock()
+    fake.chat.return_value = desk.DeskChatResponse(session_id="s-1", answer="ok", tools_used=["a"])
+    with (
+        patch("api.main.get_desk_client", return_value=fake),
+        patch("api.main.get_db_session_factory", return_value=session_factory),
+    ):
+        job_id = client.post("/desk/chat", json={"message": "hi"}).json()["job_id"]
+        response = client.get(f"/desk/chat/{job_id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["job_id"] == job_id
+    assert body["status"] == "done"
+    assert body["answer"] == "ok"
+    assert body["tools_used"] == ["a"]
+
+
+def test_get_job_404s_for_an_unknown_id(client, session_factory):
+    with patch("api.main.get_db_session_factory", return_value=session_factory):
+        response = client.get("/desk/chat/does-not-exist")
+
+    assert response.status_code == 404
+
+
+def test_get_job_404s_for_someone_elses_job(session_factory):
+    fake = MagicMock()
+    fake.chat.return_value = desk.DeskChatResponse(session_id="s-1", answer="ok")
+    app.dependency_overrides[require_user] = lambda: Identity(username="analyst1", role="viewer")
+    with (
+        patch("api.main.get_desk_client", return_value=fake),
+        patch("api.main.get_db_session_factory", return_value=session_factory),
+    ):
+        job_id = TestClient(app).post("/desk/chat", json={"message": "hi"}).json()["job_id"]
+
+    app.dependency_overrides[require_user] = lambda: Identity(username="analyst2", role="viewer")
+    with patch("api.main.get_db_session_factory", return_value=session_factory):
+        response = TestClient(app).get(f"/desk/chat/{job_id}")
+    app.dependency_overrides.pop(require_user, None)
+
+    assert response.status_code == 404
+
+
+def test_internal_run_job_executes_a_pending_job(session_factory):
+    fake = MagicMock()
+    fake.chat.return_value = desk.DeskChatResponse(session_id="s-1", answer="ok", tools_used=[])
+    with session_factory() as session:
+        session.add(
+            DeskChatJobORM(
+                id="job-1",
+                username="analyst1",
+                message="hi",
+                status="pending",
+                created_at=desk.datetime.now(desk.UTC),
+                updated_at=desk.datetime.now(desk.UTC),
+            )
+        )
+        session.commit()
+    settings = Settings(_env_file=None, internal_job_token="t")
+    with (
+        patch("api.auth.get_settings", return_value=settings),
+        patch("api.main.get_desk_client", return_value=fake),
+        patch("api.main.get_db_session_factory", return_value=session_factory),
+    ):
+        response = TestClient(app).post(
+            "/internal/desk/run-job/job-1", headers={"Authorization": "Bearer t"}
+        )
+
+    assert response.status_code == 204
+    with session_factory() as session:
+        job = session.get(DeskChatJobORM, "job-1")
+    assert job.status == "done"
+    assert job.answer == "ok"
+
+
+def test_internal_run_job_needs_the_internal_caller(session_factory):
+    settings = Settings(_env_file=None, internal_job_token="t")
+    with patch("api.auth.get_settings", return_value=settings):
+        response = TestClient(app).post(
+            "/internal/desk/run-job/job-1", headers={"Authorization": "Bearer wrong"}
+        )
+
+    assert response.status_code == 401
+
+
+def test_internal_run_job_on_an_already_done_job_is_a_no_op(session_factory):
+    """A Cloud Tasks retry arriving after the original attempt already
+    succeeded must not re-call the agent and overwrite the answer."""
+    fake = MagicMock()
+    with session_factory() as session:
+        session.add(
+            DeskChatJobORM(
+                id="job-1",
+                username="analyst1",
+                message="hi",
+                status="done",
+                answer="already answered",
+                created_at=desk.datetime.now(desk.UTC),
+                updated_at=desk.datetime.now(desk.UTC),
+            )
+        )
+        session.commit()
+    settings = Settings(_env_file=None, internal_job_token="t")
+    with (
+        patch("api.auth.get_settings", return_value=settings),
+        patch("api.main.get_desk_client", return_value=fake),
+        patch("api.main.get_db_session_factory", return_value=session_factory),
+    ):
+        response = TestClient(app).post(
+            "/internal/desk/run-job/job-1", headers={"Authorization": "Bearer t"}
+        )
+
+    assert response.status_code == 204
+    fake.chat.assert_not_called()
+    with session_factory() as session:
+        job = session.get(DeskChatJobORM, "job-1")
+    assert job.answer == "already answered"
+
+
+def test_internal_run_job_on_an_unknown_job_is_a_no_op(session_factory):
+    """Deliberately doesn't patch get_desk_client: if the no-op path built
+    it anyway, this would 503 (desk_assistant defaults to "none")."""
+    settings = Settings(_env_file=None, internal_job_token="t")
+    with (
+        patch("api.auth.get_settings", return_value=settings),
+        patch("api.main.get_db_session_factory", return_value=session_factory),
+    ):
+        response = TestClient(app).post(
+            "/internal/desk/run-job/does-not-exist", headers={"Authorization": "Bearer t"}
+        )
+
+    assert response.status_code == 204
 
 
 def test_chat_endpoint_when_disabled_is_503(client):
