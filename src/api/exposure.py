@@ -7,8 +7,9 @@ request-time yfinance call; see streaming/live_feed_poller.py and
 streaming/event_agent.py's upsert_latest_price for how latest_prices/
 price_history get populated."""
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
-from functools import lru_cache
+from functools import lru_cache, partial
 
 import structlog
 from sqlalchemy.orm import Session
@@ -258,18 +259,29 @@ def build_exposure_board(session: Session) -> ExposureBoardResponse:
     prior_prices = latest_closes_before(session, all_tickers, now)
     collateral_by_cp = collateral_held_for_counterparties(session, counterparty_ids)
 
-    items = [
-        _compute_exposure(
-            cp,
-            positions_by_cp.get(cp.id, []),
-            current_prices,
-            prior_prices,
-            collateral_by_cp.get(cp.id, 0.0),
-            vix,
-            vix_error,
-        )
-        for cp in counterparties
-    ]
+    # _compute_exposure is pure (no DB session, see its docstring) -- its
+    # only I/O is _csa_terms, a RAG + LLM call that's cached (_cached_csa_terms
+    # above) but only after the first request pays for it. On a cold Cloud
+    # Run instance (scale-to-zero, GCP_ROADMAP G5) the cache is empty, so a
+    # sequential loop paid for every counterparty's CSA extraction one at a
+    # time -- found live (MM-147 follow-up): the dominant cost behind a slow
+    # first board load right after a user signs in. Each counterparty's
+    # extraction is independent, so they're fetched concurrently instead;
+    # capped the same way as the margin-call feed's equivalent fix
+    # (api/margin_calls.py's _STATE_FETCH_WORKERS).
+    build = partial(
+        _compute_exposure,
+        current_prices=current_prices,
+        prior_prices=prior_prices,
+        vix=vix,
+        vix_error=vix_error,
+    )
+
+    def _build_one(cp: Counterparty) -> CounterpartyExposure:
+        return build(cp, positions_by_cp.get(cp.id, []), held=collateral_by_cp.get(cp.id, 0.0))
+
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(counterparties)))) as pool:
+        items = list(pool.map(_build_one, counterparties))
     return ExposureBoardResponse(as_of=datetime.now(UTC), counterparties=items)
 
 

@@ -128,6 +128,32 @@ class TestSqlCheckpointSaverDirect:
         assert blocked_in_time
         assert entered.is_set()
 
+    def test_get_tuple_is_not_blocked_by_an_externally_held_lock(self, session_factory) -> None:
+        """MM-147 follow-up: the lock only guards the write path (see the
+        constructor docstring) -- a read on another thread must not wait on
+        a lock held elsewhere, or the margin-call feed's per-thread
+        get_state() loop could never be parallelized."""
+        saver = SqlCheckpointSaver(session_factory)
+        saver.put({"configurable": {"thread_id": "t-read"}}, _checkpoint("c1"), {}, {})
+
+        saver._lock.acquire()
+        result: dict = {}
+        finished = threading.Event()
+
+        def _read() -> None:
+            result["tup"] = saver.get_tuple({"configurable": {"thread_id": "t-read"}})
+            finished.set()
+
+        thread = threading.Thread(target=_read)
+        thread.start()
+        completed_promptly = finished.wait(timeout=0.2)
+        saver._lock.release()
+        thread.join(timeout=2)
+
+        assert completed_promptly
+        assert result["tup"] is not None
+        assert result["tup"].checkpoint["id"] == "c1"
+
     def test_put_then_get_tuple_round_trips_checkpoint_and_metadata(self, session_factory) -> None:
         saver = SqlCheckpointSaver(session_factory)
         config = {"configurable": {"thread_id": "t3"}}

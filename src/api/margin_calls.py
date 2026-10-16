@@ -7,7 +7,9 @@ only supports get/put by thread_id); this reads the checkpoint table
 directly for thread discovery, then reuses graph.get_state() per thread,
 same call get_or_start_run already makes for a single thread."""
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from functools import partial
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
@@ -131,6 +133,24 @@ def summarize_run(
     return _summarize(thread_id, values, settings or get_settings())
 
 
+# One get_state() call per checkpoint thread is an independent read (its
+# own session, its own round trip to the DB) -- fetched concurrently rather
+# than one at a time (MM-147 follow-up), now that the checkpoint saver's
+# lock no longer serializes reads (persistence/db/checkpoint_saver.py).
+# Found live: this loop was the dominant cost behind a slow dashboard load,
+# and it only got slower as more margin-call runs accumulated over the
+# project's life -- every demo/test run adds a thread nothing ever reads
+# again, but every feed request still paid for it. Capped well below the DB
+# engine's default connection-pool ceiling (5 + 10 overflow) so this alone
+# can't starve other concurrent requests sharing the same pool.
+_STATE_FETCH_WORKERS = 8
+
+
+def _fetch_state_values(graph: CompiledStateGraph, thread_id: str) -> dict:
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    return graph.get_state(config).values
+
+
 def _all_summaries(
     graph: CompiledStateGraph, session: Session, settings: Settings
 ) -> list[MarginCallSummary]:
@@ -139,14 +159,17 @@ def _all_summaries(
     (MM-63), so there's exactly one place that reads checkpoints and derives
     lifecycle status."""
     thread_ids = session.execute(select(CheckpointORM.thread_id).distinct()).scalars().all()
+    if not thread_ids:
+        return []
 
-    summaries = []
-    for thread_id in thread_ids:
-        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-        values = graph.get_state(config).values
-        if not values:
-            continue
-        summaries.append(_summarize(thread_id, values, settings))
+    with ThreadPoolExecutor(max_workers=min(_STATE_FETCH_WORKERS, len(thread_ids))) as pool:
+        all_values = pool.map(partial(_fetch_state_values, graph), thread_ids)
+
+    summaries = [
+        _summarize(thread_id, values, settings)
+        for thread_id, values in zip(thread_ids, all_values, strict=True)
+        if values
+    ]
 
     summaries.sort(key=lambda s: s.occurred_at, reverse=True)
     return summaries
