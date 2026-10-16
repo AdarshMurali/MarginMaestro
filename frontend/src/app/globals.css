@@ -128,3 +128,37 @@
     @apply font-sans;
   }
 }
+/* Landing hero illustration (MM-147): the exposure line draws in, then the
+   breach marker, the drafted call and the approval toast pop in one after
+   another (delays set inline). Runs once; reduced motion shows the end frame. */
+@keyframes mm-draw-in {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes mm-pop-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes mm-ping {
+  0% { transform: scale(0.6); opacity: 0.45; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+.mm-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: mm-draw-in 1.6s cubic-bezier(0.33, 1, 0.68, 1) 0.2s forwards;
+}
+.mm-pop {
+  opacity: 0;
+  animation: mm-pop-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.mm-ping {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  animation: mm-ping 1.8s ease-out 1.6s infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mm-draw { animation: none; stroke-dashoffset: 0; }
+  .mm-pop { animation: none; opacity: 1; }
+  .mm-ping { animation: none; opacity: 0; }
+}

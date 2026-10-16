@@ -10,6 +10,9 @@ export { auth as proxy } from "@/lib/auth";
 //   exemption the proxy redirects them to /login before the rewrite ever
 //   reaches the backend's actually-unauthenticated endpoints, and the
 //   landing page's stats silently show "--" (found live, MM-147 follow-up).
+// - /api/market-universe: the landing page's ticker strip (public endpoint).
+// - /logos/* and /icon.svg: static brand images the landing page and the
+//   browser tab show before sign-in.
 // Every other route redirects to /login via NextAuth's `auth` wrapper,
 // which redirects automatically when `pages.signIn` is configured and
 // there is no session.
@@ -20,6 +23,6 @@ export { auth as proxy } from "@/lib/auth";
 // "/" and /login carry that theme directly now.
 export const config = {
   matcher: [
-    "/((?!api/auth|api/public|api/health|api/ready|_next/static|_next/image|favicon.ico|$).*)",
+    "/((?!api/auth|api/public|api/health|api/ready|api/market-universe|logos/|icon.svg|_next/static|_next/image|favicon.ico|$).*)",
   ],
 };
