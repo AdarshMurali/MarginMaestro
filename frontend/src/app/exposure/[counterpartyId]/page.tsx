@@ -14,7 +14,27 @@ import {
   type MarginCallSummary,
 } from "@/lib/api";
 import { formatDateTime, formatUsd } from "@/lib/format";
-import { INK } from "@/lib/brand";
+import { INK, LINE, MUTED, STATUS_AMBER, STATUS_GREEN, STATUS_RED, TEXT_AMBER, TEXT_RED } from "@/lib/brand";
+import { cn } from "@/lib/utils";
+import type { MarginCallLifecycleStatus } from "@/lib/api";
+
+// A flat grey list reads as "nothing here needs you" even for an escalated
+// call -- this ties each row's accent bar and amount color to the same
+// severity buckets LifecycleStatusLight already uses (danger/warning/
+// success/active), so the history reads at a glance instead of requiring
+// everything to be read to tell them apart.
+const HISTORY_SEVERITY: Record<MarginCallLifecycleStatus, { accent: string; amount: string }> = {
+  escalated: { accent: STATUS_RED, amount: TEXT_RED },
+  rejected: { accent: STATUS_AMBER, amount: TEXT_AMBER },
+  disputed: { accent: STATUS_AMBER, amount: TEXT_AMBER },
+  no_breach: { accent: STATUS_GREEN, amount: "#20463B" },
+  sla_met: { accent: STATUS_GREEN, amount: "#20463B" },
+  below_materiality: { accent: STATUS_GREEN, amount: "#20463B" },
+  evaluating: { accent: "#D4D4D4", amount: INK },
+  awaiting_approval: { accent: INK, amount: INK },
+  awaiting_manager_approval: { accent: INK, amount: INK },
+  awaiting_sla_response: { accent: INK, amount: INK },
+};
 
 function DetailTile({ label, value }: { label: string; value: string }) {
   return (
@@ -193,37 +213,60 @@ export default function CounterpartyExposurePage() {
             )}
 
             <div className="flex flex-col gap-3">
-              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">
+              <h2 className="text-[17px] font-bold" style={{ color: INK }}>
                 Margin call history
-              </span>
+              </h2>
               {marginCallsError && (
-                <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                <p
+                  className="rounded-[10px] border px-4 py-3 text-sm"
+                  style={{ borderColor: "rgba(229,72,77,0.3)", backgroundColor: "rgba(229,72,77,0.08)", color: "#C42A30" }}
+                >
                   Could not load margin call history.
                 </p>
               )}
               {!marginCallsError && !marginCalls && (
-                <p className="text-sm text-neutral-500">Loading...</p>
+                <p className="text-sm" style={{ color: MUTED }}>
+                  Loading...
+                </p>
               )}
               {marginCalls && marginCalls.length === 0 && (
-                <p className="text-sm text-neutral-500">No margin calls for this counterparty yet.</p>
+                <p className="text-sm" style={{ color: MUTED }}>
+                  No margin calls for this counterparty yet.
+                </p>
               )}
               {marginCalls && marginCalls.length > 0 && (
-                <div className="flex flex-col divide-y divide-neutral-100 rounded-xl border border-neutral-200">
-                  {marginCalls.map((call) => (
-                    <Link
-                      key={call.thread_id}
-                      href={`/margin-calls/${encodeURIComponent(call.thread_id)}/trace`}
-                      className="flex items-center justify-between gap-4 px-4 py-3 text-sm transition-colors hover:bg-neutral-50"
-                    >
-                      <div className="flex items-center gap-3">
+                <div className="flex flex-col overflow-hidden rounded-[14px] border" style={{ borderColor: LINE }}>
+                  {marginCalls.map((call, index) => {
+                    const severity = HISTORY_SEVERITY[call.status];
+                    return (
+                      <Link
+                        key={call.thread_id}
+                        href={`/margin-calls/${encodeURIComponent(call.thread_id)}/trace`}
+                        className={cn(
+                          "grid grid-cols-[11rem_1fr_auto] items-center gap-4 py-4 pl-3.5 pr-4 text-sm transition-colors hover:bg-[#F7F7F7] sm:grid-cols-[11rem_1fr_auto_auto]",
+                          index !== 0 && "border-t",
+                        )}
+                        style={{
+                          borderColor: index !== 0 ? "#F0F0F0" : undefined,
+                          borderLeft: `3px solid ${severity.accent}`,
+                        }}
+                      >
                         <LifecycleStatusLight status={call.status} />
-                        <span className="text-neutral-600">{call.reason}</span>
-                      </div>
-                      <span className="text-xs text-neutral-500">
-                        {formatDateTime(call.occurred_at)}
-                      </span>
-                    </Link>
-                  ))}
+                        <span className="min-w-0 truncate font-semibold" style={{ color: INK }}>
+                          {call.reason}
+                        </span>
+                        <span
+                          className="hidden text-right font-mono text-base font-bold sm:inline"
+                          style={{ color: severity.amount }}
+                        >
+                          {formatUsd(call.call_amount, call.currency)}
+                        </span>
+                        <span className="whitespace-nowrap text-right text-xs" style={{ color: MUTED }}>
+                          {formatDateTime(call.occurred_at)}
+                        </span>
+                      </Link>
+                    );
+                  })}
                 </div>
               )}
             </div>
