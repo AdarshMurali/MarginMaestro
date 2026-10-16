@@ -259,16 +259,20 @@ def build_exposure_board(session: Session) -> ExposureBoardResponse:
     prior_prices = latest_closes_before(session, all_tickers, now)
     collateral_by_cp = collateral_held_for_counterparties(session, counterparty_ids)
 
-    # _compute_exposure is pure (no DB session, see its docstring) -- its
-    # only I/O is _csa_terms, a RAG + LLM call that's cached (_cached_csa_terms
-    # above) but only after the first request pays for it. On a cold Cloud
-    # Run instance (scale-to-zero, GCP_ROADMAP G5) the cache is empty, so a
-    # sequential loop paid for every counterparty's CSA extraction one at a
-    # time -- found live (MM-147 follow-up): the dominant cost behind a slow
-    # first board load right after a user signs in. Each counterparty's
-    # extraction is independent, so they're fetched concurrently instead;
-    # capped the same way as the margin-call feed's equivalent fix
-    # (api/margin_calls.py's _STATE_FETCH_WORKERS).
+    # _compute_exposure's only I/O is _csa_terms, a RAG + LLM call that's
+    # cached (_cached_csa_terms above) but only after the first request pays
+    # for it -- and retrieval queries pgvector (Postgres), so despite the
+    # function taking no `session` argument directly, a cache miss does open
+    # its own DB connection underneath. On a cold Cloud Run instance
+    # (scale-to-zero, GCP_ROADMAP G5) the cache is empty, so a sequential
+    # loop paid for every counterparty's CSA extraction one at a time --
+    # found live (MM-147 follow-up): the dominant cost behind a slow first
+    # board load right after a user signs in. Each counterparty's extraction
+    # is independent, so they're fetched concurrently instead, capped LOW
+    # for the same reason as the margin-call feed's equivalent fix
+    # (api/margin_calls.py's _STATE_FETCH_WORKERS docstring): db-f1-micro's
+    # connection budget is small, and this runs alongside that other fix's
+    # own concurrent connections on the same request.
     build = partial(
         _compute_exposure,
         current_prices=current_prices,
@@ -280,7 +284,7 @@ def build_exposure_board(session: Session) -> ExposureBoardResponse:
     def _build_one(cp: Counterparty) -> CounterpartyExposure:
         return build(cp, positions_by_cp.get(cp.id, []), held=collateral_by_cp.get(cp.id, 0.0))
 
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(counterparties)))) as pool:
+    with ThreadPoolExecutor(max_workers=min(3, max(1, len(counterparties)))) as pool:
         items = list(pool.map(_build_one, counterparties))
     return ExposureBoardResponse(as_of=datetime.now(UTC), counterparties=items)
 
