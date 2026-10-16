@@ -1,3 +1,4 @@
+import weakref
 from typing import Any
 from urllib.parse import quote_plus
 
@@ -79,8 +80,36 @@ def connect_args(settings: Settings) -> dict[str, Any]:
     return {"timeout": AZURE_SERVERLESS_RESUME_TIMEOUT_SECONDS}
 
 
+# One Engine (and its connection pool) per Settings object for the life of
+# the process -- every non-request-scoped caller (adapters/factory.py's
+# get_vector_store and get_data_class_filter, the orchestrator, the Pub/Sub
+# worker, the price poller) calls get_engine(settings) or
+# get_session_factory(settings) directly rather than going through a single
+# shared instance, and settings is almost always get_settings()'s own
+# lru_cache'd singleton. Without this cache every one of those calls built
+# its own SQLAlchemy Engine that was never disposed -- found live (MM-147
+# follow-up) as Cloud SQL's db-f1-micro max_connections filling up over a
+# couple of hours of ordinary traffic (dashboard polling, CSA RAG retrieval,
+# margin-call runs) until /exposure started failing with "remaining
+# connection slots are reserved".
+#
+# Keyed by id(settings), not the settings object itself: Settings (a
+# Pydantic BaseModel) defines __eq__ without __hash__, so it isn't hashable
+# and can't be a dict key or a WeakKeyDictionary key directly. id() reuse
+# after garbage collection is the usual hazard with an id()-keyed cache
+# (tests construct plenty of short-lived Settings objects) -- avoided here
+# by a weakref.finalize callback that evicts the entry the moment its
+# settings object is collected, which runs before that id() could be
+# reassigned to a new object.
+_ENGINES: dict[int, Engine] = {}
+
+
 def get_engine(settings: Settings | None = None) -> Engine:
     settings = settings or get_settings()
+    key = id(settings)
+    cached = _ENGINES.get(key)
+    if cached is not None:
+        return cached
     # pool_pre_ping: without it, a connection Azure SQL has silently dropped
     # (idle timeout, network blip) sits in the pool looking valid until the
     # next checkout, then fails on the caller's first query with a raw TCP
@@ -95,6 +124,8 @@ def get_engine(settings: Settings | None = None) -> Engine:
     )
     if db_auth(settings) == "iam":
         use_iam_login(engine)
+    _ENGINES[key] = engine
+    weakref.finalize(settings, _ENGINES.pop, key, None)
     return engine
 
 
