@@ -1,38 +1,31 @@
-"use client";
-
-import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { getPublicStats } from "@/lib/api";
 import { LogoMarkV2 } from "@/components/logo-v2";
-import { INK, MUTED, LINE, STATUS_AMBER, TEXT_AMBER } from "@/lib/brand";
+import { BRAND_GREEN, MUTED, LINE, STATUS_AMBER, STATUS_GREEN, TEXT_AMBER } from "@/lib/brand";
 
-const STACK = ["LangGraph", "Gemini · Vertex AI", "Cloud SQL · pgvector", "Pub/Sub", "FastAPI", "Firestore"];
+// The lifecycle every margin call actually goes through -- shown here as
+// the page's one bold visual, in the same rail idiom as the real in-app
+// Agent Trace (components/agent-trace.tsx), so what a visitor sees here is
+// what they'll see once they're signed in. Static on purpose: this is what
+// the app always does, not a number that depends on a live backend being
+// reachable (a previous version fetched /public/stats here and showed "--"
+// whenever it wasn't).
+const LIFECYCLE: { title: string; body: string; status: "done" | "running" }[] = [
+  { title: "Price moves", body: "A market event reprices every book.", status: "done" },
+  { title: "Exposure recomputed", body: "Code, not the model, computes VM and IM.", status: "done" },
+  { title: "CSA checked", body: "Thresholds come from the real agreement, clause cited.", status: "done" },
+  { title: "Human approves", body: "No call reaches a client until someone signs off.", status: "done" },
+  { title: "Client notified", body: "A personalised notice carries the calculation and CSA terms.", status: "done" },
+  { title: "SLA running", body: "A timer starts. No response in time escalates.", status: "running" },
+];
 
-function AnimatedNumber({ value }: { value: number | null }) {
-  return <span>{value === null ? "--" : value.toLocaleString()}</span>;
-}
+const DIFFERENTIATORS = [
+  { title: "Reads the agreement", body: "Thresholds come from each CSA, with the clause cited.", tech: "Gemini · RAG" },
+  { title: "Calculates in code", body: "Every figure on a call is computed, never generated.", tech: "Python calc engine" },
+  { title: "Waits for you", body: "No call reaches a client until a person approves it.", tech: "LangGraph · Cloud Run" },
+];
 
 export default function LandingPage() {
-  const [counterparties, setCounterparties] = useState<number | null>(null);
-  const [runsEvaluated, setRunsEvaluated] = useState<number | null>(null);
-  const [breachesCaught, setBreachesCaught] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    getPublicStats()
-      .then((stats) => {
-        if (cancelled) return;
-        setCounterparties(stats.counterparties);
-        setRunsEvaluated(stats.runs_evaluated);
-        setBreachesCaught(stats.calls_raised);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   return (
     <main className="landing flex min-h-full flex-col bg-white text-[#0A0A0A]">
       <style>{`
@@ -135,134 +128,96 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ---------- tech strip ---------- */}
-      <section className="border-t px-6 py-8" style={{ borderColor: LINE }}>
-        <div className="mx-auto flex w-full max-w-6xl flex-col items-center gap-4">
-          <span className="text-xs uppercase tracking-[0.14em]" style={{ color: MUTED }}>
-            The real stack underneath
-          </span>
-          <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-3">
-            {STACK.map((name) => (
-              <span key={name} className="font-mono text-sm font-medium" style={{ color: "#3D3D3D" }}>
-                {name}
-              </span>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ---------- live stats ---------- */}
-      <section className="px-6 py-16">
-        <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-2 divide-y sm:flex-row sm:divide-x sm:divide-y-0" style={{ borderColor: LINE }}>
-          <div className="flex flex-1 flex-col items-center gap-1 py-6 sm:py-0">
-            <span className="font-mono text-4xl font-semibold">
-              <AnimatedNumber value={counterparties} />
-            </span>
-            <span className="text-xs" style={{ color: MUTED }}>
-              Counterparties tracked, live
-            </span>
-          </div>
-          <div className="flex flex-1 flex-col items-center gap-1 py-6 sm:py-0">
-            <span className="font-mono text-4xl font-semibold">
-              <AnimatedNumber value={runsEvaluated} />
-            </span>
-            <span className="text-xs" style={{ color: MUTED }}>
-              Margin-call runs evaluated
-            </span>
-          </div>
-          <div className="flex flex-1 flex-col items-center gap-1 py-6 sm:py-0">
-            <span className="font-mono text-4xl font-semibold">
-              <AnimatedNumber value={breachesCaught} />
-            </span>
-            <span className="text-xs" style={{ color: MUTED }}>
-              Real breaches caught
-            </span>
-          </div>
-        </div>
-      </section>
-
-      {/* ---------- how it works ---------- */}
+      {/* ---------- lifecycle ---------- */}
       <section id="how-it-works" className="border-t px-6 py-16" style={{ borderColor: LINE }}>
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-10 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex max-w-md flex-col gap-5">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-10">
+          <div className="max-w-xl">
             <h2 className="text-3xl font-extrabold leading-tight text-balance">
-              See every decision.
-              <br />
-              Not just the outcome.
+              From a price tick to a signed-off call
             </h2>
-            <ul className="flex flex-col gap-4 text-[15px]" style={{ color: "#3D3D3D" }}>
-              <li className="flex gap-3">
-                <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: INK }} />
-                Thresholds are pulled straight from the real CSA agreement via RAG -- never
-                guessed, never hard-coded.
-              </li>
-              <li className="flex gap-3">
-                <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: INK }} />
-                Every run leaves a full, step-by-step agent trace -- what ran, in what order,
-                what it found.
-              </li>
-              <li className="flex gap-3">
-                <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: INK }} />
-                A margin call never fires on its own -- a human always approves before anything
-                reaches a client.
-              </li>
-            </ul>
+            <p className="mt-3 text-[15px]" style={{ color: MUTED }}>
+              Every margin call follows the same six steps -- traced, not just logged.
+            </p>
           </div>
-
-          <div className="w-full max-w-sm rounded-2xl border p-5 shadow-sm" style={{ borderColor: LINE }}>
-            <div className="text-xs font-medium" style={{ color: MUTED }}>
-              Agent trace · illustrative
-            </div>
-            <div className="mt-4 flex flex-col gap-4">
-              {[
-                ["Event received", "Simulated price_shock on TSLA, NVDA"],
-                ["Compute exposure", "VM 135,388, IM 1,102,077"],
-                ["Fetch CSA terms", "Threshold 340,000 USD"],
-              ].map(([title, detail]) => (
-                <div key={title} className="flex gap-3">
-                  <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: "#00B86B" }} />
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium">{title}</span>
-                    <span className="text-xs" style={{ color: MUTED }}>
-                      {detail}
+          <ol className="flex overflow-x-auto pb-1">
+            {LIFECYCLE.map((step, index) => {
+              const isLast = index === LIFECYCLE.length - 1;
+              const running = step.status === "running";
+              return (
+                <li key={step.title} className="flex min-w-[9.5rem] flex-1 flex-col">
+                  <div className="flex items-center">
+                    <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                      {running && (
+                        <span
+                          className="absolute inline-flex h-full w-full animate-ping rounded-full"
+                          style={{ backgroundColor: STATUS_AMBER, opacity: 0.5 }}
+                        />
+                      )}
+                      <span
+                        className="relative h-3.5 w-3.5 rounded-full"
+                        style={{ backgroundColor: running ? STATUS_AMBER : STATUS_GREEN }}
+                      />
                     </span>
+                    {!isLast && (
+                      <span className="h-px flex-1" style={{ backgroundColor: STATUS_GREEN }} />
+                    )}
                   </div>
-                </div>
-              ))}
-              <div className="flex gap-3">
-                <span className="mt-1.5 h-2 w-2 shrink-0 animate-pulse rounded-full" style={{ backgroundColor: MUTED }} />
-                <div className="flex flex-col">
-                  <span className="text-sm font-medium">Evaluate breach</span>
-                  <span className="text-xs" style={{ color: MUTED }}>
-                    in progress...
-                  </span>
-                </div>
-              </div>
+                  <div className="flex flex-col gap-1 pt-3 pr-6">
+                    <span className="text-sm font-bold">{step.title}</span>
+                    <p className="text-xs leading-relaxed" style={{ color: MUTED }}>
+                      {step.body}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      </section>
+
+      {/* ---------- differentiators ---------- */}
+      <section className="border-t px-6 py-16" style={{ borderColor: LINE }}>
+        <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-8 sm:grid-cols-3">
+          {DIFFERENTIATORS.map((d) => (
+            <div key={d.title} className="flex flex-col gap-1.5">
+              <span className="text-lg font-extrabold">{d.title}</span>
+              <span className="text-[14px]" style={{ color: "#3D3D3D" }}>
+                {d.body}
+              </span>
+              <span className="font-mono text-xs" style={{ color: MUTED }}>
+                {d.tech}
+              </span>
             </div>
-          </div>
+          ))}
         </div>
       </section>
 
       {/* ---------- closing CTA ---------- */}
-      <section className="px-6 py-20">
-        <div
-          className="mx-auto flex w-full max-w-3xl flex-col items-center gap-6 rounded-2xl border px-8 py-14 text-center shadow-sm"
-          style={{ borderColor: LINE }}
+      <section className="border-t px-6 py-16 text-center" style={{ borderColor: LINE }}>
+        <h2 className="text-2xl font-extrabold text-balance sm:text-3xl">
+          Ready to watch it decide?
+        </h2>
+        <Link
+          href="/login"
+          className="mt-6 inline-flex min-h-11 items-center rounded-[10px] bg-[#0A0A0A] px-7 text-sm font-bold text-white transition-colors hover:bg-[#262626]"
         >
-          <h2 className="text-2xl font-extrabold text-balance sm:text-3xl">
-            Ready to watch it decide?
-          </h2>
-          <Link
-            href="/login"
-            className="inline-flex min-h-11 items-center rounded-[10px] bg-[#0A0A0A] px-7 text-sm font-bold text-white transition-colors hover:bg-[#262626]"
-          >
-            Sign in to the dashboard
-          </Link>
-        </div>
+          Sign in to the dashboard
+        </Link>
       </section>
 
-      <footer className="border-t px-6 py-8 text-center text-xs" style={{ borderColor: LINE, color: MUTED }}>
-        MarginMaestro -- a portfolio project. Data is real; scenarios are synthetic.
+      <footer className="px-6 py-14" style={{ backgroundColor: "#0A0A0A" }}>
+        <div className="mx-auto flex w-full max-w-6xl flex-col items-center gap-5 text-center">
+          <LogoMarkV2 size={30} />
+          <p className="max-w-sm text-sm" style={{ color: "#A3A3A3" }}>
+            MarginMaestro -- a portfolio project. Data is real; scenarios are synthetic.
+          </p>
+          <p
+            className="font-mono text-sm font-medium tracking-wide"
+            style={{ color: BRAND_GREEN }}
+          >
+            LangGraph · Gemini on Vertex AI · Cloud SQL · pgvector · Pub/Sub · Firestore · Cloud Run
+          </p>
+        </div>
       </footer>
     </main>
   );
