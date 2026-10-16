@@ -342,21 +342,36 @@ export function getMarketUniverse(): Promise<MarketUniverseResponse> {
 
 // MM-129: "Ask the margin desk" -- one chat turn with the ADK agent on Agent
 // Runtime, answered as the signed-in analyst (the API forwards the identity).
-export interface DeskChatResponse {
-  session_id: string;
-  answer: string;
+// MM-147 follow-up: async -- Agent Runtime can take 90+ seconds on a cold
+// start, past Firebase Hosting's edge proxy timeout (found live: the
+// backend call itself succeeded; the browser never saw the answer). POST
+// /desk/chat now returns a job immediately; the caller polls
+// getDeskChatJob() until status is no longer "pending" (it's often already
+// "done" by the first response in local dev, where dispatch runs inline).
+export type DeskChatJobStatus = "pending" | "done" | "error";
+
+export interface DeskChatJobResponse {
+  job_id: string;
+  status: DeskChatJobStatus;
+  session_id: string | null;
+  answer: string | null;
   tools_used: string[];
+  error: string | null;
 }
 
 export function postDeskChat(
   token: string,
   message: string,
   sessionId: string | null,
-): Promise<DeskChatResponse> {
-  return postJson<DeskChatResponse>("/desk/chat", token, {
+): Promise<DeskChatJobResponse> {
+  return postJson<DeskChatJobResponse>("/desk/chat", token, {
     message,
     session_id: sessionId,
   });
+}
+
+export function getDeskChatJob(jobId: string): Promise<DeskChatJobResponse> {
+  return getJson<DeskChatJobResponse>(`/desk/chat/${encodeURIComponent(jobId)}`);
 }
 
 // MM-142: warehouse reports. The numbers are computed upstream (calc engine)

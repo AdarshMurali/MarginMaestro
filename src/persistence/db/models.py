@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import JSON, ForeignKey, LargeBinary, String, UniqueConstraint
+from sqlalchemy import JSON, ForeignKey, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -268,3 +268,27 @@ class CounterpartyContactORM(Base):
             f"CounterpartyContactORM(id={self.id!r}, counterparty_id={self.counterparty_id!r}, "
             f"channel={self.channel!r}, active={self.active!r})"
         )
+
+
+class DeskChatJobORM(Base):
+    """One row per 'Ask the Desk' turn (MM-147 follow-up): the API returns
+    this job's id immediately instead of blocking on Agent Runtime, which
+    can take 90+ seconds on a cold start -- past Firebase Hosting's edge
+    proxy timeout to the frontend, found live (the backend call itself
+    succeeded; the browser just never saw the answer). The actual Agent
+    Runtime call runs via Cloud Tasks (DESK_JOB_DISPATCH=cloudtasks) or
+    inline before the POST returns (=sync, the local-dev default); either
+    way the frontend polls this row until status is no longer "pending"."""
+
+    __tablename__ = "desk_chat_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    username: Mapped[str] = mapped_column(String(100))
+    message: Mapped[str] = mapped_column(String(2000))
+    session_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    answer: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    tools_used: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime]
+    updated_at: Mapped[datetime]
