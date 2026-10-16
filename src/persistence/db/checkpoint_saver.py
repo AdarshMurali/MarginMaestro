@@ -71,6 +71,18 @@ class SqlCheckpointSaver(BaseCheckpointSaver[int]):
         not just a theoretical one. Defaults to a private lock when not
         given, matching this class's original (pre-MM-91) behavior.
 
+        Only put()/put_writes()/delete_thread() take this lock -- reads
+        (get_tuple/list) write nothing, so they can't corrupt data by racing
+        each other or a concurrent write (the DB's own commit visibility
+        handles that); the lock only ever protected the write path described
+        above. Each read already opens its own session from
+        `session_factory`, a pattern that's safe to call from multiple
+        threads at once -- found live (MM-147 follow-up): the margin-call
+        feed calls get_state() once per checkpoint thread, and every one of
+        those reads was serialized behind this single process-wide lock for
+        no safety reason, which also blocked ever parallelizing that
+        N-thread loop.
+
         `serde`: the orchestrator passes a serializer whose msgpack allow-list
         names every type its state can hold (agents.state_serde), so saved
         runs stay readable once LangGraph blocks unregistered types."""
@@ -134,7 +146,7 @@ class SqlCheckpointSaver(BaseCheckpointSaver[int]):
     def get_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
         thread_id = config["configurable"]["thread_id"]
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
-        with self._lock, self._session_factory() as session:
+        with self._session_factory() as session:
             if checkpoint_id := get_checkpoint_id(config):
                 row = session.get(CheckpointORM, (thread_id, checkpoint_ns, checkpoint_id))
             else:
@@ -157,13 +169,14 @@ class SqlCheckpointSaver(BaseCheckpointSaver[int]):
         before: RunnableConfig | None = None,
         limit: int | None = None,
     ) -> Iterator[CheckpointTuple]:
-        # Materialized eagerly under the lock, then yielded from a plain list
-        # afterward -- a bare `yield` here would hold the lock open for the
+        # Materialized eagerly, then yielded from a plain list afterward --
+        # a bare `yield` here would hold the session open for the
         # generator's whole lifetime (only released once fully consumed,
-        # closed, or GC'd), which can stall other threads if a caller (e.g.
-        # one that only wants the first N results) never exhausts it.
+        # closed, or GC'd), which can stall connection-pool reuse if a
+        # caller (e.g. one that only wants the first N results) never
+        # exhausts it.
         results: list[CheckpointTuple] = []
-        with self._lock, self._session_factory() as session:
+        with self._session_factory() as session:
             stmt = select(CheckpointORM)
             if config is not None:
                 stmt = stmt.where(CheckpointORM.thread_id == config["configurable"]["thread_id"])
