@@ -5,18 +5,23 @@
 
 **An agentic, event-driven platform that automates the end-to-end margin call lifecycle — from market event to client notification, escalation, and audit — using LLM agent orchestration, a RAG pipeline over legal/policy documents, and a real-time streaming backbone.**
 
-> Status: ✅ **Live on Google Cloud.** API, MCP servers and event consumers on Cloud Run; Cloud SQL Postgres + pgvector; Gemini on Vertex AI; the "Ask the Desk" ADK agent on Agent Platform; frontend on Vercel. The earlier AWS (EC2) + Azure SQL deployment is paused and scheduled for decommissioning (Phase G9). See [`docs/gcp/GCP_ROADMAP.md`](docs/gcp/GCP_ROADMAP.md) and [`docs/gcp/GCP_PROGRESS.md`](docs/gcp/GCP_PROGRESS.md) for the GCP track, [`docs/ROADMAP.md`](docs/ROADMAP.md) / [`docs/PROGRESS.md`](docs/PROGRESS.md) for the original phases.
+> Status: ✅ **Live on Google Cloud.** API, MCP servers and event consumers on Cloud Run; Cloud SQL Postgres + pgvector; Gemini on Vertex AI; the "Ask the Desk" ADK agent on Agent Platform; frontend on Firebase App Hosting + Vercel. The project was first built and fully deployed as a standalone production stack on **AWS** — EC2, Secrets Manager, S3, IAM — with Azure SQL and OpenAI driving the same agent pipeline, proving the architecture end to end before it was adapted to the GCP-native services below. See [`docs/gcp/GCP_ROADMAP.md`](docs/gcp/GCP_ROADMAP.md) and [`docs/gcp/GCP_PROGRESS.md`](docs/gcp/GCP_PROGRESS.md) for the GCP track, [`docs/ROADMAP.md`](docs/ROADMAP.md) / [`docs/PROGRESS.md`](docs/PROGRESS.md) for the original AWS-era phases.
 
 ---
 
 ## 🚀 Try the live demo
 
+**This is the Google Cloud deployment** (the hackathon submission) — everything below runs on Cloud Run, Cloud SQL and Vertex AI, not AWS.
+
 | | |
 |---|---|
-| **App** | **https://marginmaestro.vercel.app** |
-| **API** | http://13.202.222.57:8000 ([`/health`](http://13.202.222.57:8000/health), [`/docs`](http://13.202.222.57:8000/docs) for the OpenAPI schema) |
+| **App (Google Cloud)** | **https://marginmaestro-web--marginmaestro-demo.us-central1.hosted.app** |
+| **App (mirror)** | https://marginmaestro.vercel.app — identical frontend, same Google Cloud API behind it |
+| **API** | https://marginmaestro-api-pkjc2r5ivq-uc.a.run.app ([`/health`](https://marginmaestro-api-pkjc2r5ivq-uc.a.run.app/health), [`/docs`](https://marginmaestro-api-pkjc2r5ivq-uc.a.run.app/docs) for the OpenAPI schema) |
 
-Sign in at [`/login`](https://marginmaestro.vercel.app/login) with one of the seeded demo accounts (also the default values of `demo_approver_password` / `demo_manager_password` / `demo_analyst_password` / `demo_auditor_password` in [`src/config/settings.py`](src/config/settings.py) — nothing sensitive, these exist purely to gate the demo dashboard):
+> Cloud Run scales to zero when idle, so the first request after a quiet period can take 10-20s to cold-start — that's expected, not a hang.
+
+Sign in at [`/login`](https://marginmaestro-web--marginmaestro-demo.us-central1.hosted.app/login) with one of the seeded demo accounts (also the default values of `demo_approver_password` / `demo_manager_password` / `demo_analyst_password` / `demo_auditor_password` in [`src/config/settings.py`](src/config/settings.py) — nothing sensitive, these exist purely to gate the demo dashboard):
 
 | Username | Password | Role | Can do |
 |---|---|---|---|
@@ -42,7 +47,7 @@ Prefer to watch it happen end-to-end without clicking? Clone the repo and run th
 
 ```bash
 pip install -e ".[dev]"
-python -m demo.run_demo --base-url http://13.202.222.57:8000
+python -m demo.run_demo --base-url https://marginmaestro-api-pkjc2r5ivq-uc.a.run.app
 ```
 
 ---
@@ -67,7 +72,7 @@ Historically this is done with **spreadsheets, email, and phone calls**, and it 
 
 - **[`docs/architecture/functional-architecture.svg`](docs/architecture/functional-architecture.svg)** — the business-process view, in the same visual language as the tech diagrams below: detect & evaluate → decide (approval + second sign-off) → notify (WhatsApp + Slack) → respond & escalate (SLA timer → ServiceNow) → transparency (audit, lineage, reporting), with the actual touchpoints (WhatsApp, Slack, ServiceNow, Gemini, Firebase) called out where a real product is used.
 - **[`docs/architecture/functional-lifecycle.svg`](docs/architecture/functional-lifecycle.svg)** — the same lifecycle at the implementation level: every LangGraph node from `compute_exposure` through approval, notification, and SLA/escalation, color-coded by CLAUDE.md's golden rule (deterministic code vs. LLM reasoning/RAG vs. hybrid vs. the human-approval gate).
-- **[`docs/architecture/tech-architecture.svg`](docs/architecture/tech-architecture.svg)** — the original (pre-GCP) deployment, now paused: AWS (EC2 + Elastic IP, Secrets Manager, S3, IAM), Vercel, Azure SQL, the CI/CD pipeline, and the third-party integrations (OpenAI, Slack, ServiceNow), with a clearly separated box for what's local-dev-only (Kafka/Redpanda, OTel/Prometheus/Grafana) and not part of the live deployment.
+- **[`docs/architecture/tech-architecture.svg`](docs/architecture/tech-architecture.svg)** — the original AWS deployment the project was first built and fully proven on: AWS (EC2 + Elastic IP, Secrets Manager, S3, IAM), Vercel, Azure SQL, the CI/CD pipeline, and the third-party integrations (OpenAI, Slack, ServiceNow), with a clearly separated box for what's local-dev-only (Kafka/Redpanda, OTel/Prometheus/Grafana) and not part of either deployment.
 - **[`docs/architecture/gcp-tech-architecture-blue.svg`](docs/architecture/gcp-tech-architecture-blue.svg)** and **[`gcp-tech-architecture-multicolor.svg`](docs/architecture/gcp-tech-architecture-multicolor.svg)** — the live Google Cloud architecture (the GCP track in [`docs/gcp/GCP_ROADMAP.md`](docs/gcp/GCP_ROADMAP.md)): Cloud Run services (API, MCP tool servers private to the desk agent), Firebase App Hosting + Firestore live status, Pub/Sub and Cloud Tasks, Gemini on Vertex AI with Agent Platform (Sessions, Memory Bank, Gen AI evaluation in CI), Model Armor and Sensitive Data Protection, Cloud SQL + pgvector with row-level security, BigQuery + Dataplex + Data Lineage, the security/operations layer (including CodeQL/Dependabot/SonarCloud/Trivy/Checkov/gitleaks in CI), WhatsApp/Slack/ServiceNow, and the GitHub Actions → Docker Hub → Cloud Run (keyless WIF) deploy path. Same diagram in two icon styles: Google Cloud's official blue product icons, and its official four-colour core/category icons. PNG copies sit alongside each SVG.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full written design, and [`docs/AGENT_ORCHESTRATION_FAQ.md`](docs/AGENT_ORCHESTRATION_FAQ.md) for which parts are deterministic code vs. LLM-driven, and what happens end-to-end when a real (not simulated) market move triggers a run.
