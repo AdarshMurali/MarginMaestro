@@ -95,6 +95,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full written design, 
 | Notifications | **WhatsApp Cloud API + Slack** | Client notices on WhatsApp (approved template, signed webhook for replies and delivery status); Slack for internal approvals, alerts and escalations |
 | Escalation | **ServiceNow** | Real incident opened when an SLA is breached (see ADR-0007) |
 | Governance | **Dataplex catalog + Data Lineage + Cloud Audit Logs** | Every table and document family catalogued and classified; lineage per margin call; data-access audit logs; append-only audit trail |
+| Warehouse / reporting | **BigQuery + Tableau** | Finance star schema: the live book loaded after every daily margin run, plus a 1,000-counterparty, 5-year simulated book for backtesting, with row access policies and column masking matching Cloud SQL RLS; five pre-built reports in-app at `/reports`, and a Tableau workbook (`tableau/Margin_Dashboard.twb`, guide in [`docs/warehouse/tableau.md`](docs/warehouse/tableau.md)) for deeper analysis |
 | Observability | **Cloud Trace + Cloud Logging + Cloud Monitoring** | One trace per margin-call run; structured logs; incident alert |
 | Dev-story tracker | **Jira** | `MM-#` tickets for this project's own development — not an agent-facing tool |
 | Secrets/config | **Secret Manager** | One JSON secret per environment (`marginmaestro-<env>`) |
@@ -113,25 +114,33 @@ MarginMaestro/
 ├── TESTING.md
 ├── .env.example
 ├── .gitignore
-├── src/                       # Backend: agents, calc, streaming, rag, api, config, persistence
-├── frontend/                  # Next.js dashboard (deployed to Vercel)
-├── infra/                     # Terraform: gcp/ (live) + the original AWS stack, Prometheus/Grafana provisioning
+├── src/                       # Backend: agents, calc, streaming, rag, api, mcp_servers, ports/adapters,
+│                              #   config, persistence, governance, warehouse, realtime, observability, ops
+├── frontend/                  # Next.js dashboard + "Ask the Desk" chat (Firebase App Hosting + Vercel)
+├── tests/                     # Unit, contract and integration tests (coverage gate ≥ 80%)
+├── migrations/                 # Alembic migrations (dual-dialect: SQL Server + Postgres)
+├── infra/                     # Terraform: gcp/ (live Google Cloud stack) + the original AWS stack,
+│                              #   Prometheus/Grafana provisioning
+├── firebase/                  # Firestore security rules (real-time call status, MM-146)
+├── tableau/                   # G7 reporting workbook (Margin_Dashboard.twb) + its screenshots
+├── scripts/                   # One-off ops scripts (Cloud SQL bootstrap, RAG ingest, secret migration)
 └── docs/
     ├── ARCHITECTURE.md       # Lifecycle, agent mesh, streaming, data flow
     ├── AGENTS.md             # Each agent: responsibility, IO, tools
     ├── DATA_SOURCES.md       # Structured vs unstructured data map + free sources
-    ├── ROADMAP.md            # Phased, Jira-ready plan (epics/stories/DoD)
-    ├── PROGRESS.md           # Living handoff log — updated at end of every task
+    ├── ROADMAP.md            # Original (pre-GCP) phased plan, mapped to Jira epics/stories
+    ├── PROGRESS.md           # Original-track living handoff log
     ├── AGENT_ORCHESTRATION_FAQ.md  # Code vs. LLM breakdown; real vs. simulated trigger parity
-    ├── architecture/         # Functional lifecycle + technical architecture diagrams (see above)
-    └── adr/                  # Architecture Decision Records
-        ├── 0001-record-architecture-decisions.md
-        ├── 0002-agent-orchestration-langgraph.md
-        ├── 0003-streaming-kafka-defer-flink.md
-        ├── 0004-vector-store-chromadb.md
-        ├── 0005-llm-for-reasoning-code-for-math.md
-        ├── 0006-openai-embeddings.md
-        └── 0007-servicenow-for-escalation.md
+    ├── data_catalog.yaml     # Governance catalog: every table/document family, class, owner (G8)
+    ├── architecture/         # Functional + technical architecture diagrams (see above)
+    ├── assets/               # Hackathon deck screenshots + brand assets
+    ├── warehouse/            # BigQuery warehouse guide + Tableau workbook guide (G7)
+    ├── hackathon/            # AI Builder Cup submission materials
+    ├── adr/                  # Architecture Decision Records (original stack, ADR-0001…0007)
+    └── gcp/                  # The live GCP track
+        ├── GCP_ROADMAP.md   # Phases G0–G10, service catalog, Jira mapping
+        ├── GCP_PROGRESS.md  # GCP-track living handoff log — read this first for current state
+        └── adr/              # GCP-specific ADRs (ADR-0008…0021)
 ```
 
 ## Getting started (local)
